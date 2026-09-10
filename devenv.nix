@@ -86,10 +86,6 @@
       python scripts/seed_tech_tree_forum.py
     '';
 
-    seed-forums.exec = ''
-      python scripts/seed_forums.py
-    '';
-
     db-shell.exec = ''
       psql -h 127.0.0.1 -U postgres -d dgg_pm
     '';
@@ -107,27 +103,6 @@
       source .env
       set +a
     fi
-
-    echo "=========================================================="
-    echo " 🚀 Welcome to the dgg-pm Development Environment (devenv)"
-    echo "=========================================================="
-    echo " Python     : $(python --version 2>/dev/null || echo 'Python 3.12')"
-    echo " PostgreSQL : PostgreSQL 16 (services.postgres)"
-    echo ""
-    echo " Available commands:"
-    echo "   - run-app      : Start the dgg-pm bot & API server"
-    echo "   - run-tests    : Run test suite with pytest"
-    echo "   - lint         : Run ruff lint checks"
-    echo "   - format       : Auto-format code with ruff"
-    echo "   - db-init      : Initialize PostgreSQL database schema"
-    echo "   - db-clear     : Wipe/truncate PostgreSQL database tables"
-    echo "   - db-reset     : Wipe database tables and re-seed test data"
-    echo "   - seed-tree    : Seed interactive tech-tree test project & forum"
-    echo "   - seed-forums  : Seed 1-project forum and 3-project multi-hub forum"
-    echo "   - db-shell     : Open interactive psql shell"
-    echo "   - sync         : Sync dependencies with uv"
-    echo "   - devenv up    : Start background services (PostgreSQL, App)"
-    echo "=========================================================="
   '';
 
   # Pre-commit hooks
