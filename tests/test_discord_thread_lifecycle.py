@@ -130,10 +130,12 @@ async def test_bot_sync_task_thread_archive_and_unarchive(services):
     team_srv = services["team"]
     guild_id = 987654321
 
+    project = await proj_srv.create_project(guild_id=guild_id, name="DB Migration Project", prefix="DBM")
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Database migration",
         creator_discord_id=1001,
+        project_id=project.id,
     )
     await task_srv.update_discord_message_ids(task.id, 55555, 66666)
     task = await task_srv.get_by_id(task.id)
@@ -178,10 +180,12 @@ async def test_bot_sync_task_thread_title_sync(services):
     team_srv = services["team"]
     guild_id = 987654321
 
+    project = await proj_srv.create_project(guild_id=guild_id, name="Title Sync Project", prefix="TSP")
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Initial Title",
         creator_discord_id=1001,
+        project_id=project.id,
     )
     await task_srv.update_discord_message_ids(task.id, 55555, 66666)
 

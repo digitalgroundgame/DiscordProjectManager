@@ -50,9 +50,12 @@ class PriorityLevel(StrEnum):
             return cls.LOW
 
 
-class TeamRoleType(StrEnum):
+class SquadRoleType(StrEnum):
     MEMBER = "member"
     LEAD = "lead"
+
+
+TeamRoleType = SquadRoleType
 
 
 class OutboxStatus(StrEnum):

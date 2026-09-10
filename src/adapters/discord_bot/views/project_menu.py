@@ -11,9 +11,12 @@ import discord
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
+from src.adapters.discord_bot.workspace_protocol import (
+    IProjectDiscordWorkspace,
+    ProjectProvisionSpec,
+)
 from src.domain.enums import TaskStatus
 from src.domain.models import Project, Team
-from src.ports.discord_workspace import IProjectDiscordWorkspace, ProjectProvisionSpec
 from src.services.project_service import ProjectService
 from src.services.task_service import TaskService
 from src.services.team_service import TeamService

@@ -5,8 +5,11 @@ import discord
 import pytest
 
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
+from src.adapters.discord_bot.workspace_protocol import (
+    ProjectProvisionSpec,
+    ProjectWorkspaceRef,
+)
 from src.domain.exceptions import ProjectNotFoundError
-from src.ports.discord_workspace import ProjectProvisionSpec, ProjectWorkspaceRef
 
 
 def _create_mock_tag(tag_id: int, name: str) -> MagicMock:

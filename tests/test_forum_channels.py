@@ -279,11 +279,13 @@ async def test_bot_sync_forum_post_starter_message_and_tags(services):
     team_srv = services["team"]
     guild_id = 123123123
 
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cache Project", prefix="CP")
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Migrate Cache Cluster",
         creator_discord_id=1001,
         priority=PriorityLevel.HIGH,
+        project_id=project.id,
     )
     await task_srv.update_discord_message_ids(task.id, 888111, 888111)
     task = await task_srv.get_by_id(task.id)

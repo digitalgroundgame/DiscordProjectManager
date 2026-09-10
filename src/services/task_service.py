@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import io
 import re
-import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -26,12 +27,40 @@ from src.domain.tech_tree import (
     TechTree,
     resolve_member_name,
 )
-from src.ports.repositories import ITaskRepo
+from src.ports.repositories import IOutboxRepo, IProjectRepo, ITaskRepo
 from src.ports.unit_of_work import IUnitOfWork
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 
 __all__ = ["StaleVersionError", "TaskService", "parse_inline_dependencies", "resolve_member_name"]
+
+
+class _NullUnitOfWork(IUnitOfWork):
+    """Fallback Unit of Work when no transactional unit of work is injected."""
+
+    def __init__(self, task_repo: ITaskRepo, project_repo: IProjectRepo, outbox_repo: IOutboxRepo):
+        self.tasks = task_repo
+        self.projects = project_repo
+        self.outbox = outbox_repo
+        self.squads = None  # type: ignore[assignment]
+        self.teams = None  # type: ignore[assignment]
+        self.user_prefs = None  # type: ignore[assignment]
+
+    async def __aenter__(self) -> _NullUnitOfWork:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        pass
+
+    async def commit(self) -> None:
+        pass
+
+    async def rollback(self) -> None:
+        pass
+
+    @property
+    def session(self) -> Any:
+        return None
 
 
 def parse_inline_dependencies(text: str | None) -> list[str]:
@@ -64,13 +93,17 @@ class TaskService:
         self.uow = uow
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncGenerator[Any, None]:
-        """Manages an atomic transaction scope via UnitOfWork if configured, or no-op if omitted."""
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork, None]:
+        """Manages an atomic transaction scope via UnitOfWork if configured, or fallback if omitted."""
         if self.uow is not None:
             async with self.uow as active_uow:
-                yield active_uow.session
+                yield active_uow
         else:
-            yield None
+            yield _NullUnitOfWork(
+                self.task_repo,
+                self.project_service.project_repo,
+                self.outbox_service.outbox_repo,
+            )
 
     async def create_task(
         self,
@@ -95,20 +128,16 @@ class TaskService:
                 raise ProjectNotFoundError(f"Project '{project_name}' was not found in this server.")
             resolved_project_id = project.id
 
+        if not resolved_project_id:
+            raise ValidationError("A project container must be specified for every task.")
+
         clean_watchers = list(set(watchers or []))
 
-        async with self._transaction() as session:
+        async with self._transaction() as uow:
             # Allocate short ID within transaction
-            if resolved_project_id:
-                task_number, short_id = await self.project_service.allocate_next_short_id(
-                    resolved_project_id, session=session
-                )
-            else:
-                # Standalone task: use a randomly generated collision-resistant ID.
-                # token_hex(5) gives ~1.1e12 combinations, making unique-constraint
-                # collisions (guild_id, short_id) practically impossible.
-                task_number = 1
-                short_id = f"TASK-{secrets.token_hex(5).upper()}"
+            task_number, short_id = await self.project_service.allocate_next_short_id(
+                resolved_project_id, project_repo=uow.projects
+            )
 
             task = Task(
                 id=uuid4(),
@@ -129,7 +158,7 @@ class TaskService:
             )
 
             # 1. Persist task
-            saved_task = await self.task_repo.create(task, session=session)
+            saved_task = await uow.tasks.create(task)
 
             # 2. Audit log creation
             history = TaskHistory(
@@ -139,11 +168,11 @@ class TaskService:
                 new_status=TaskStatus.NOT_STARTED,
                 notes=f"Task '{title}' created with ID {short_id}",
             )
-            await self.task_repo.add_history(history, session=session)
+            await uow.tasks.add_history(history)
 
             # 3. Schedule tiered reminders if due_at set
             if due_at:
-                await self.outbox_service.schedule_task_reminders(saved_task, session=session)
+                await self.outbox_service.schedule_task_reminders(saved_task, outbox_repo=uow.outbox)
 
             # 4. Enqueue creation event
             await self.outbox_service.enqueue_event(
@@ -160,7 +189,7 @@ class TaskService:
                     "watchers": saved_task.watchers,
                     "due_at": saved_task.due_at.isoformat() if saved_task.due_at else None,
                 },
-                session=session,
+                outbox_repo=uow.outbox,
             )
 
         # Link any prerequisites specified explicitly or found in body tags
@@ -195,13 +224,12 @@ class TaskService:
         old_status = current_task.status
         completed_at = datetime.now(UTC) if new_status == TaskStatus.COMPLETED else None
 
-        async with self._transaction() as session:
-            updated_task = await self.task_repo.update_status_cas(
+        async with self._transaction() as uow:
+            updated_task = await uow.tasks.update_status_cas(
                 task_id=task_id,
                 expected_version=expected_version,
                 new_status=new_status,
                 completed_at=completed_at,
-                session=session,
             )
             if not updated_task:
                 raise StaleVersionError(
@@ -217,11 +245,11 @@ class TaskService:
                 new_status=new_status,
                 notes=notes,
             )
-            await self.task_repo.add_history(history, session=session)
+            await uow.tasks.add_history(history)
 
             # If completed, cancel pending reminder events
             if new_status == TaskStatus.COMPLETED:
-                await self.outbox_service.cancel_task_reminders(task_id, session=session)
+                await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
 
             # Enqueue status changed event
             await self.outbox_service.enqueue_event(
@@ -242,7 +270,7 @@ class TaskService:
                     "discord_thread_id": updated_task.discord_thread_id,
                     "discord_message_id": updated_task.discord_message_id,
                 },
-                session=session,
+                outbox_repo=uow.outbox,
             )
 
         return updated_task
@@ -257,14 +285,14 @@ class TaskService:
         if not task:
             raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
 
-        async with self._transaction() as session:
+        async with self._transaction() as uow:
             history = TaskHistory(
                 task_id=task_id,
                 actor_discord_id=actor_discord_id,
                 action=TaskHistoryAction.NOTE_ADDED,
                 notes=note_text.strip(),
             )
-            saved_history = await self.task_repo.add_history(history, session=session)
+            saved_history = await uow.tasks.add_history(history)
 
             # Enqueue note event for thread/DM notification
             await self.outbox_service.enqueue_event(
@@ -283,7 +311,7 @@ class TaskService:
                     "is_completed": task.status == TaskStatus.COMPLETED,
                     "discord_thread_id": task.discord_thread_id,
                 },
-                session=session,
+                outbox_repo=uow.outbox,
             )
 
         return saved_history
@@ -303,12 +331,11 @@ class TaskService:
             return current_task
 
         clear = new_assignee_id is None
-        async with self._transaction() as session:
-            updated_task = await self.task_repo.update_task(
+        async with self._transaction() as uow:
+            updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 assignee_discord_id=new_assignee_id,
                 clear_assignee=clear,
-                session=session,
             )
             if not updated_task:
                 raise ValidationError(f"Failed to update assignee for task {task_id}.")
@@ -320,7 +347,7 @@ class TaskService:
                 action=TaskHistoryAction.ASSIGNED,
                 notes=note,
             )
-            await self.task_repo.add_history(history, session=session)
+            await uow.tasks.add_history(history)
 
             # Enqueue event
             await self.outbox_service.enqueue_event(
@@ -342,7 +369,7 @@ class TaskService:
                     "discord_thread_id": updated_task.discord_thread_id,
                     "discord_message_id": updated_task.discord_message_id,
                 },
-                session=session,
+                outbox_repo=uow.outbox,
             )
 
         return updated_task
@@ -361,11 +388,10 @@ class TaskService:
         if old_priority == new_priority:
             return current_task
 
-        async with self._transaction() as session:
-            updated_task = await self.task_repo.update_task(
+        async with self._transaction() as uow:
+            updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 priority=new_priority,
-                session=session,
             )
             if not updated_task:
                 raise ValidationError(f"Failed to update priority for task {task_id}.")
@@ -376,7 +402,7 @@ class TaskService:
                 action=TaskHistoryAction.PRIORITY_CHANGED,
                 notes=f"Priority changed from {old_priority.value} to {new_priority.value}",
             )
-            await self.task_repo.add_history(history, session=session)
+            await uow.tasks.add_history(history)
 
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_UPDATED,
@@ -398,7 +424,7 @@ class TaskService:
                     "discord_thread_id": updated_task.discord_thread_id,
                     "discord_message_id": updated_task.discord_message_id,
                 },
-                session=session,
+                outbox_repo=uow.outbox,
             )
 
         return updated_task
@@ -437,8 +463,8 @@ class TaskService:
             if removed:
                 changes.append(f"Removed watchers: {', '.join(f'<@{u}>' for u in sorted(removed))}")
 
-        async with self._transaction() as session:
-            updated_task = await self.task_repo.update_task(
+        async with self._transaction() as uow:
+            updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 title=title,
                 body=body,
@@ -446,18 +472,17 @@ class TaskService:
                 due_at=due_at,
                 clear_due_at=clear_due_at,
                 watchers=watchers,
-                session=session,
             )
             if not updated_task:
                 raise ValidationError(f"Failed to update task {task_id}.")
 
             # If due_at changed, reschedule outbox reminders
             if clear_due_at:
-                await self.outbox_service.cancel_task_reminders(task_id, session=session)
+                await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
             elif due_at is not None and due_at != current_task.due_at:
-                await self.outbox_service.cancel_task_reminders(task_id, session=session)
+                await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
                 if not updated_task.is_completed and not updated_task.is_archived:
-                    await self.outbox_service.schedule_task_reminders(updated_task, session=session)
+                    await self.outbox_service.schedule_task_reminders(updated_task, outbox_repo=uow.outbox)
 
             history = TaskHistory(
                 task_id=task_id,
@@ -465,7 +490,7 @@ class TaskService:
                 action=TaskHistoryAction.UPDATED,
                 notes="Task details updated",
             )
-            await self.task_repo.add_history(history, session=session)
+            await uow.tasks.add_history(history)
 
             if changes:
                 await self.outbox_service.enqueue_event(
@@ -487,7 +512,7 @@ class TaskService:
                         "discord_thread_id": updated_task.discord_thread_id,
                         "discord_message_id": updated_task.discord_message_id,
                     },
-                    session=session,
+                    outbox_repo=uow.outbox,
                 )
 
         return updated_task
@@ -504,7 +529,7 @@ class TaskService:
         return await self.task_repo.get_by_id(task_id)
 
     async def get_by_short_id(self, guild_id: int, short_id: str) -> Task | None:
-        return await self.task_repo.get_by_short_id(guild_id, short_id)
+        return await self.task_repo.get_by_short_id(guild_id, short_id.upper())
 
     async def get_by_thread_id(self, guild_id: int, thread_id: int) -> Task | None:
         return await self.task_repo.get_by_thread_id(guild_id, thread_id)
@@ -546,32 +571,32 @@ class TaskService:
         )
 
     async def archive_task(self, task_id: UUID, actor_discord_id: int) -> Task | None:
-        async with self._transaction() as session:
-            task = await self.task_repo.set_archived(task_id, is_archived=True, session=session)
+        async with self._transaction() as uow:
+            task = await uow.tasks.set_archived(task_id, is_archived=True)
             if task:
-                await self.outbox_service.cancel_task_reminders(task_id, session=session)
+                await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
                 history = TaskHistory(
                     task_id=task_id,
                     actor_discord_id=actor_discord_id,
                     action=TaskHistoryAction.ARCHIVED,
                     notes="Task archived",
                 )
-                await self.task_repo.add_history(history, session=session)
+                await uow.tasks.add_history(history)
         return task
 
     async def unarchive_task(self, task_id: UUID, actor_discord_id: int) -> Task | None:
-        async with self._transaction() as session:
-            task = await self.task_repo.set_archived(task_id, is_archived=False, session=session)
+        async with self._transaction() as uow:
+            task = await uow.tasks.set_archived(task_id, is_archived=False)
             if task:
                 if task.due_at and not task.is_completed:
-                    await self.outbox_service.schedule_task_reminders(task, session=session)
+                    await self.outbox_service.schedule_task_reminders(task, outbox_repo=uow.outbox)
                 history = TaskHistory(
                     task_id=task_id,
                     actor_discord_id=actor_discord_id,
                     action=TaskHistoryAction.UNARCHIVED,
                     notes="Task unarchived and restored",
                 )
-                await self.task_repo.add_history(history, session=session)
+                await uow.tasks.add_history(history)
         return task
 
     async def get_history(self, task_id: UUID) -> list[TaskHistory]:
@@ -606,8 +631,8 @@ class TaskService:
         except CircularDependencyError as e:
             raise ValidationError(str(e)) from e
 
-        async with self._transaction() as session:
-            res = await self.task_repo.add_dependency(task.id, depends_on_task.id, session=session)
+        async with self._transaction() as uow:
+            res = await uow.tasks.add_dependency(task.id, depends_on_task.id)
             if actor_discord_id:
                 history = TaskHistory(
                     task_id=task.id,
@@ -615,7 +640,7 @@ class TaskService:
                     action=TaskHistoryAction.UPDATED,
                     notes=f"Added prerequisite dependency on {depends_on_short_id}",
                 )
-                await self.task_repo.add_history(history, session=session)
+                await uow.tasks.add_history(history)
             return res
 
     async def remove_dependency(
@@ -634,8 +659,8 @@ class TaskService:
         if not depends_on_task:
             raise TaskNotFoundError(f"Prerequisite task '{depends_on_short_id}' was not found in this server.")
 
-        async with self._transaction() as session:
-            res = await self.task_repo.remove_dependency(task.id, depends_on_task.id, session=session)
+        async with self._transaction() as uow:
+            res = await uow.tasks.remove_dependency(task.id, depends_on_task.id)
             if actor_discord_id and res:
                 history = TaskHistory(
                     task_id=task.id,
@@ -643,7 +668,7 @@ class TaskService:
                     action=TaskHistoryAction.UPDATED,
                     notes=f"Removed prerequisite dependency on {depends_on_short_id}",
                 )
-                await self.task_repo.add_history(history, session=session)
+                await uow.tasks.add_history(history)
             return res
 
     async def get_task_dependencies(self, task_id: UUID) -> tuple[list[Task], list[Task]]:

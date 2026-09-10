@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.ports.repositories import (
+        IOutboxRepo,
+        IProjectRepo,
+        ISquadRepo,
+        ITaskRepo,
+        ITeamRepo,
+        IUserPreferenceRepo,
+    )
 
 
 class IUnitOfWork(ABC):
     """Port defining the Unit of Work interface for managing atomic database transactions."""
+
+    tasks: ITaskRepo
+    projects: IProjectRepo
+    squads: ISquadRepo
+    teams: ITeamRepo
+    outbox: IOutboxRepo
+    user_prefs: IUserPreferenceRepo
 
     @abstractmethod
     async def __aenter__(self) -> IUnitOfWork:

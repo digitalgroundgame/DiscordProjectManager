@@ -10,14 +10,17 @@ from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAd
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 from src.adapters.discord_bot.views.hub_menu import PmHubView
 from src.adapters.discord_bot.views.task_modals import TaskEditModal, TaskNoteModal
+from src.adapters.discord_bot.workspace_protocol import (
+    IProjectDiscordWorkspace,
+    ITaskDiscordWorkspace,
+)
 from src.config import settings
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
-from src.ports.discord_workspace import IProjectDiscordWorkspace, ITaskDiscordWorkspace
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService, TeamService
 from src.services.task_service import StaleVersionError, TaskService
-from src.services.team_service import TeamService
 from src.services.user_service import UserService
 from src.utils.date_parser import get_due_date_from_preset
 
@@ -29,7 +32,8 @@ class DggPmBot(commands.Bot):
         self,
         task_service: TaskService,
         project_service: ProjectService,
-        team_service: TeamService,
+        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
@@ -46,9 +50,10 @@ class DggPmBot(commands.Bot):
         )
         self.task_service = task_service
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service or team_service
+        self.team_service = self.squad_service
         self.user_service = user_service
-        self.auth_service = AuthService(project_service, team_service)
+        self.auth_service = AuthService(project_service, self.squad_service)
         self.workspace = workspace or DiscordTaskWorkspaceAdapter(
             bot=self,
             task_service=task_service,
@@ -58,7 +63,7 @@ class DggPmBot(commands.Bot):
         self.project_workspace = project_workspace or DiscordProjectWorkspaceAdapter(
             bot=self,
             project_service=project_service,
-            team_service=team_service,
+            team_service=self.squad_service,
             task_service=task_service,
             user_service=user_service,
             auth_service=self.auth_service,

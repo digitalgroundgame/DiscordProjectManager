@@ -13,13 +13,13 @@ from src.adapters.discord_bot.views.forum_helpers import (
     ensure_project_tag,
     setup_forum_tags,
 )
-from src.domain.exceptions import ProjectNotFoundError
-from src.domain.models import Project, Team
-from src.ports.discord_workspace import (
+from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
     ProjectProvisionSpec,
     ProjectWorkspaceRef,
 )
+from src.domain.exceptions import ProjectNotFoundError
+from src.domain.models import Project, Team
 
 if TYPE_CHECKING:
     from src.services.auth_service import AuthService

@@ -9,9 +9,9 @@ from src.domain.enums import (
     NotificationPreference,
     OutboxStatus,
     PriorityLevel,
+    SquadRoleType,
     TaskHistoryAction,
     TaskStatus,
-    TeamRoleType,
 )
 
 
@@ -22,7 +22,7 @@ class DomainModel(BaseModel):
 class Task(DomainModel):
     id: UUID = Field(default_factory=uuid4)
     guild_id: int
-    project_id: UUID | None = None
+    project_id: UUID = Field(default_factory=uuid4)
     task_number: int = 1
     short_id: str
     version: int = 1
@@ -104,7 +104,7 @@ class Project(DomainModel):
         return self.archived_at is not None
 
 
-class Team(DomainModel):
+class Squad(DomainModel):
     id: UUID = Field(default_factory=uuid4)
     guild_id: int
     name: str
@@ -112,18 +112,51 @@ class Team(DomainModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class TeamMember(DomainModel):
-    team_id: UUID
+Team = Squad
+
+
+class SquadMember(DomainModel):
+    squad_id: UUID
     user_discord_id: int
-    role_type: TeamRoleType = TeamRoleType.MEMBER
+    role_type: SquadRoleType = SquadRoleType.MEMBER
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    @model_validator(mode="before")
+    @classmethod
+    def _handle_legacy_team_id(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "team_id" in data and "squad_id" not in data:
+                data["squad_id"] = data["team_id"]
+        return data
 
-class ProjectTeam(DomainModel):
+    @property
+    def team_id(self) -> UUID:
+        return self.squad_id
+
+
+TeamMember = SquadMember
+
+
+class ProjectSquad(DomainModel):
     project_id: UUID
-    team_id: UUID
+    squad_id: UUID
     start_date: datetime | None = None
     timeline: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _handle_legacy_team_id(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "team_id" in data and "squad_id" not in data:
+                data["squad_id"] = data["team_id"]
+        return data
+
+    @property
+    def team_id(self) -> UUID:
+        return self.squad_id
+
+
+ProjectTeam = ProjectSquad
 
 
 class OutboxEvent(DomainModel):

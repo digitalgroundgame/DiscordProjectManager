@@ -15,8 +15,8 @@ from src.adapters.api.app import api_app  # noqa: E402
 from src.adapters.db.postgres_repo import (  # noqa: E402
     PostgresOutboxRepo,
     PostgresProjectRepo,
+    PostgresSquadRepo,
     PostgresTaskRepo,
-    PostgresTeamRepo,
     PostgresUserPreferenceRepo,
 )
 from src.adapters.db.session import async_session_factory, close_db, init_db  # noqa: E402
@@ -27,8 +27,8 @@ from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.services.outbox_service import OutboxService  # noqa: E402
 from src.services.project_service import ProjectService  # noqa: E402
+from src.services.squad_service import SquadService  # noqa: E402
 from src.services.task_service import TaskService  # noqa: E402
-from src.services.team_service import TeamService  # noqa: E402
 from src.services.user_service import UserService  # noqa: E402
 
 logging.basicConfig(
@@ -49,13 +49,13 @@ async def run_app() -> None:
     # 2. Wire Hexagonal Repositories & Services with Session Pool Factory
     task_repo = PostgresTaskRepo(async_session_factory)
     project_repo = PostgresProjectRepo(async_session_factory)
-    team_repo = PostgresTeamRepo(async_session_factory)
+    squad_repo = PostgresSquadRepo(async_session_factory)
     outbox_repo = PostgresOutboxRepo(async_session_factory)
     user_pref_repo = PostgresUserPreferenceRepo(async_session_factory)
 
     uow = SqlAlchemyUnitOfWork(async_session_factory)
     project_service = ProjectService(project_repo)
-    team_service = TeamService(team_repo)
+    squad_service = SquadService(squad_repo)
     outbox_service = OutboxService(outbox_repo)
     task_service = TaskService(task_repo, project_service, outbox_service, uow=uow)
     user_service = UserService(user_pref_repo)
@@ -64,7 +64,7 @@ async def run_app() -> None:
     bot = DggPmBot(
         task_service=task_service,
         project_service=project_service,
-        team_service=team_service,
+        squad_service=squad_service,
         user_service=user_service,
     )
     notifier = DiscordNotifier(bot, user_service=user_service, workspace=bot.workspace)

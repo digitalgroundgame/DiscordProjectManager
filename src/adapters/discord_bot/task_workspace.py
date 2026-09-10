@@ -25,9 +25,13 @@ from src.adapters.discord_bot.views.task_embed import (
     build_task_history_embed,
     build_thread_workspace_content,
 )
+from src.adapters.discord_bot.workspace_protocol import (
+    ITaskDiscordWorkspace,
+    TaskControlPanel,
+    TaskWorkspaceRef,
+)
 from src.domain.enums import TaskStatus
 from src.domain.models import Project, Task, TaskHistory
-from src.ports.discord_workspace import ITaskDiscordWorkspace, TaskControlPanel, TaskWorkspaceRef
 from src.services.auth_service import AuthService
 
 if TYPE_CHECKING:

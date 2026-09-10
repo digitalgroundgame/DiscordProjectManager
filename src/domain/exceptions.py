@@ -27,8 +27,11 @@ class ProjectNotFoundError(EntityNotFoundError):
     """Raised when a specified project does not exist."""
 
 
-class TeamNotFoundError(EntityNotFoundError):
-    """Raised when a specified team does not exist."""
+class SquadNotFoundError(EntityNotFoundError):
+    """Raised when a specified squad does not exist."""
+
+
+TeamNotFoundError = SquadNotFoundError
 
 
 class EntityAlreadyExistsError(DomainError):
@@ -39,8 +42,11 @@ class ProjectAlreadyExistsError(EntityAlreadyExistsError, ValueError):
     """Raised when creating a project with a duplicate name or prefix."""
 
 
-class TeamAlreadyExistsError(EntityAlreadyExistsError, ValueError):
-    """Raised when creating a team with a duplicate name."""
+class SquadAlreadyExistsError(EntityAlreadyExistsError, ValueError):
+    """Raised when creating a squad with a duplicate name."""
+
+
+TeamAlreadyExistsError = SquadAlreadyExistsError
 
 
 class StaleVersionError(DomainError):

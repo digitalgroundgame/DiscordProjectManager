@@ -14,7 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship, synonym
 
 
 class Base(DeclarativeBase):
@@ -43,7 +43,8 @@ class ProjectTable(Base):
     )
 
     tasks = relationship("TaskTable", back_populates="project", cascade="all, delete-orphan")
-    teams = relationship("ProjectTeamTable", back_populates="project", cascade="all, delete-orphan", lazy="selectin")
+    squads = relationship("ProjectSquadTable", back_populates="project", cascade="all, delete-orphan", lazy="selectin")
+    teams = synonym("squads")
 
     __table_args__ = (
         UniqueConstraint("guild_id", "name", name="uq_project_guild_name"),
@@ -51,8 +52,8 @@ class ProjectTable(Base):
     )
 
 
-class TeamTable(Base):
-    __tablename__ = "teams"
+class SquadTable(Base):
+    __tablename__ = "squads"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     guild_id = Column(BigInteger, nullable=False, index=True)
@@ -60,33 +61,43 @@ class TeamTable(Base):
     discord_role_id = Column(BigInteger, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
-    members = relationship("TeamMemberTable", back_populates="team", cascade="all, delete-orphan")
-    projects = relationship("ProjectTeamTable", back_populates="team", cascade="all, delete-orphan")
+    members = relationship("SquadMemberTable", back_populates="squad", cascade="all, delete-orphan")
+    projects = relationship("ProjectSquadTable", back_populates="squad", cascade="all, delete-orphan")
 
-    __table_args__ = (UniqueConstraint("guild_id", "name", name="uq_team_guild_name"),)
+    __table_args__ = (UniqueConstraint("guild_id", "name", name="uq_squad_guild_name"),)
 
 
-class TeamMemberTable(Base):
-    __tablename__ = "team_members"
+TeamTable = SquadTable
 
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+
+class SquadMemberTable(Base):
+    __tablename__ = "squad_members"
+
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("squads.id", ondelete="CASCADE"), primary_key=True)
     user_discord_id = Column(BigInteger, primary_key=True)
     role_type = Column(String(20), nullable=False, default="member")
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
-    team = relationship("TeamTable", back_populates="members")
+    squad = relationship("SquadTable", back_populates="members")
 
 
-class ProjectTeamTable(Base):
-    __tablename__ = "project_teams"
+TeamMemberTable = SquadMemberTable
+
+
+class ProjectSquadTable(Base):
+    __tablename__ = "project_squads"
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("squads.id", ondelete="CASCADE"), primary_key=True)
     start_date = Column(DateTime(timezone=True), nullable=True)
     timeline = Column(String(100), nullable=True)
 
-    project = relationship("ProjectTable", back_populates="teams")
-    team = relationship("TeamTable", back_populates="projects", lazy="selectin")
+    project = relationship("ProjectTable", back_populates="squads")
+    squad = relationship("SquadTable", back_populates="projects", lazy="selectin")
+    team = synonym("squad")
+
+
+ProjectTeamTable = ProjectSquadTable
 
 
 class TaskTable(Base):
@@ -94,7 +105,7 @@ class TaskTable(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     guild_id = Column(BigInteger, nullable=False, index=True)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     task_number = Column(Integer, nullable=False)
     short_id = Column(String(20), nullable=False, index=True)
     version = Column(Integer, nullable=False, default=1)

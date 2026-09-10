@@ -13,17 +13,23 @@ from src.domain.models import Project, Task
 
 if TYPE_CHECKING:
     from src.services.project_service import ProjectService
-    from src.services.team_service import TeamService
+    from src.services.squad_service import SquadService, TeamService
 
 logger = logging.getLogger("dgg_pm.services.auth")
 
 
 class AuthService:
-    """Evaluates role, team, and server permissions for task mutations and project operations."""
+    """Evaluates role, squad, and server permissions for task mutations and project operations."""
 
-    def __init__(self, project_service: ProjectService, team_service: TeamService | None = None):
+    def __init__(
+        self,
+        project_service: ProjectService,
+        squad_service: SquadService | None = None,
+        team_service: TeamService | None = None,
+    ):
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service or team_service
+        self.team_service = self.squad_service
 
     @staticmethod
     def is_server_manager(user: discord.Member | discord.User) -> bool:
@@ -268,12 +274,12 @@ class AuthService:
                 "Only members with the project's Discord role or the Project Lead can be assigned."
             )
 
-    async def can_manage_team_leads(self, user: discord.Member | discord.User, team_id: UUID) -> bool:
-        """Determines if a user can designate or remove team leads.
+    async def can_manage_squad_leads(self, user: discord.Member | discord.User, squad_id: UUID) -> bool:
+        """Determines if a user can designate or remove squad leads.
 
         Authorized if:
         1. User has Server Manager permissions (manage_guild / administrator).
-        2. User is designated as a Team Lead in database AND currently holds the team's Discord role.
+        2. User is designated as a Squad Lead in database AND currently holds the squad's Discord role.
         """
         if self.is_server_manager(user):
             return True
@@ -282,30 +288,45 @@ class AuthService:
         if user_id is None or not isinstance(user_id, int):
             return False
 
-        is_lead = await self.team_service.is_team_lead(team_id, user_id)
+        if not self.squad_service:
+            return False
+
+        is_lead = await self.squad_service.is_squad_lead(squad_id, user_id)
         if not is_lead:
             return False
 
-        # Verify that the user still currently holds the team's Discord role
+        # Verify that the user still currently holds the squad's Discord role
         if hasattr(user, "roles"):
-            team = await self.team_service.get_by_id(team_id)
-            if team:
+            squad = await self.squad_service.get_by_id(squad_id)
+            if squad:
                 user_role_ids = {r.id for r in getattr(user, "roles", []) if hasattr(r, "id")}
-                if team.discord_role_id not in user_role_ids:
+                if squad.discord_role_id not in user_role_ids:
                     return False
 
         return True
 
-    async def require_team_lead_management(self, user: discord.Member | discord.User, team_id: UUID) -> None:
-        """Raises PermissionDeniedError if the user cannot manage team leads."""
-        if not await self.can_manage_team_leads(user, team_id):
+    async def can_manage_team_leads(self, user: discord.Member | discord.User, team_id: UUID) -> bool:
+        return await self.can_manage_squad_leads(user, team_id)
+
+    async def require_squad_lead_management(self, user: discord.Member | discord.User, squad_id: UUID) -> None:
+        """Raises PermissionDeniedError if the user cannot manage squad leads."""
+        if not await self.can_manage_squad_leads(user, squad_id):
             raise PermissionDeniedError(
-                "You do not have permission to manage team leads for this team. "
-                "You must be a Team Lead or a server manager."
+                "You do not have permission to manage squad leads for this squad. "
+                "You must be a Squad Lead or a server manager."
             )
 
+    async def require_team_lead_management(self, user: discord.Member | discord.User, team_id: UUID) -> None:
+        await self.require_squad_lead_management(user, team_id)
+
+    async def can_manage_squad_roster(self, user: discord.Member | discord.User, squad_id: UUID) -> bool:
+        return await self.can_manage_squad_leads(user, squad_id)
+
     async def can_manage_team_roster(self, user: discord.Member | discord.User, team_id: UUID) -> bool:
-        return await self.can_manage_team_leads(user, team_id)
+        return await self.can_manage_squad_roster(user, team_id)
+
+    async def require_squad_roster_management(self, user: discord.Member | discord.User, squad_id: UUID) -> None:
+        await self.require_squad_lead_management(user, squad_id)
 
     async def require_team_roster_management(self, user: discord.Member | discord.User, team_id: UUID) -> None:
-        await self.require_team_lead_management(user, team_id)
+        await self.require_squad_roster_management(user, team_id)

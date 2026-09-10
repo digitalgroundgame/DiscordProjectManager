@@ -7,11 +7,13 @@ from src.domain.enums import NotificationPreference, PriorityLevel, TaskStatus
 from src.domain.models import (
     OutboxEvent,
     Project,
+    ProjectSquad,
     ProjectTeam,
+    Squad,
+    SquadMember,
     Task,
     TaskHistory,
     Team,
-    TeamMember,
     UserPreference,
 )
 
@@ -179,62 +181,93 @@ class IProjectRepo(ABC):
         """Updates the designated Project Lead Discord user ID for a project."""
 
     @abstractmethod
+    async def assign_squad(self, project_squad: ProjectSquad) -> None:
+        """Maps a squad to a project."""
+
+    @abstractmethod
+    async def remove_squad(self, project_id: UUID, squad_id: UUID) -> None:
+        """Unmaps a squad from a project."""
+
+    @abstractmethod
+    async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
+        """Lists all squads mapped to a project."""
+
     async def assign_team(self, project_team: ProjectTeam) -> None:
-        """Maps a team to a project."""
+        """Backward-compatible alias for assign_squad."""
+        await self.assign_squad(project_team)
 
-    @abstractmethod
     async def remove_team(self, project_id: UUID, team_id: UUID) -> None:
-        """Unmaps a team from a project."""
+        """Backward-compatible alias for remove_squad."""
+        await self.remove_squad(project_id, team_id)
 
-    @abstractmethod
     async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
-        """Lists all teams mapped to a project."""
+        """Backward-compatible alias for list_squads_for_project."""
+        return await self.list_squads_for_project(project_id)
 
 
-class ITeamRepo(ABC):
+class ISquadRepo(ABC):
     @abstractmethod
-    async def create(self, team: Team) -> Team:
-        """Persists a new team."""
-
-    @abstractmethod
-    async def get_by_id(self, team_id: UUID) -> Team | None:
-        """Fetches team by ID."""
+    async def create(self, squad: Squad) -> Squad:
+        """Persists a new squad."""
 
     @abstractmethod
-    async def get_by_name(self, guild_id: int, name: str) -> Team | None:
-        """Fetches team by name within a guild."""
+    async def get_by_id(self, squad_id: UUID) -> Squad | None:
+        """Fetches squad by ID."""
 
     @abstractmethod
-    async def get_by_role_id(self, guild_id: int, role_id: int) -> Team | None:
-        """Fetches team by Discord role ID."""
+    async def get_by_name(self, guild_id: int, name: str) -> Squad | None:
+        """Fetches squad by name within a guild."""
 
     @abstractmethod
+    async def get_by_role_id(self, guild_id: int, role_id: int) -> Squad | None:
+        """Fetches squad by Discord role ID."""
+
+    @abstractmethod
+    async def add_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
+        """Designates a user as a squad lead in database."""
+
+    @abstractmethod
+    async def remove_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
+        """Removes squad lead status for a user."""
+
+    @abstractmethod
+    async def list_squad_leads(self, squad_id: UUID) -> list[int]:
+        """Lists Discord user IDs of all leads for a squad."""
+
+    @abstractmethod
+    async def assign_member(self, member: SquadMember) -> None:
+        """Records or updates squad member domain role (LEAD/MEMBER)."""
+
+    @abstractmethod
+    async def is_squad_lead(self, squad_id: UUID, user_discord_id: int) -> bool:
+        """Checks whether user has SquadRoleType.LEAD for the given squad."""
+
+    @abstractmethod
+    async def list_squads(self, guild_id: int) -> list[Squad]:
+        """Lists all squads for a guild."""
+
+    @abstractmethod
+    async def list_members(self, squad_id: UUID) -> list[SquadMember]:
+        """Lists all members assigned to a squad."""
+
+    # Backward-compatible aliases
     async def add_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        """Designates a user as a team lead in database."""
+        await self.add_squad_lead(team_id, user_discord_id)
 
-    @abstractmethod
     async def remove_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        """Removes team lead status for a user."""
+        await self.remove_squad_lead(team_id, user_discord_id)
 
-    @abstractmethod
     async def list_team_leads(self, team_id: UUID) -> list[int]:
-        """Lists Discord user IDs of all leads for a team."""
+        return await self.list_squad_leads(team_id)
 
-    @abstractmethod
-    async def assign_member(self, member: TeamMember) -> None:
-        """Records or updates team member domain role (LEAD/MEMBER)."""
-
-    @abstractmethod
     async def is_team_lead(self, team_id: UUID, user_discord_id: int) -> bool:
-        """Checks whether user has TeamRoleType.LEAD for the given team."""
+        return await self.is_squad_lead(team_id, user_discord_id)
 
-    @abstractmethod
     async def list_teams(self, guild_id: int) -> list[Team]:
-        """Lists all teams for a guild."""
+        return await self.list_squads(guild_id)
 
-    @abstractmethod
-    async def list_members(self, team_id: UUID) -> list[TeamMember]:
-        """Lists all members assigned to a team."""
+
+ITeamRepo = ISquadRepo
 
 
 class IOutboxRepo(ABC):

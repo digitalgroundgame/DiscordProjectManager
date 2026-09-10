@@ -19,6 +19,7 @@ class OutboxService:
         idempotency_key: str,
         payload: dict[str, Any],
         scheduled_for: datetime | None = None,
+        outbox_repo: IOutboxRepo | None = None,
         session: Any | None = None,
     ) -> OutboxEvent:
         event = OutboxEvent(
@@ -28,9 +29,15 @@ class OutboxService:
             status=OutboxStatus.PENDING,
             scheduled_for=scheduled_for or datetime.now(UTC),
         )
-        return await self.outbox_repo.enqueue(event, session=session)
+        repo = outbox_repo or self.outbox_repo
+        return await repo.enqueue(event, session=session)
 
-    async def schedule_task_reminders(self, task: Task, session: Any | None = None) -> list[OutboxEvent]:
+    async def schedule_task_reminders(
+        self,
+        task: Task,
+        outbox_repo: IOutboxRepo | None = None,
+        session: Any | None = None,
+    ) -> list[OutboxEvent]:
         """Schedules tiered reminders (T-24h, T-1h, Due) for a task if due_at is set."""
         if not task.due_at or task.is_completed or task.is_archived:
             return []
@@ -56,6 +63,7 @@ class OutboxService:
                     "due_at": due_utc.isoformat(),
                 },
                 scheduled_for=t_24h,
+                outbox_repo=outbox_repo,
                 session=session,
             )
             scheduled_events.append(evt)
@@ -77,6 +85,7 @@ class OutboxService:
                     "due_at": due_utc.isoformat(),
                 },
                 scheduled_for=t_1h,
+                outbox_repo=outbox_repo,
                 session=session,
             )
             scheduled_events.append(evt)
@@ -97,11 +106,18 @@ class OutboxService:
                     "due_at": due_utc.isoformat(),
                 },
                 scheduled_for=due_utc,
+                outbox_repo=outbox_repo,
                 session=session,
             )
             scheduled_events.append(evt)
 
         return scheduled_events
 
-    async def cancel_task_reminders(self, task_id: UUID, session: Any | None = None) -> int:
-        return await self.outbox_repo.cancel_task_reminders(task_id, session=session)
+    async def cancel_task_reminders(
+        self,
+        task_id: UUID,
+        outbox_repo: IOutboxRepo | None = None,
+        session: Any | None = None,
+    ) -> int:
+        repo = outbox_repo or self.outbox_repo
+        return await repo.cancel_task_reminders(task_id, session=session)

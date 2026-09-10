@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from src.domain.exceptions import ProjectAlreadyExistsError, ProjectNotFoundError
-from src.domain.models import Project, ProjectTeam, Team
+from src.domain.models import Project, ProjectSquad, Squad, Team
 from src.ports.repositories import IProjectRepo
 
 
@@ -78,10 +78,16 @@ class ProjectService:
     async def list_projects(self, guild_id: int, include_archived: bool = False) -> list[Project]:
         return await self.project_repo.list_projects(guild_id, include_archived=include_archived)
 
-    async def allocate_next_short_id(self, project_id: UUID, session: Any = None) -> tuple[int, str]:
+    async def allocate_next_short_id(
+        self,
+        project_id: UUID,
+        project_repo: IProjectRepo | None = None,
+        session: Any = None,
+    ) -> tuple[int, str]:
         """Atomically increments next_task_number and returns (task_number, short_id)."""
+        repo = project_repo or self.project_repo
         try:
-            task_num, prefix = await self.project_repo.increment_task_number_atomic(project_id, session=session)
+            task_num, prefix = await repo.increment_task_number_atomic(project_id, session=session)
         except ValueError as e:
             raise ProjectNotFoundError(f"Project with ID '{project_id}' not found.") from e
         short_id = f"{prefix}-{task_num}"
@@ -104,6 +110,21 @@ class ProjectService:
         """Updates or clears the designated Project Lead Discord user for a project."""
         return await self.project_repo.update_lead_id(project_id, lead_discord_id)
 
+    async def assign_squad_to_project(
+        self,
+        project_id: UUID,
+        squad_id: UUID,
+        start_date: datetime | None = None,
+        timeline: str | None = None,
+    ) -> None:
+        ps = ProjectSquad(
+            project_id=project_id,
+            squad_id=squad_id,
+            start_date=start_date,
+            timeline=timeline,
+        )
+        await self.project_repo.assign_squad(ps)
+
     async def assign_team_to_project(
         self,
         project_id: UUID,
@@ -111,16 +132,21 @@ class ProjectService:
         start_date: datetime | None = None,
         timeline: str | None = None,
     ) -> None:
-        pt = ProjectTeam(
+        await self.assign_squad_to_project(
             project_id=project_id,
-            team_id=team_id,
+            squad_id=team_id,
             start_date=start_date,
             timeline=timeline,
         )
-        await self.project_repo.assign_team(pt)
+
+    async def remove_squad_from_project(self, project_id: UUID, squad_id: UUID) -> None:
+        await self.project_repo.remove_squad(project_id, squad_id)
 
     async def remove_team_from_project(self, project_id: UUID, team_id: UUID) -> None:
-        await self.project_repo.remove_team(project_id, team_id)
+        await self.remove_squad_from_project(project_id, team_id)
+
+    async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
+        return await self.project_repo.list_squads_for_project(project_id)
 
     async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
-        return await self.project_repo.list_teams_for_project(project_id)
+        return await self.list_squads_for_project(project_id)

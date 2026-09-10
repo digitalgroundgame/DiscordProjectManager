@@ -5,9 +5,9 @@ import discord
 import pytest
 
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
+from src.adapters.discord_bot.workspace_protocol import TaskWorkspaceRef
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Project, Task
-from src.ports.discord_workspace import TaskWorkspaceRef
 
 
 def _create_mock_forum_tag(tag_id: int, name: str) -> MagicMock:

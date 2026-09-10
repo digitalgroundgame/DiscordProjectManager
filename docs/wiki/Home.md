@@ -17,9 +17,9 @@ Welcome to the **DGG-PM** GitHub Wiki!
    - Complete reference of all `/pm` grouped slash commands.
    - Arguments, permissions, options, and autocomplete.
 
-3. **[Teams & Authorization Matrix](Teams-and-Authorization.md)**
+3. **[Squads & Authorization Matrix](Teams-and-Authorization.md)**
    - Discord-native role membership.
-   - Team Leads & 3-tier self-healing protection.
+   - Squad Leads & 3-tier self-healing protection.
    - Role-restricted task assignments and mutation guards.
 
 4. **[Forum Channels & Interactive Hubs](Forum-Channels-and-Hubs.md)**

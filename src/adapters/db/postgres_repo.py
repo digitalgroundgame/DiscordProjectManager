@@ -12,14 +12,14 @@ from sqlalchemy.orm import selectinload
 
 from src.adapters.db.tables import (
     OutboxEventTable,
+    ProjectSquadTable,
     ProjectTable,
-    ProjectTeamTable,
+    SquadMemberTable,
+    SquadTable,
     TaskDependencyTable,
     TaskHistoryTable,
     TaskTable,
     TaskWatcherTable,
-    TeamMemberTable,
-    TeamTable,
     UserPreferenceTable,
 )
 from src.domain.enums import (
@@ -27,25 +27,27 @@ from src.domain.enums import (
     NotificationPreference,
     OutboxStatus,
     PriorityLevel,
+    SquadRoleType,
     TaskHistoryAction,
     TaskStatus,
-    TeamRoleType,
 )
 from src.domain.models import (
     OutboxEvent,
     Project,
+    ProjectSquad,
     ProjectTeam,
+    Squad,
+    SquadMember,
     Task,
     TaskHistory,
     Team,
-    TeamMember,
     UserPreference,
 )
 from src.ports.repositories import (
     IOutboxRepo,
     IProjectRepo,
+    ISquadRepo,
     ITaskRepo,
-    ITeamRepo,
     IUserPreferenceRepo,
 )
 
@@ -127,8 +129,8 @@ def _to_domain_project(row: ProjectTable) -> Project:
     )
 
 
-def _to_domain_team(row: TeamTable) -> Team:
-    return Team(
+def _to_domain_squad(row: SquadTable) -> Squad:
+    return Squad(
         id=row.id,
         guild_id=row.guild_id,
         name=row.name,
@@ -137,13 +139,19 @@ def _to_domain_team(row: TeamTable) -> Team:
     )
 
 
-def _to_domain_team_member(row: TeamMemberTable) -> TeamMember:
-    return TeamMember(
-        team_id=row.team_id,
+_to_domain_team = _to_domain_squad
+
+
+def _to_domain_squad_member(row: SquadMemberTable) -> SquadMember:
+    return SquadMember(
+        squad_id=row.squad_id,
         user_discord_id=row.user_discord_id,
-        role_type=TeamRoleType(row.role_type),
+        role_type=SquadRoleType(row.role_type),
         created_at=row.created_at,
     )
+
+
+_to_domain_team_member = _to_domain_squad_member
 
 
 def _to_domain_outbox(row: OutboxEventTable) -> OutboxEvent:
@@ -604,24 +612,27 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
             # Map any initial squads/roles passed in project.discord_role_ids
             for rid in project.discord_role_ids:
-                team_stmt = select(TeamTable).where(
-                    TeamTable.guild_id == project.guild_id,
-                    TeamTable.discord_role_id == rid,
+                squad_stmt = select(SquadTable).where(
+                    SquadTable.guild_id == project.guild_id,
+                    SquadTable.discord_role_id == rid,
                 )
-                team_res = await session.execute(team_stmt)
-                team_row = team_res.scalar_one_or_none()
-                if not team_row:
-                    team_row = TeamTable(
+                squad_res = await session.execute(squad_stmt)
+                squad_row = squad_res.scalar_one_or_none()
+                if not squad_row:
+                    squad_row = SquadTable(
                         guild_id=project.guild_id,
                         name=f"Squad-{rid}",
                         discord_role_id=rid,
                     )
-                    session.add(team_row)
+                    session.add(squad_row)
                     await session.flush()
-                pt_row = ProjectTeamTable(project_id=project.id, team_id=team_row.id)
+                pt_row = ProjectSquadTable(project_id=project.id, squad_id=squad_row.id)
                 session.add(pt_row)
 
-            await session.commit()
+            if self._should_commit(None):
+                await session.commit()
+            else:
+                await session.flush()
             return project
 
     async def get_by_id(self, project_id: UUID) -> Project | None:
@@ -742,26 +753,26 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             if not proj_row:
                 return None
 
-            del_stmt = delete(ProjectTeamTable).where(ProjectTeamTable.project_id == project_id)
+            del_stmt = delete(ProjectSquadTable).where(ProjectSquadTable.project_id == project_id)
             await session.execute(del_stmt)
 
             if discord_role_id is not None:
-                team_stmt = select(TeamTable).where(
-                    TeamTable.guild_id == proj_row.guild_id,
-                    TeamTable.discord_role_id == discord_role_id,
+                squad_stmt = select(SquadTable).where(
+                    SquadTable.guild_id == proj_row.guild_id,
+                    SquadTable.discord_role_id == discord_role_id,
                 )
-                team_res = await session.execute(team_stmt)
-                team_row = team_res.scalar_one_or_none()
-                if not team_row:
-                    team_row = TeamTable(
+                squad_res = await session.execute(squad_stmt)
+                squad_row = squad_res.scalar_one_or_none()
+                if not squad_row:
+                    squad_row = SquadTable(
                         guild_id=proj_row.guild_id,
                         name=f"Squad-{discord_role_id}",
                         discord_role_id=discord_role_id,
                     )
-                    session.add(team_row)
+                    session.add(squad_row)
                     await session.flush()
 
-                pt_row = ProjectTeamTable(project_id=project_id, team_id=team_row.id)
+                pt_row = ProjectSquadTable(project_id=project_id, squad_id=squad_row.id)
                 await session.merge(pt_row)
 
             proj_row.updated_at = datetime.now(UTC)
@@ -783,111 +794,120 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             await session.commit()
             return _to_domain_project(row)
 
-    async def assign_team(self, project_team: ProjectTeam) -> None:
+    async def assign_squad(self, project_squad: ProjectSquad) -> None:
         async with self._get_session() as session:
-            row = ProjectTeamTable(
-                project_id=project_team.project_id,
-                team_id=project_team.team_id,
-                start_date=project_team.start_date,
-                timeline=project_team.timeline,
+            row = ProjectSquadTable(
+                project_id=project_squad.project_id,
+                squad_id=project_squad.squad_id,
+                start_date=project_squad.start_date,
+                timeline=project_squad.timeline,
             )
             await session.merge(row)
+            await session.commit()
+
+    async def assign_team(self, project_team: ProjectTeam) -> None:
+        await self.assign_squad(project_team)
+
+    async def remove_squad(self, project_id: UUID, squad_id: UUID) -> None:
+        async with self._get_session() as session:
+            stmt = delete(ProjectSquadTable).where(
+                ProjectSquadTable.project_id == project_id,
+                ProjectSquadTable.squad_id == squad_id,
+            )
+            await session.execute(stmt)
             await session.commit()
 
     async def remove_team(self, project_id: UUID, team_id: UUID) -> None:
-        async with self._get_session() as session:
-            stmt = delete(ProjectTeamTable).where(
-                ProjectTeamTable.project_id == project_id,
-                ProjectTeamTable.team_id == team_id,
-            )
-            await session.execute(stmt)
-            await session.commit()
+        await self.remove_squad(project_id, team_id)
 
-    async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
+    async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         async with self._get_session() as session:
             stmt = (
-                select(TeamTable)
-                .join(ProjectTeamTable, ProjectTeamTable.team_id == TeamTable.id)
-                .where(ProjectTeamTable.project_id == project_id)
+                select(SquadTable)
+                .join(ProjectSquadTable, ProjectSquadTable.squad_id == SquadTable.id)
+                .where(ProjectSquadTable.project_id == project_id)
             )
             res = await session.execute(stmt)
             rows = res.scalars().all()
-            return [_to_domain_team(r) for r in rows]
+            return [_to_domain_squad(r) for r in rows]
+
+    async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
+        return await self.list_squads_for_project(project_id)
 
 
-class PostgresTeamRepo(BasePostgresRepo, ITeamRepo):
-    async def create(self, team: Team) -> Team:
+class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
+    async def create(self, squad: Squad) -> Squad:
         async with self._get_session() as session:
-            row = TeamTable(
-                id=team.id,
-                guild_id=team.guild_id,
-                name=team.name,
-                discord_role_id=team.discord_role_id,
-                created_at=team.created_at,
+            row = SquadTable(
+                id=squad.id,
+                guild_id=squad.guild_id,
+                name=squad.name,
+                discord_role_id=squad.discord_role_id,
+                created_at=squad.created_at,
             )
             session.add(row)
             await session.commit()
-            return team
+            return squad
 
-    async def get_by_id(self, team_id: UUID) -> Team | None:
+    async def get_by_id(self, squad_id: UUID) -> Squad | None:
         async with self._get_session() as session:
-            stmt = select(TeamTable).where(TeamTable.id == team_id)
+            stmt = select(SquadTable).where(SquadTable.id == squad_id)
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
-            return _to_domain_team(row) if row else None
+            return _to_domain_squad(row) if row else None
 
-    async def get_by_name(self, guild_id: int, name: str) -> Team | None:
+    async def get_by_name(self, guild_id: int, name: str) -> Squad | None:
         async with self._get_session() as session:
-            stmt = select(TeamTable).where(
-                TeamTable.guild_id == guild_id,
-                func.upper(TeamTable.name) == name.strip().upper(),
+            stmt = select(SquadTable).where(
+                SquadTable.guild_id == guild_id,
+                func.upper(SquadTable.name) == name.strip().upper(),
             )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
-            return _to_domain_team(row) if row else None
+            return _to_domain_squad(row) if row else None
 
-    async def get_by_role_id(self, guild_id: int, role_id: int) -> Team | None:
+    async def get_by_role_id(self, guild_id: int, role_id: int) -> Squad | None:
         async with self._get_session() as session:
-            stmt = select(TeamTable).where(
-                TeamTable.guild_id == guild_id,
-                TeamTable.discord_role_id == role_id,
+            stmt = select(SquadTable).where(
+                SquadTable.guild_id == guild_id,
+                SquadTable.discord_role_id == role_id,
             )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
-            return _to_domain_team(row) if row else None
+            return _to_domain_squad(row) if row else None
 
-    async def add_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
+    async def add_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
         async with self._get_session() as session:
-            row = TeamMemberTable(
-                team_id=team_id,
+            row = SquadMemberTable(
+                squad_id=squad_id,
                 user_discord_id=user_discord_id,
-                role_type=TeamRoleType.LEAD.value,
+                role_type=SquadRoleType.LEAD.value,
             )
             await session.merge(row)
             await session.commit()
 
-    async def remove_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
+    async def remove_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
         async with self._get_session() as session:
-            stmt = delete(TeamMemberTable).where(
-                TeamMemberTable.team_id == team_id,
-                TeamMemberTable.user_discord_id == user_discord_id,
+            stmt = delete(SquadMemberTable).where(
+                SquadMemberTable.squad_id == squad_id,
+                SquadMemberTable.user_discord_id == user_discord_id,
             )
             await session.execute(stmt)
             await session.commit()
 
-    async def list_team_leads(self, team_id: UUID) -> list[int]:
+    async def list_squad_leads(self, squad_id: UUID) -> list[int]:
         async with self._get_session() as session:
-            stmt = select(TeamMemberTable.user_discord_id).where(
-                TeamMemberTable.team_id == team_id,
-                TeamMemberTable.role_type == TeamRoleType.LEAD.value,
+            stmt = select(SquadMemberTable.user_discord_id).where(
+                SquadMemberTable.squad_id == squad_id,
+                SquadMemberTable.role_type == SquadRoleType.LEAD.value,
             )
             res = await session.execute(stmt)
             return [int(uid) for uid in res.scalars().all()]
 
-    async def assign_member(self, member: TeamMember) -> None:
+    async def assign_member(self, member: SquadMember) -> None:
         async with self._get_session() as session:
-            row = TeamMemberTable(
-                team_id=member.team_id,
+            row = SquadMemberTable(
+                squad_id=member.squad_id,
                 user_discord_id=member.user_discord_id,
                 role_type=member.role_type.value,
                 created_at=member.created_at,
@@ -895,29 +915,32 @@ class PostgresTeamRepo(BasePostgresRepo, ITeamRepo):
             await session.merge(row)
             await session.commit()
 
-    async def is_team_lead(self, team_id: UUID, user_discord_id: int) -> bool:
+    async def is_squad_lead(self, squad_id: UUID, user_discord_id: int) -> bool:
         async with self._get_session() as session:
-            stmt = select(TeamMemberTable).where(
-                TeamMemberTable.team_id == team_id,
-                TeamMemberTable.user_discord_id == user_discord_id,
-                TeamMemberTable.role_type == "lead",
+            stmt = select(SquadMemberTable).where(
+                SquadMemberTable.squad_id == squad_id,
+                SquadMemberTable.user_discord_id == user_discord_id,
+                SquadMemberTable.role_type == SquadRoleType.LEAD.value,
             )
             res = await session.execute(stmt)
             return res.scalar_one_or_none() is not None
 
-    async def list_teams(self, guild_id: int) -> list[Team]:
+    async def list_squads(self, guild_id: int) -> list[Squad]:
         async with self._get_session() as session:
-            stmt = select(TeamTable).where(TeamTable.guild_id == guild_id).order_by(TeamTable.name.asc())
+            stmt = select(SquadTable).where(SquadTable.guild_id == guild_id).order_by(SquadTable.name.asc())
             res = await session.execute(stmt)
             rows = res.scalars().all()
-            return [_to_domain_team(r) for r in rows]
+            return [_to_domain_squad(r) for r in rows]
 
-    async def list_members(self, team_id: UUID) -> list[TeamMember]:
+    async def list_members(self, squad_id: UUID) -> list[SquadMember]:
         async with self._get_session() as session:
-            stmt = select(TeamMemberTable).where(TeamMemberTable.team_id == team_id)
+            stmt = select(SquadMemberTable).where(SquadMemberTable.squad_id == squad_id)
             res = await session.execute(stmt)
             rows = res.scalars().all()
-            return [_to_domain_team_member(r) for r in rows]
+            return [_to_domain_squad_member(r) for r in rows]
+
+
+PostgresTeamRepo = PostgresSquadRepo
 
 
 class PostgresOutboxRepo(BasePostgresRepo, IOutboxRepo):

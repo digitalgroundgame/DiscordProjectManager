@@ -1,4 +1,4 @@
-"""Port defining the interface for Task Discord Workspaces and Thread Lifecycle management."""
+"""Protocols and value types for Discord Workspaces and Thread Lifecycle management."""
 
 from __future__ import annotations
 
@@ -46,21 +46,7 @@ class ITaskDiscordWorkspace(Protocol):
         target_container: discord.abc.GuildChannel | discord.Thread | int | None = None,
         preferred_channel_id: int | None = None,
     ) -> TaskWorkspaceRef:
-        """Provisions a new Discord Thread Workspace and mounts the Task Action Card.
-
-        Handles container resolution (Forum Channel vs Text Channel), thread creation
-        with 7-day auto-archive, starter card embed rendering, interactive Task Action Card
-        view mounting, and dynamic Forum Tag application.
-
-        Args:
-            task: The domain Task model to provision presence for.
-            project: Optional parent Project model for tag matching and title metadata.
-            target_container: Specific channel, thread, or channel ID to post in.
-            preferred_channel_id: Optional fallback channel ID if target_container is omitted.
-
-        Returns:
-            TaskWorkspaceRef containing thread_id, message_id, channel_id, and jump_url.
-        """
+        """Provisions a new Discord Thread Workspace and mounts the Task Action Card."""
         ...
 
     async def sync_workspace(
@@ -74,24 +60,7 @@ class ITaskDiscordWorkspace(Protocol):
         sync_archive: bool = True,
         sync_starter_card: bool = True,
     ) -> bool:
-        """Synchronizes an existing Thread Workspace with the current Task domain model state.
-
-        Idempotently updates the root Task Action Card embed, resolves and refreshes
-        Forum Channel tags, updates thread title (if renamed), and adjusts thread archive
-        state (auto-archiving completed/archived tasks or unarchiving reopened ones).
-
-        Args:
-            task: The updated Task domain model.
-            project: Optional parent Project model.
-            project_name: Optional project name override for embed and tag resolution.
-            sync_title: Whether to check and update thread name if the task title changed.
-            sync_tags: Whether to update applied Forum Channel tags.
-            sync_archive: Whether to synchronize thread archive state based on task status.
-            sync_starter_card: Whether to re-render and edit the root starter message embed.
-
-        Returns:
-            True if synchronization succeeded or was a no-op; False if thread was missing.
-        """
+        """Synchronizes an existing Thread Workspace with the current Task domain model state."""
         ...
 
     async def refresh_action_card(
@@ -102,17 +71,7 @@ class ITaskDiscordWorkspace(Protocol):
         project: Project | None = None,
         project_name: str | None = None,
     ) -> None:
-        """Refreshes the interactive Task Action Card in response to a Discord component interaction.
-
-        Updates the interaction message with the latest Task status buttons, metadata
-        embed, and thread workspace content while managing transient unarchive state.
-
-        Args:
-            interaction: The incoming button/select component interaction.
-            task: The freshly mutated Task domain model.
-            project: Optional parent Project model.
-            project_name: Optional project name for embed display.
-        """
+        """Refreshes the interactive Task Action Card in response to a Discord component interaction."""
         ...
 
     async def post_activity(
@@ -123,21 +82,7 @@ class ITaskDiscordWorkspace(Protocol):
         embed: discord.Embed | None = None,
         rearchive_if_completed: bool = True,
     ) -> discord.Message | None:
-        """Posts an activity update, note, or Outbox Event notification into the Task's Thread Workspace.
-
-        Safely handles transient thread unarchiving before posting and guarantees that
-        completed or archived tasks are re-archived immediately after message delivery.
-
-        Args:
-            task: The Task domain model whose Thread Workspace will receive the message.
-            content: Markdown content or mention text to post.
-            embed: Optional rich notification embed.
-            rearchive_if_completed: If True (default), ensures the thread is re-archived
-                if the task is completed or archived.
-
-        Returns:
-            The created discord.Message, or None if the thread could not be reached.
-        """
+        """Posts an activity update, note, or Outbox Event notification into the Task's Thread Workspace."""
         ...
 
     async def render_task_controls(
@@ -151,17 +96,7 @@ class ITaskDiscordWorkspace(Protocol):
         history: list[TaskHistory] | None = None,
         sibling_tasks: list[Task] | None = None,
     ) -> None:
-        """Renders interactive ephemeral control panels (Quick Controls, Dependencies, Audit Trail).
-
-        Args:
-            interaction: The incoming button interaction.
-            task: The target Task domain model.
-            panel: Panel type ('quick_controls', 'dependencies', or 'history').
-            prerequisites: Prerequisite tasks (for dependencies panel).
-            dependents: Dependent tasks (for dependencies panel).
-            history: Audit history entries (for history panel).
-            sibling_tasks: Sibling project tasks (for dependency selector dropdown).
-        """
+        """Renders interactive ephemeral control panels (Quick Controls, Dependencies, Audit Trail)."""
         ...
 
 

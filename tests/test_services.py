@@ -1,6 +1,7 @@
 import pytest
 
 from src.domain.enums import PriorityLevel, TaskStatus
+from src.domain.exceptions import ValidationError
 from src.services.task_service import StaleVersionError
 
 
@@ -67,40 +68,29 @@ async def test_task_creation_and_short_id(services):
     assert t2.short_id == "BE-2"
     assert t2.task_number == 2
 
-    # Standalone task
-    t_standalone = await task_srv.create_task(
-        guild_id=guild_id,
-        title="Quick standalone bugfix",
-        creator_discord_id=1002,
-        project_id=None,
-    )
-    assert t_standalone.short_id.startswith("TASK-")
-    assert t_standalone.project_id is None
+    # Standalone task without project container is prohibited (ADR 0002)
+    with pytest.raises(ValidationError, match="project container must be specified"):
+        await task_srv.create_task(
+            guild_id=guild_id,
+            title="Quick standalone bugfix",
+            creator_discord_id=1002,
+            project_id=None,
+        )
 
 
 @pytest.mark.asyncio
-async def test_standalone_task_short_ids_are_collision_safe(services, repos):
+async def test_standalone_tasks_prohibited_without_project(services):
     task_srv = services["task"]
-    task_repo = repos["task"]
     guild_id = 666666666666666666
 
-    # Create several standalone tasks; short IDs must be distinct (no random collision) and unique per guild
-    seen: set[str] = set()
-    for _ in range(10):
-        t = await task_srv.create_task(
+    # Attempting to create tasks without project_id raises ValidationError
+    with pytest.raises(ValidationError, match="project container must be specified"):
+        await task_srv.create_task(
             guild_id=guild_id,
-            title=f"Standalone capture {_}",
+            title="Standalone capture",
             creator_discord_id=1001,
             project_id=None,
         )
-        assert t.short_id.startswith("TASK-")
-        assert len(t.short_id) <= 20  # fits the DB column
-        assert t.short_id not in seen
-        seen.add(t.short_id)
-
-        # Fetching back by short_id finds the same task
-        fetched = await task_repo.get_by_short_id(guild_id, t.short_id)
-        assert fetched is not None and fetched.id == t.id
 
 
 @pytest.mark.asyncio
@@ -274,9 +264,12 @@ async def test_user_service_preferences(services):
 async def test_task_creation_atomic_rollback(services, repos):
     """Verify that if outbox enqueueing fails, the task and history are completely rolled back."""
     task_srv = services["task"]
+    proj_srv = services["project"]
     outbox_srv = services["outbox"]
     task_repo = repos["task"]
     guild_id = 999888777666
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Rollback Test", prefix="RBK")
 
     # Mock outbox_service.enqueue_event to raise an exception
     original_enqueue = outbox_srv.enqueue_event
@@ -292,6 +285,7 @@ async def test_task_creation_atomic_rollback(services, repos):
                 guild_id=guild_id,
                 title="This Task Must Roll Back",
                 creator_discord_id=12345,
+                project_id=project.id,
             )
 
         # Confirm the task was NEVER persisted to the database

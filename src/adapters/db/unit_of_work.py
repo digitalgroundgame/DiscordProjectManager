@@ -5,6 +5,21 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.adapters.db.postgres_repo import (
+    PostgresOutboxRepo,
+    PostgresProjectRepo,
+    PostgresSquadRepo,
+    PostgresTaskRepo,
+    PostgresUserPreferenceRepo,
+)
+from src.ports.repositories import (
+    IOutboxRepo,
+    IProjectRepo,
+    ISquadRepo,
+    ITaskRepo,
+    ITeamRepo,
+    IUserPreferenceRepo,
+)
 from src.ports.unit_of_work import IUnitOfWork
 
 logger = logging.getLogger("dgg_pm.adapters.uow")
@@ -16,9 +31,21 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
         self._session: AsyncSession | None = None
+        self.tasks: ITaskRepo = None  # type: ignore[assignment]
+        self.projects: IProjectRepo = None  # type: ignore[assignment]
+        self.squads: ISquadRepo = None  # type: ignore[assignment]
+        self.teams: ITeamRepo = None  # type: ignore[assignment]
+        self.outbox: IOutboxRepo = None  # type: ignore[assignment]
+        self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
 
     async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
+        self.tasks = PostgresTaskRepo(self._session)
+        self.projects = PostgresProjectRepo(self._session)
+        self.squads = PostgresSquadRepo(self._session)
+        self.teams = self.squads
+        self.outbox = PostgresOutboxRepo(self._session)
+        self.user_prefs = PostgresUserPreferenceRepo(self._session)
         return self
 
     async def __aexit__(

@@ -71,12 +71,15 @@ async def test_auth_service_task_assignee_and_creator(services):
     auth_srv = AuthService(proj_srv, team_srv)
 
     guild_id = 9990002
+    project = await proj_srv.create_project(
+        guild_id=guild_id, name="Creator Assignee Project", prefix="CAP", discord_role_id=888801
+    )
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Creator Assignee Task",
         creator_discord_id=1001,
         assignee_discord_id=1002,
-        project_id=None,
+        project_id=project.id,
     )
 
     creator = _make_mock_member(1001)
@@ -245,7 +248,7 @@ async def test_team_lead_cog_enforcement(services):
         user=ineligible_user,
     )
     interaction_ineligible.followup.send.assert_awaited_once()
-    assert "is not part of team" in interaction_ineligible.followup.send.await_args.args[0]
+    assert "is not part of" in interaction_ineligible.followup.send.await_args.args[0]
 
     # 3. Regular member attempts to designate lead (Permission Denied)
     unauthorized_user = _make_mock_member(5099, role_ids=[777888])

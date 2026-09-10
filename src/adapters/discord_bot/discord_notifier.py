@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import discord
 
 from src.adapters.discord_bot.views.forum_helpers import resolve_forum_tags
+from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
 from src.domain.enums import EventType, NotificationPreference, PriorityLevel, TaskStatus
 from src.domain.models import OutboxEvent, Task
-from src.ports.discord_workspace import ITaskDiscordWorkspace
 from src.ports.notifier import INotificationDispatcher
 
 if TYPE_CHECKING:
@@ -39,9 +39,9 @@ class DiscordNotifier(INotificationDispatcher):
             task_id = UUID(int=0)
         guild_id = int(payload.get("guild_id") or 0)
         try:
-            project_id = UUID(payload["project_id"]) if payload.get("project_id") else None
+            project_id = UUID(str(payload["project_id"])) if payload.get("project_id") else uuid4()
         except (ValueError, TypeError, AttributeError):
-            project_id = None
+            project_id = uuid4()
         short_id = payload.get("short_id", "")
         title = payload.get("title", "")
         status_val = payload.get("new_status") or payload.get("status") or "notStarted"

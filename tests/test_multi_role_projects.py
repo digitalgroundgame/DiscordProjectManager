@@ -5,7 +5,7 @@ import pytest
 
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.views.project_menu import ProjectRoleSelectView
-from src.ports.discord_workspace import ProjectProvisionSpec
+from src.adapters.discord_bot.workspace_protocol import ProjectProvisionSpec
 from src.services.auth_service import AuthService
 
 

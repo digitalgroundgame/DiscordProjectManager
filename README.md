@@ -76,26 +76,30 @@ Detailed guides, command references, and architecture documents are available in
 
 ---
 
-## Discord Slash Commands
+## Discord Slash Commands (`/pm`)
+
+All bot operations are isolated under the unified `/pm` slash command namespace:
 
 | Slash Command | Required Permission | Description |
 | :--- | :--- | :--- |
-| `/project-create` | `Manage Server` | Instantiate a top-level project container and bind channel |
-| `/project-assign` | `Manage Server` | Map a functional team to a project with timeline |
-| `/project-list` | Standard Member | List all active projects in the server |
-| `/project-archive` | `Manage Server` | Archive project and its active tasks |
-| `/project-unarchive`| `Manage Server` | Restore archived project |
-| `/team-create` | `Manage Server` | Define a functional team mapped to a Discord server role |
-| `/team-assign` | `Manage Server` | Assign a member to a team with domain role (`lead` / `member`) |
-| `/team-list` | Standard Member | List all configured server teams |
-| `/task-create` | Standard Member | Create project task with embed card and discussion thread |
-| `/task-standalone`| Standard Member | Create ad-hoc task independent of project containers |
-| `/task-status` | Standard Member | Update execution status (with autocomplete) |
-| `/task-history` | Standard Member | View full chronological audit trail of a task |
-| `/task-list` | Standard Member | Filter and browse active tasks with interactive pagination |
-| `/task-archive` | Standard Member | Soft-delete an individual task |
-| `/task-unarchive` | Standard Member | Restore an archived task |
-| `/help-pm` | Standard Member | Display bot guides and operational documentation |
+| **`/pm menu`** | Standard Member | Open the master interactive Control Hub |
+| **`/pm help`** | Standard Member | Display operational command guide and wiki links |
+| **`/pm settings`** | Standard Member | Configure personal notification delivery (`dm`, `channel`, `both`, `silent`) |
+| **`/pm setup-hub`** | `Manage Server` | Post and pin an interactive Control Center in a Forum or Text Channel |
+| **`/pm tree`** | Standard Member | Render the visual tech tree DAG dependency graph |
+| **`/pm task create`** | Squad Member / Manager | Create a project task, provision thread workspace & action card |
+| **`/pm task status`** | Assignee / Lead / Manager | Update execution status (CAS optimistic concurrency control) |
+| **`/pm task assign`** | Squad Member / Manager | Assign or unassign a member from a task |
+| **`/pm task depend`** | Squad Member / Manager | Link prerequisite dependency (`task` requires `depends_on`) |
+| **`/pm task list`** | Standard Member | Filter and browse active tasks with interactive pagination |
+| **`/pm task history`** | Standard Member | View full chronological audit trail of a task |
+| **`/pm project create`**| `Manage Server` | Instantiate project container, map Squad role, provision forum |
+| **`/pm project list`**  | Standard Member | List all active project containers and bound channels |
+| **`/pm squad create`**  | `Manage Server` | Define a functional squad mapped 1:1 with a Discord role |
+| **`/pm squad lead`**    | `Manage Server` / Lead | Designate or remove a Squad Lead |
+| **`/pm squad list`**    | Standard Member | Display all configured squads, leads, and member rosters |
+
+*For complete parameters, options, and permission breakdowns, see the [Slash Commands Reference](docs/wiki/Slash-Commands-Reference.md).*
 
 ---
 

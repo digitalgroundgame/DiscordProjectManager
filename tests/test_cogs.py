@@ -459,9 +459,11 @@ async def test_thread_workspace_content_leads_with_description(services):
     from src.adapters.discord_bot.views.task_embed import build_thread_workspace_content
     from src.domain.enums import PriorityLevel
 
+    proj_srv = services["project"]
     task_srv = services["task"]
     guild_id = 1000000003
 
+    project = await proj_srv.create_project(guild_id=guild_id, name="Workspace Project", prefix="WP")
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Workspace Clarity",
@@ -469,7 +471,7 @@ async def test_thread_workspace_content_leads_with_description(services):
         assignee_discord_id=2001,
         priority=PriorityLevel.LOW,
         body="Deploy the new API gateway and wire up monitoring dashboards.",
-        project_id=None,
+        project_id=project.id,
     )
 
     content = build_thread_workspace_content(task)

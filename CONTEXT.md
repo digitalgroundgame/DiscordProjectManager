@@ -7,16 +7,24 @@ Discord-native project management platform designed to eliminate context-switchi
 ### Core Entities
 
 **Task**:
-A distinct unit of work with a title, status, priority, optional due date, assignee, watchers, and prerequisite dependencies.
-_Avoid_: Issue, ticket, work item, todo
+A distinct unit of work anchored to a Project container with a title, status, priority, optional due date, assignee, watchers, and prerequisite dependencies.
+_Avoid_: Issue, ticket, work item, todo, standalone task
 
 **Project**:
-A high-level container aggregating related tasks, identified by a unique server prefix (e.g. `INF-1`), bound Discord channel, squad role, and designated project lead.
+A high-level container aggregating related tasks, identified by a unique server prefix (e.g. `INF`), bound Discord channel, mapped Squad roles, and designated project lead.
 _Avoid_: Workspace, board, category, epic
 
 **Squad**:
-A functional team or contributor group mapped 1:1 with a Discord Server Role.
+A functional contributor group mapped 1:1 with a Discord Server Role.
 _Avoid_: Team, group, department, user group
+
+**Squad Lead**:
+A contributor designated in the database to manage a Squad, whose authority is strictly contingent on actively holding the Squad's Discord Server Role.
+_Avoid_: Team lead, manager, supervisor
+
+**Project Lead**:
+A designated member accountable for an entire Project container across all its assigned Squads.
+_Avoid_: Project manager, scrum master
 
 ### Discord Workspaces & Interaction
 
@@ -49,3 +57,7 @@ _Avoid_: Message event, webhook, notification record
 **Tech Tree**:
 A Directed Acyclic Graph (DAG) representing prerequisite dependency relationships between tasks in a project.
 _Avoid_: Dependency graph, gantt chart, blocker list
+
+**Notification Preference**:
+A member-configured delivery setting (`DM`, `CHANNEL`, `BOTH`, or `SILENT`) that governs how task updates and watcher summaries are dispatched.
+_Avoid_: Alert setting, notification channel, delivery mode
