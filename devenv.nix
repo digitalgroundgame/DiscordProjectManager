@@ -85,6 +85,10 @@
       alembic upgrade head
     '';
 
+    db-check.exec = ''
+      alembic check
+    '';
+
     db-revision.exec = ''
       alembic revision --autogenerate "$@"
     '';

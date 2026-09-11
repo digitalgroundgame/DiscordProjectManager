@@ -6,6 +6,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -45,11 +46,14 @@ def get_alembic_config() -> Config:
 
 
 async def run_migrations(max_retries: int = 15, retry_interval: float = 1.0) -> None:
-    """Applies Alembic migrations to head with connection retries and auto-stamp support."""
+    """Applies Alembic migrations to head with connection retries, auto-stamp support, and drift verification."""
     cfg = get_alembic_config()
 
     for attempt in range(1, max_retries + 1):
         try:
+            # Note: Pre-flight table inspection uses the app's shared engine, while Alembic's
+            # env.py creates its own connection pool during command execution. This results in two
+            # connection pools touching the database in quick succession during startup.
             async with engine.connect() as conn:
                 tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
                 has_app_tables = "projects" in tables or "tasks" in tables
@@ -59,15 +63,33 @@ async def run_migrations(max_retries: int = 15, retry_interval: float = 1.0) -> 
                     res = await conn.execute(text("SELECT version_num FROM alembic_version"))
                     has_version_rows = len(res.fetchall()) > 0
 
-            # Safe auto-stamp for existing databases lacking an alembic_version row
+            # Safe auto-stamp for existing unversioned databases lacking an alembic_version row.
+            # Stamping targets the baseline initial revision (e.g. '0001') rather than 'head',
+            # ensuring any subsequent migrations are applied rather than skipped.
             if has_app_tables and not has_version_rows:
-                logger.info("Existing unversioned database schema detected; stamping to migration head...")
-                await asyncio.to_thread(command.stamp, cfg, "head")
-                logger.info("Database successfully stamped to migration head.")
-            else:
-                logger.info("Applying database migrations to 'head'...")
-                await asyncio.to_thread(command.upgrade, cfg, "head")
-                logger.info("Database migrations applied successfully.")
+                script_dir = ScriptDirectory.from_config(cfg)
+                base_revision = script_dir.get_base() or "0001"
+                logger.info(
+                    "Existing unversioned database schema detected; stamping to baseline revision '%s'...",
+                    base_revision,
+                )
+                await asyncio.to_thread(command.stamp, cfg, base_revision)
+                logger.info("Database successfully stamped to baseline revision '%s'.", base_revision)
+
+            logger.info("Applying database migrations to 'head'...")
+            await asyncio.to_thread(command.upgrade, cfg, "head")
+            logger.info("Database migrations applied successfully.")
+
+            # Verification pass: check for schema drift against ORM models
+            try:
+                await asyncio.to_thread(command.check, cfg)
+                logger.info("Database schema verification passed: no drift detected against ORM models.")
+            except Exception as check_err:
+                logger.warning(
+                    "Database schema drift detected between database and ORM models: %s. "
+                    "Run 'alembic check' or generate a reconciliation revision.",
+                    check_err,
+                )
             return
         except Exception as e:
             if attempt == max_retries:

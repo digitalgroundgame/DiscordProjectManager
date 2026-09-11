@@ -58,7 +58,8 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@localhost:5432/dgg_p
 AUTO_RUN_MIGRATIONS=true
 ```
 
-When `AUTO_RUN_MIGRATIONS=true`, starting the application via `devenv shell -- run-app` or `devenv up` automatically checks and applies pending migrations on startup.
+> [!NOTE]
+> `AUTO_RUN_MIGRATIONS` defaults to `false` in code to prevent multi-replica startup concurrency races in production. It is explicitly set to `true` in `devenv.nix` and `.env` for seamless local development. When `true`, starting the application via `devenv shell -- run-app` or `devenv up` automatically checks and applies pending migrations on startup.
 
 ---
 
@@ -192,13 +193,16 @@ In production deployments, you can choose between two operational models:
 ### Running Migrations via Docker
 
 #### Approach 1: Pre-Flight Execution Before Starting App (Recommended)
-Before rolling out updated application containers, run the migration in a standalone one-off container:
+Before rolling out updated application containers, optionally run a schema verification pass and apply migrations in a standalone one-off container:
 
 ```bash
-# Run migrations using the production app container image
+# 1. (Recommended) Run schema drift verification pass against target DB
+docker compose run --rm app alembic check
+
+# 2. Run migrations using the production app container image
 docker compose run --rm app alembic upgrade head
 
-# After migrations succeed, deploy/restart the app service
+# 3. After migrations succeed, deploy/restart the app service
 docker compose up -d --no-deps app
 ```
 
@@ -321,6 +325,7 @@ docker compose logs -f --tail 100 app
 | :--- | :--- | :--- |
 | **Apply all pending migrations** | `devenv shell -- db-migrate` | `docker compose run --rm app alembic upgrade head` |
 | **Generate autodetected migration** | `devenv shell -- db-revision -m "<msg>"` | `alembic revision --autogenerate -m "<msg>"` |
+| **Check for schema drift against ORM** | `devenv shell -- db-check` (or `alembic check`) | `docker compose run --rm app alembic check` |
 | **Check current database revision** | `devenv shell -- alembic current` | `docker compose exec app alembic current` |
 | **Show revision history** | `devenv shell -- alembic history` | `docker compose exec app alembic history` |
 | **Rollback one revision** | `devenv shell -- alembic downgrade -1` | `docker compose exec app alembic downgrade -1` |

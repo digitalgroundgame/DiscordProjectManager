@@ -109,6 +109,11 @@ async def clear_database(guild_id: int | None = None) -> None:
                 )
     else:
         logger.info("🧹 Dropping and re-creating ALL database tables fresh via Alembic...")
+        # Note: On PostgreSQL 15+, `CREATE SCHEMA public` no longer grants CREATE privileges to
+        # PUBLIC by default (CVE-2018-1058 defense). This script assumes the connecting database
+        # user (e.g., 'postgres' in local development and Docker) owns the database and the public
+        # schema with full DDL privileges. If executing in hosted environments with non-owner roles,
+        # ensure proper schema ownership or CREATE permissions are granted.
         async with engine.begin() as conn:
             await conn.execute(text("DROP SCHEMA public CASCADE"))
             await conn.execute(text("CREATE SCHEMA public"))

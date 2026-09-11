@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dgg_pm"
-    AUTO_RUN_MIGRATIONS: bool = True
+    AUTO_RUN_MIGRATIONS: bool = False
 
     # Outbox Worker Configuration
     OUTBOX_POLL_INTERVAL_SECONDS: float = 5.0
