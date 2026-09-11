@@ -121,7 +121,7 @@ Edit `.env`:
 DISCORD_BOT_TOKEN=your_token_here
 DISCORD_CLIENT_ID=your_client_id_here
 DISCORD_GUILD_ID=your_test_guild_id   # Optional: faster command syncing in dev
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dgg_pm
+DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@localhost:5432/dgg_pm
 ```
 
 ### 3. Discord Developer Portal Configuration
@@ -138,12 +138,61 @@ When configuring your application in the [Discord Developer Portal](https://disc
   - `Embed Links`
   - `Read Message History`
 
-### 4. Running with Docker Compose
+### 4. Local Development (Standard Python / uv)
+
+DGG-PM uses [`uv`](https://docs.astral.sh/uv/) for ultra-fast, cross-platform Python package management and `docker compose` for services.
+
 ```bash
-docker-compose up --build
+# 1. Install dependencies & initialize virtual environment
+make install     # or: uv sync --all-extras
+
+# 2. Start PostgreSQL container in the background
+make db-up       # or: docker compose up -d postgres
+
+# 3. Run the test suite (uses in-memory SQLite; does not even require Postgres)
+make test        # or: uv run pytest -v tests/
+
+# 4. Start the application
+make run         # or: uv run python -m src.main
 ```
 
-### 5. Deploying to Coolify
+#### Handy `Makefile` Shortcuts:
+```bash
+make help        # List all available targets and descriptions
+make test        # Run pytest test suite
+make test-cov    # Run tests with coverage report
+make lint        # Check code with ruff
+make format      # Autoformat with ruff
+make check       # Run lint, format check, and tests
+make db-up       # Start Postgres container
+make db-down     # Stop Postgres container
+make db-migrate  # Apply pending Alembic migrations
+make db-check    # Check migration status
+make db-reset    # Wipe tables and re-seed sample data
+make db-shell    # Open interactive psql shell
+```
+
+### 5. NixOS / Nix Flakes Development
+
+If you are developing on **NixOS** or using **Nix**:
+
+```bash
+# Enter the development shell (provides Python 3.13, uv, postgresql client, gnumake, docker, and C libraries)
+nix develop
+
+# Or with direnv (recommended):
+direnv allow
+```
+
+Once inside the Nix shell, all standard `make` and `uv` commands work directly without additional configuration.
+
+### 6. Running with Docker Compose (Full Stack)
+To run both the application and PostgreSQL in containers:
+```bash
+docker compose up -d --build
+```
+
+### 7. Deploying to Coolify
 
 DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io):
 
@@ -168,30 +217,3 @@ DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io):
 4. In Coolify Application Settings, set:
    - **Port**: `8000`
    - **Health Check Path**: `/healthz`
-
-### 6. Running with devenv (Nix)
-With [`devenv`](https://devenv.sh/) installed:
-```bash
-# Enter the devenv developer shell (installs Python 3.13, dependencies via uv, PostgreSQL 16, tools)
-devenv shell
-
-# Start background services (PostgreSQL & app)
-devenv up
-
-# Run helper scripts inside the devenv shell
-run-tests    # Execute pytest test suite
-run-app      # Launch platform
-db-init      # Initialize database schema
-db-clear     # Wipe/truncate PostgreSQL database tables
-db-reset     # Wipe database tables and re-seed test data
-db-shell     # Connect to local PostgreSQL
-format       # Autoformat with ruff
-lint         # Lint check with ruff
-```
-
-### 6. Running Locally (Standard Python)
-```bash
-pip install -e ".[dev]"
-pytest
-python src/main.py
-```

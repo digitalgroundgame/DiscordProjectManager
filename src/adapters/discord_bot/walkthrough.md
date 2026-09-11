@@ -37,14 +37,14 @@
 ### Automated Tests
 - Full test suite passed (92/92 tests passing):
   ```bash
-  devenv shell -- pytest
+  make test
   # 92 passed, 1 warning in 2.55s
   ```
 
 ### Code Formatting & Linting
 - Linter passed with 0 errors:
   ```bash
-  devenv shell -- lint
+  make lint
   # All checks passed!
   ```
 

@@ -41,14 +41,12 @@ DGG-PM uses **Alembic** integrated natively into its Hexagonal Architecture:
 
 ### Environment Setup
 
-Development commands are run inside the Nix-based `devenv` shell:
+Development commands can be run via `make` shortcuts or directly with `uv run`:
 
 ```bash
-# Enter devenv shell
-devenv shell
-
-# Or run commands directly with devenv
-devenv shell -- db-migrate
+# Apply pending migrations
+make db-migrate
+# or: uv run alembic upgrade head
 ```
 
 Local environment variables are managed in `.env`. Ensure your `DATABASE_URL` is set:
@@ -59,7 +57,7 @@ AUTO_RUN_MIGRATIONS=true
 ```
 
 > [!NOTE]
-> `AUTO_RUN_MIGRATIONS` defaults to `false` in code to prevent multi-replica startup concurrency races in production. It is explicitly set to `true` in `devenv.nix` and `.env` for seamless local development. When `true`, starting the application via `devenv shell -- run-app` or `devenv up` automatically checks and applies pending migrations on startup.
+> `AUTO_RUN_MIGRATIONS` defaults to `false` in code to prevent multi-replica startup concurrency races in production. It is set to `true` in `.env` for seamless local development. When `true`, starting the application via `make run` automatically checks and applies pending migrations on startup.
 
 ---
 
@@ -80,11 +78,12 @@ class TaskTable(Base):
 Generate a new migration script using the helper command or raw Alembic:
 
 ```bash
-# Using the devenv helper script (automatically assigns next 4-digit sequential ID, e.g. 0002)
-devenv shell -- db-revision -m "add_estimated_hours_to_tasks"
+# Using the helper command (automatically assigns next 4-digit sequential ID, e.g. 0002)
+make db-revision MSG="add_estimated_hours_to_tasks"
+# or: uv run python scripts/generate_revision.py -m "add_estimated_hours_to_tasks"
 
 # Or using raw alembic directly (requires explicit --rev-id for sequential naming)
-devenv shell -- alembic revision --autogenerate --rev-id "0002" -m "add_estimated_hours_to_tasks"
+uv run alembic revision --autogenerate --rev-id "0002" -m "add_estimated_hours_to_tasks"
 ```
 
 This creates a new file under `src/adapters/db/migrations/versions/0002_add_estimated_hours_to_tasks.py`.
@@ -108,8 +107,8 @@ def downgrade() -> None:
 Ensure the migration script passes Ruff checks:
 
 ```bash
-devenv shell -- format
-devenv shell -- lint
+make format
+make lint
 ```
 
 ---
@@ -119,34 +118,34 @@ devenv shell -- lint
 Apply all pending migrations to bring your local database up to `head`:
 
 ```bash
-devenv shell -- db-migrate
-# or: devenv shell -- alembic upgrade head
+make db-migrate
+# or: uv run alembic upgrade head
 ```
 
 Verify current revision:
 
 ```bash
-devenv shell -- alembic current
+uv run alembic current
 ```
 
 Inspect revision history:
 
 ```bash
-devenv shell -- alembic history --verbose
+uv run alembic history --verbose
 ```
 
 Verify schema alignment and check for unmigrated drift:
 
 ```bash
-devenv shell -- db-check
-# or: devenv shell -- alembic check
+make db-check
+# or: uv run alembic check
 ```
 
 Run the automated test suite (including migration validation tests):
 
 ```bash
-devenv shell -- pytest tests/test_migrations.py
-devenv shell -- run-tests
+uv run pytest tests/test_migrations.py
+make test
 ```
 
 > [!TIP]
@@ -161,13 +160,13 @@ To verify that your downgrade function works cleanly:
 
 ```bash
 # Step back 1 revision
-devenv shell -- alembic downgrade -1
+uv run alembic downgrade -1
 
 # Verify schema
-devenv shell -- alembic current
+uv run alembic current
 
 # Re-apply to head
-devenv shell -- db-migrate
+make db-migrate
 ```
 
 ---
@@ -178,10 +177,10 @@ When developing locally, you can wipe and rebuild the database cleanly:
 
 ```bash
 # Wipe schema and apply all migrations fresh
-devenv shell -- db-clear
+make db-clear
 
 # Wipe schema, apply migrations to head, and seed mock projects/squads/tasks
-devenv shell -- db-reset
+make db-reset
 ```
 
 `clear_db.py` executes `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` and runs Alembic migrations from scratch, guaranteeing a clean state.
@@ -332,14 +331,14 @@ docker compose logs -f --tail 100 app
 
 ## 4. CLI Command Quick Reference
 
-| Action | devenv (Local Dev) | Docker / Production |
+| Action | Local Dev (Makefile / uv) | Docker / Production |
 | :--- | :--- | :--- |
-| **Apply all pending migrations** | `devenv shell -- db-migrate` | `docker compose run --rm app alembic upgrade head` |
-| **Generate autodetected migration** | `devenv shell -- db-revision -m "<msg>"` | `alembic revision --autogenerate -m "<msg>"` |
-| **Check for schema drift against ORM** | `devenv shell -- db-check` (or `alembic check`) | `docker compose run --rm app alembic check` |
-| **Check current database revision** | `devenv shell -- alembic current` | `docker compose exec app alembic current` |
-| **Show revision history** | `devenv shell -- alembic history` | `docker compose exec app alembic history` |
-| **Rollback one revision** | `devenv shell -- alembic downgrade -1` | `docker compose exec app alembic downgrade -1` |
-| **Stamp database to head without running DDL**| `devenv shell -- alembic stamp head` | `docker compose exec app alembic stamp head` |
-| **Wipe & rebuild clean database** | `devenv shell -- db-clear` | *(Restricted to dev/test environments)* |
-| **Wipe, rebuild & re-seed test data** | `devenv shell -- db-reset` | *(Restricted to dev/test environments)* |
+| **Apply all pending migrations** | `make db-migrate` (or `uv run alembic upgrade head`) | `docker compose run --rm app alembic upgrade head` |
+| **Generate autodetected migration** | `make db-revision MSG="<msg>"` | `alembic revision --autogenerate -m "<msg>"` |
+| **Check for schema drift against ORM** | `make db-check` (or `uv run alembic check`) | `docker compose run --rm app alembic check` |
+| **Check current database revision** | `uv run alembic current` | `docker compose exec app alembic current` |
+| **Show revision history** | `uv run alembic history` | `docker compose exec app alembic history` |
+| **Rollback one revision** | `uv run alembic downgrade -1` | `docker compose exec app alembic downgrade -1` |
+| **Stamp database to head without running DDL**| `uv run alembic stamp head` | `docker compose exec app alembic stamp head` |
+| **Wipe & rebuild clean database** | `make db-clear` | *(Restricted to dev/test environments)* |
+| **Wipe, rebuild & re-seed test data** | `make db-reset` | *(Restricted to dev/test environments)* |

@@ -1,33 +1,39 @@
 # Project Instructions & Workspace Rules
 
-## Development Environment (`devenv`)
+## Development Environment
 
-This project uses [`devenv`](https://devenv.sh/) (Nix-based) for managing Python, PostgreSQL, toolchains, and environment variables.
+This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) and Docker Compose, with first-class NixOS support via a lightweight [`flake.nix`](flake.nix) and `direnv`.
 
 ### Rules for Tool & Command Execution
 
-1. **Always use `devenv shell -- <cmd>` for non-interactive commands**:
-   - Do NOT run `pip`, `pytest`, `python`, or `ruff` directly on the host system without devenv.
-   - Execute all project-related commands, test runs, linting, and script invocations using `devenv shell -- <command>`.
+1. **Tool Invocation**:
+   - Prefer using `make <target>` or `uv run <cmd>` for executing tests, linting, formatting, and database operations.
+   - Do NOT use `pip` directly. Dependencies are managed via `pyproject.toml` and `uv.lock`.
 
-2. **Common devenv Commands**:
-   - **Run Test Suite**: `devenv shell -- run-tests` (or `devenv shell -- pytest`)
-   - **Run Application**: `devenv shell -- run-app` (or `devenv shell -- python src/main.py`)
-   - **Linting**: `devenv shell -- lint` (or `devenv shell -- ruff check .`)
-   - **Formatting**: `devenv shell -- format` (or `devenv shell -- ruff format .`)
-   - **Database Initialization**: `devenv shell -- db-init`
-   - **Database Clear/Wipe**: `devenv shell -- db-clear`
-   - **Database Reset & Re-seed**: `devenv shell -- db-reset`
-   - **Database Shell**: `devenv shell -- db-shell`
-   - **Sync Dependencies**: `devenv shell -- sync` (or `devenv shell -- uv sync --all-extras`)
+2. **Common Commands (`Makefile` shortcuts)**:
+   - **Run Test Suite**: `make test` (or `uv run pytest -v tests/`)
+   - **Run Application**: `make run` (or `uv run python -m src.main`)
+   - **Linting**: `make lint` (or `uv run ruff check .`)
+   - **Lint & Fix**: `make lint-fix` (or `uv run ruff check --fix .`)
+   - **Formatting**: `make format` (or `uv run ruff format .`)
+   - **Full Check**: `make check` (runs lint, format-check, and tests)
+   - **Sync Dependencies**: `make sync` (or `uv sync --all-extras`)
+   - **Database Up**: `make db-up` (`docker compose up -d postgres`)
+   - **Database Down**: `make db-down` (`docker compose stop postgres`)
+   - **Database Initialization**: `make db-init`
+   - **Database Migrations**: `make db-migrate` (or `uv run alembic upgrade head`)
+   - **Database Check**: `make db-check` (or `uv run alembic check`)
+   - **Database Revision**: `make db-revision MSG="description"`
+   - **Database Clear/Wipe**: `make db-clear`
+   - **Database Reset & Re-seed**: `make db-reset`
+   - **Database Shell**: `make db-shell`
 
 3. **Background Services**:
-   - PostgreSQL 16 is managed via devenv.
-   - Use `devenv up` to start all declared services and background processes.
+   - PostgreSQL 16 is managed via Docker Compose (`make db-up` / `docker compose up -d postgres`).
+   - Unit and integration tests run against an in-memory SQLite database (`sqlite+aiosqlite:///:memory:`) and do not require PostgreSQL to be running.
 
-4. **Dependency Management**:
-   - Specify new runtime and development dependencies in `pyproject.toml`.
-   - Sync the virtual environment using `devenv shell -- sync`.
+4. **NixOS Support**:
+   - NixOS developers can use `direnv` (`use flake` in `.envrc`) or `nix develop` to automatically populate Python 3.13, `uv`, `psql`, `docker`, and required system libraries in their environment.
 
 5. **Deployment & App Container Rebuild**:
-   - When finished making code changes/updates, always rebuild and restart the application container by running `docker compose up -d --build app`.
+   - When finished making code changes/updates, rebuild and restart the application container by running `make docker-build` (or `docker compose up -d --build app`).
