@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dgg_pm"
     AUTO_RUN_MIGRATIONS: bool = False
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                return "postgresql+asyncpg://" + v[len("postgres://") :]
+            if v.startswith("postgresql://") and not v.startswith("postgresql+"):
+                return "postgresql+asyncpg://" + v[len("postgresql://") :]
+        return v
+
     # Outbox Worker Configuration
     OUTBOX_POLL_INTERVAL_SECONDS: float = 5.0
     OUTBOX_BATCH_SIZE: int = 10

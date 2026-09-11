@@ -143,7 +143,33 @@ When configuring your application in the [Discord Developer Portal](https://disc
 docker-compose up --build
 ```
 
-### 5. Running with devenv (Nix)
+### 5. Deploying to Coolify
+
+DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io):
+
+#### Option A: Docker Compose Stack (Recommended)
+1. In Coolify, create a new resource ➔ **Docker Compose**.
+2. Select this repository or paste [`docker-compose.yml`](docker-compose.yml).
+3. Configure your environment variables in Coolify:
+   - `DISCORD_BOT_TOKEN`: Your Discord bot token
+   - `DISCORD_CLIENT_ID`: Your Discord bot application ID
+   - `DISCORD_GUILD_ID`: *(Optional)* Guild ID for instant slash command registration
+4. Click **Deploy**. Migrations run automatically on startup and the container healthcheck monitors `/healthz`.
+
+#### Option B: Standalone Application + Coolify PostgreSQL
+1. Create a PostgreSQL database service in Coolify.
+2. Create a new **Application** pointing to this repository (Build Pack: **Dockerfile**).
+3. Configure environment variables in the Coolify Application settings:
+   - `DATABASE_URL`: Your Coolify PostgreSQL connection string (standard `postgres://` and `postgresql://` are auto-normalized to asyncpg)
+   - `AUTO_RUN_MIGRATIONS`: `true`
+   - `DISCORD_BOT_TOKEN`: Your Discord bot token
+   - `DISCORD_CLIENT_ID`: Your Discord bot application ID
+   - `DISCORD_GUILD_ID`: *(Optional)*
+4. In Coolify Application Settings, set:
+   - **Port**: `8000`
+   - **Health Check Path**: `/healthz`
+
+### 6. Running with devenv (Nix)
 With [`devenv`](https://devenv.sh/) installed:
 ```bash
 # Enter the devenv developer shell (installs Python 3.13, dependencies via uv, PostgreSQL 16, tools)
