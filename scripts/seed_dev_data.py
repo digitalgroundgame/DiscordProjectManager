@@ -628,7 +628,7 @@ async def clean_guild_data(guild_id: int) -> None:
                 {"gid": guild_id},
             )
             await session.execute(
-                text("DELETE FROM project_teams WHERE project_id IN (SELECT id FROM projects WHERE guild_id = :gid)"),
+                text("DELETE FROM project_squads WHERE project_id IN (SELECT id FROM projects WHERE guild_id = :gid)"),
                 {"gid": guild_id},
             )
             await session.execute(
@@ -636,11 +636,11 @@ async def clean_guild_data(guild_id: int) -> None:
                 {"gid": guild_id},
             )
             await session.execute(
-                text("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE guild_id = :gid)"),
+                text("DELETE FROM squad_members WHERE squad_id IN (SELECT id FROM squads WHERE guild_id = :gid)"),
                 {"gid": guild_id},
             )
             await session.execute(
-                text("DELETE FROM teams WHERE guild_id = :gid"),
+                text("DELETE FROM squads WHERE guild_id = :gid"),
                 {"gid": guild_id},
             )
             await session.execute(

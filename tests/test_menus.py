@@ -26,6 +26,14 @@ from src.adapters.discord_bot.views.project_menu import (
 from src.adapters.discord_bot.views.settings_menu import (
     UserSettingsView,
 )
+from src.adapters.discord_bot.views.squad_menu import (
+    SquadCreateModalWithName,
+    SquadCreateRoleSelectView,
+    SquadMemberAssignView,
+    SquadMenuView,
+    SquadRosterDetailView,
+    build_squad_menu_embed,
+)
 from src.adapters.discord_bot.views.task_menu import (
     TaskCreateModal,
     TaskMenuView,
@@ -33,12 +41,6 @@ from src.adapters.discord_bot.views.task_menu import (
     TaskSelectProjectView,
     build_task_board_embed,
     build_task_menu_embed,
-)
-from src.adapters.discord_bot.views.team_menu import (
-    TeamCreateModalWithName,
-    TeamCreateRoleSelectView,
-    TeamMenuView,
-    build_team_menu_embed,
 )
 from src.domain.enums import PriorityLevel, TaskStatus
 
@@ -285,15 +287,15 @@ async def test_project_menu_and_modal(services):
 
 
 @pytest.mark.asyncio
-async def test_team_menu_and_modal(services):
+async def test_squad_menu_and_modal(services):
     team_srv = services["team"]
     guild_id = 8888888888
 
-    # 1. Test TeamMenuView and embed
-    view = TeamMenuView(team_srv, project_service=services["project"], task_service=services["task"])
-    embed = build_team_menu_embed()
-    assert "Squad & Team Management Hub" in embed.title
-    assert len(view.children) == 4  # Create Team, Assign Member, Team Roster, PM Main Menu
+    # 1. Test SquadMenuView and embed
+    view = SquadMenuView(team_srv, project_service=services["project"], task_service=services["task"])
+    embed = build_squad_menu_embed()
+    assert "Squad Management Hub" in embed.title
+    assert len(view.children) == 4  # Create Squad, Assign Member, Squad Roster, PM Main Menu
 
     # Test clicking PM Main Menu
     main_menu_interaction = MagicMock(spec=discord.Interaction)
@@ -306,8 +308,8 @@ async def test_team_menu_and_modal(services):
     await view._on_hub_clicked(main_menu_interaction)
     main_menu_interaction.response.edit_message.assert_awaited_once()
 
-    # 2. Test TeamCreateRoleSelectView
-    role_view = TeamCreateRoleSelectView(team_srv)
+    # 2. Test SquadCreateRoleSelectView
+    role_view = SquadCreateRoleSelectView(team_srv)
     assert len(role_view.children) == 2  # Role Select + Back Button
 
     mock_role = MagicMock(spec=discord.Role)
@@ -321,8 +323,8 @@ async def test_team_menu_and_modal(services):
     await role_view._on_role_selected(select_interaction)
     select_interaction.response.send_modal.assert_awaited_once()
 
-    # 3. Test TeamCreateModalWithName submission
-    modal = TeamCreateModalWithName(team_service=team_srv, selected_role=mock_role)
+    # 3. Test SquadCreateModalWithName submission
+    modal = SquadCreateModalWithName(squad_service=team_srv, selected_role=mock_role)
     assert modal.name_input.default == "Site Reliability"
     modal.name_input._value = "Site Reliability Engineering"
 
@@ -339,11 +341,9 @@ async def test_team_menu_and_modal(services):
     assert created_team is not None
     assert created_team.discord_role_id == 555666777
 
-    # 4. Test TeamAssignMemberSelectView (Case A: User missing team role)
-    from src.adapters.discord_bot.views.team_menu import TeamAssignMemberSelectView
-
-    assign_view = TeamAssignMemberSelectView(teams=[created_team], team_service=team_srv)
-    assert len(assign_view.children) == 5  # Team, User, Role, Confirm, Back
+    # 4. Test SquadMemberAssignView (Case A: User missing squad role)
+    assign_view = SquadMemberAssignView(teams=[created_team], team_service=team_srv)
+    assert len(assign_view.children) == 5  # Squad, User, Role, Confirm, Cancel
 
     mock_member_no_role = MagicMock(spec=discord.Member)
     mock_member_no_role.id = 3001
@@ -363,9 +363,9 @@ async def test_team_menu_and_modal(services):
     await assign_view.confirm_btn.callback(assign_interaction)
     assign_interaction.response.send_message.assert_awaited_once()
     msg = assign_interaction.response.send_message.call_args[0][0]
-    assert "is not part of team" in msg
+    assert "is not part of squad" in msg
 
-    # Case B: User has team role, select lead role and confirm
+    # Case B: User has squad role, select lead role and confirm
     mock_role = MagicMock(spec=discord.Role)
     mock_role.id = 555666777
     mock_member_with_role = MagicMock(spec=discord.Member)
@@ -381,13 +381,11 @@ async def test_team_menu_and_modal(services):
     await assign_view.confirm_btn.callback(assign_interaction)
     assign_interaction.response.edit_message.assert_awaited_once()
     success_embed = assign_interaction.response.edit_message.call_args[1]["embed"]
-    assert "Designated" in success_embed.description and "Team Lead" in success_embed.description
+    assert "Designated" in success_embed.description and "Squad Lead" in success_embed.description
 
-    # 5. Test TeamRosterDetailView
-    from src.adapters.discord_bot.views.team_menu import TeamRosterDetailView
-
-    roster_view = TeamRosterDetailView(teams=[created_team], team_service=team_srv)
-    assert len(roster_view.children) == 2  # Team Select + Back Button
+    # 5. Test SquadRosterDetailView
+    roster_view = SquadRosterDetailView(teams=[created_team], team_service=team_srv)
+    assert len(roster_view.children) == 2  # Squad Select + Back Button
     roster_view.select._values = [str(created_team.id)]
 
     roster_interaction = MagicMock(spec=discord.Interaction)
@@ -1199,16 +1197,16 @@ async def test_menu_timeouts_and_hub_registration(services):
     await proj_view.on_timeout()
     inter.delete_original_response.assert_awaited_once()
 
-    # 2. TeamMenuView on_timeout
+    # 2. SquadMenuView on_timeout
     inter2 = MagicMock(spec=discord.Interaction)
     inter2.guild_id = guild_id
     inter2.user = MagicMock()
     inter2.user.id = 1234
     inter2.delete_original_response = AsyncMock()
 
-    team_view = TeamMenuView(team_srv, proj_srv, task_srv, initial_interaction=inter2)
-    assert team_view.timeout == 180
-    await team_view.on_timeout()
+    squad_view = SquadMenuView(team_srv, proj_srv, task_srv, initial_interaction=inter2)
+    assert squad_view.timeout == 180
+    await squad_view.on_timeout()
     inter2.delete_original_response.assert_awaited_once()
 
     # 3. TaskMenuView on_timeout

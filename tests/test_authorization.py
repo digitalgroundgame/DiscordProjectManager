@@ -711,70 +711,70 @@ async def test_permission_aware_project_menu_ui(services):
 
 
 @pytest.mark.asyncio
-async def test_permission_aware_team_menu_ui(services):
-    """Test that TeamMenuView dynamic buttons adapt based on manager/lead permissions."""
-    from src.adapters.discord_bot.views.team_menu import TeamMenuView, build_team_menu_embed
+async def test_permission_aware_squad_menu_ui(services):
+    """Test that SquadMenuView dynamic buttons adapt based on manager/lead permissions."""
+    from src.adapters.discord_bot.views.squad_menu import SquadMenuView, build_squad_menu_embed
 
     team_srv = services["team"]
     proj_srv = services["project"]
     task_srv = services["task"]
 
-    # 1. Server Manager (can create teams, can assign members)
-    manager_view = TeamMenuView(
+    # 1. Server Manager (can create squads, can assign members)
+    manager_view = SquadMenuView(
         team_srv,
         proj_srv,
         task_srv,
-        can_create_teams=True,
+        can_create_squads=True,
         can_assign_members=True,
     )
     assert len(manager_view.children) == 4
-    assert manager_view.create_team_btn is not None
+    assert manager_view.create_squad_btn is not None
     assert manager_view.assign_member_btn is not None
-    assert manager_view.list_teams_btn is not None
+    assert manager_view.list_squads_btn is not None
     assert manager_view.hub_btn is not None
 
-    manager_embed = build_team_menu_embed(can_create_teams=True, can_assign_members=True)
-    assert "Create Team" in manager_embed.description
+    manager_embed = build_squad_menu_embed(can_create_squads=True, can_assign_members=True)
+    assert "Create Squad" in manager_embed.description
     assert "Assign Member" in manager_embed.description
-    assert "Team Roster" in manager_embed.description
+    assert "Squad Roster" in manager_embed.description
 
-    # 2. Team Lead (cannot create teams, can assign members)
-    lead_view = TeamMenuView(
+    # 2. Squad Lead (cannot create squads, can assign members)
+    lead_view = SquadMenuView(
         team_srv,
         proj_srv,
         task_srv,
-        can_create_teams=False,
+        can_create_squads=False,
         can_assign_members=True,
     )
     assert len(lead_view.children) == 3
-    assert lead_view.create_team_btn is None
+    assert lead_view.create_squad_btn is None
     assert lead_view.assign_member_btn is not None
-    assert lead_view.list_teams_btn is not None
+    assert lead_view.list_squads_btn is not None
     assert lead_view.hub_btn is not None
 
-    lead_embed = build_team_menu_embed(can_create_teams=False, can_assign_members=True)
-    assert "Create Team" not in lead_embed.description
+    lead_embed = build_squad_menu_embed(can_create_squads=False, can_assign_members=True)
+    assert "Create Squad" not in lead_embed.description
     assert "Assign Member" in lead_embed.description
-    assert "Team Roster" in lead_embed.description
+    assert "Squad Roster" in lead_embed.description
 
-    # 3. Regular Member (cannot create teams, cannot assign members)
-    member_view = TeamMenuView(
+    # 3. Regular Member (cannot create squads, cannot assign members)
+    member_view = SquadMenuView(
         team_srv,
         proj_srv,
         task_srv,
-        can_create_teams=False,
+        can_create_squads=False,
         can_assign_members=False,
     )
     assert len(member_view.children) == 2
-    assert member_view.create_team_btn is None
+    assert member_view.create_squad_btn is None
     assert member_view.assign_member_btn is None
-    assert member_view.list_teams_btn is not None
+    assert member_view.list_squads_btn is not None
     assert member_view.hub_btn is not None
 
-    member_embed = build_team_menu_embed(can_create_teams=False, can_assign_members=False)
-    assert "Create Team" not in member_embed.description
+    member_embed = build_squad_menu_embed(can_create_squads=False, can_assign_members=False)
+    assert "Create Squad" not in member_embed.description
     assert "Assign Member" not in member_embed.description
-    assert "Team Roster" in member_embed.description
+    assert "Squad Roster" in member_embed.description
 
 
 @pytest.mark.asyncio

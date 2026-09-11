@@ -22,6 +22,10 @@ _Avoid_: Team, group, department, user group
 A contributor designated in the database to manage a Squad, whose authority is strictly contingent on actively holding the Squad's Discord Server Role.
 _Avoid_: Team lead, manager, supervisor
 
+**Squad Member**:
+A Discord member verified to hold a Squad's mapped Discord Server Role and enrolled in the Squad roster.
+_Avoid_: Team member, squad user, contributor, worker
+
 **Project Lead**:
 A designated member accountable for an entire Project container across all its assigned Squads.
 _Avoid_: Project manager, scrum master

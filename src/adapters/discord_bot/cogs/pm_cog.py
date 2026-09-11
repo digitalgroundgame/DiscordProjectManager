@@ -57,12 +57,12 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         bot: commands.Bot,
         project_service: ProjectService | None = None,
         team_service: TeamService | None = None,
-        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         auth_service: AuthService | None = None,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
+        squad_service: SquadService | None = None,
     ):
         self.bot = bot
         self.project_service = project_service

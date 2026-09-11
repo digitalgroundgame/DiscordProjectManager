@@ -942,3 +942,47 @@ async def test_task_quick_controls_view_callbacks(services):
     done_interaction.response.edit_message.assert_awaited_once()
     done_embed = done_interaction.response.edit_message.call_args.kwargs["embed"]
     assert "Updated" in done_embed.title
+
+
+@pytest.mark.asyncio
+async def test_pm_menu_command_and_bot_wiring(services):
+    """Verify DggPmBot setup_hook wires TaskService to PmCog and /pm menu runs without error."""
+    from unittest.mock import patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+    from src.services.auth_service import AuthService
+    from src.services.task_service import TaskService
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        team_service=services["team"],
+        task_service=services["task"],
+        user_service=services["user"],
+        squad_service=services.get("squad", services["team"]),
+    )
+
+    with patch.object(bot.tree, "sync", new_callable=AsyncMock):
+        await bot.setup_hook()
+
+    pm_cog = bot.get_cog("PmCog")
+    assert pm_cog is not None
+    assert isinstance(pm_cog.task_service, TaskService)
+    assert isinstance(pm_cog.auth_service, AuthService)
+    assert pm_cog.task_service == services["task"]
+
+    # Now execute /pm menu
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock()
+    interaction.guild.id = 12345
+    interaction.guild.name = "Test Guild"
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.id = 99999
+    interaction.user.guild_permissions = discord.Permissions(administrator=True)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await pm_cog.menu.callback(pm_cog, interaction)
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.call_args.kwargs
+    assert "embed" in kwargs
+    assert "view" in kwargs

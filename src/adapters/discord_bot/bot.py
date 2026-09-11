@@ -74,12 +74,13 @@ class DggPmBot(commands.Bot):
         # Load unified /pm command group cog
         await self.add_cog(
             PmCog(
-                self,
-                self.project_service,
-                self.team_service,
-                self.task_service,
-                self.auth_service,
-                self.user_service,
+                bot=self,
+                project_service=self.project_service,
+                team_service=self.team_service,
+                squad_service=self.squad_service,
+                task_service=self.task_service,
+                auth_service=self.auth_service,
+                user_service=self.user_service,
                 workspace=self.workspace,
                 project_workspace=self.project_workspace,
             )

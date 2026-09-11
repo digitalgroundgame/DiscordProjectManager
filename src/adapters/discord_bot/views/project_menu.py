@@ -1619,6 +1619,7 @@ class ProjectAssignTeamView(discord.ui.View):
         team_service: TeamService,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        team_page: int = 0,
     ):
         super().__init__(timeout=180)
         self.projects = projects
@@ -1627,9 +1628,15 @@ class ProjectAssignTeamView(discord.ui.View):
         self.team_service = team_service
         self.task_service = task_service
         self._initial_interaction = initial_interaction
+        self.team_page = team_page
 
-        self.selected_project_id: UUID = projects[0].id
-        self.selected_team_id: UUID = teams[0].id
+        self.selected_project_id: UUID = projects[0].id if projects else UUID(int=0)
+        self.selected_team_id: UUID = teams[0].id if teams else UUID(int=0)
+
+        self._rebuild_items()
+
+    def _rebuild_items(self) -> None:
+        self.clear_items()
 
         # Row 0: Select Project
         proj_options = [
@@ -1637,13 +1644,13 @@ class ProjectAssignTeamView(discord.ui.View):
                 label=f"{p.name} ({p.prefix})"[:100],
                 value=str(p.id),
                 description=(p.description[:50] if p.description else "Active Project"),
-                default=(i == 0),
+                default=(p.id == self.selected_project_id),
             )
-            for i, p in enumerate(projects[:25])
+            for i, p in enumerate(self.projects[:25])
         ]
         self.proj_select = discord.ui.Select(
             placeholder="Select Project...",
-            options=proj_options,
+            options=proj_options or [discord.SelectOption(label="No Projects", value="none")],
             min_values=1,
             max_values=1,
             row=0,
@@ -1651,19 +1658,33 @@ class ProjectAssignTeamView(discord.ui.View):
         self.proj_select.callback = self._on_project_changed
         self.add_item(self.proj_select)
 
-        # Row 1: Select Team
+        # Row 1: Select Team / Squad (Paged if >25)
+        total_team_pages = max(1, math.ceil(len(self.teams) / 25))
+        if self.team_page >= total_team_pages:
+            self.team_page = max(0, total_team_pages - 1)
+        start_t = self.team_page * 25
+        page_teams = self.teams[start_t : start_t + 25]
+
+        if not any(t.id == self.selected_team_id for t in page_teams) and page_teams:
+            self.selected_team_id = page_teams[0].id
+
         team_options = [
             discord.SelectOption(
                 label=t.name[:100],
                 value=str(t.id),
                 description=f"Discord Role: @{t.discord_role_id}"[:50],
-                default=(i == 0),
+                default=(t.id == self.selected_team_id),
             )
-            for i, t in enumerate(teams[:25])
+            for i, t in enumerate(page_teams)
         ]
+        placeholder = (
+            f"Select Squad / Team (Page {self.team_page + 1}/{total_team_pages})..."
+            if total_team_pages > 1
+            else "Select Team..."
+        )
         self.team_select = discord.ui.Select(
-            placeholder="Select Team...",
-            options=team_options,
+            placeholder=placeholder,
+            options=team_options or [discord.SelectOption(label="No Squads", value="none")],
             min_values=1,
             max_values=1,
             row=1,
@@ -1696,6 +1717,26 @@ class ProjectAssignTeamView(discord.ui.View):
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
 
+        # Row 3: Squad Pagination buttons if total_team_pages > 1
+        if total_team_pages > 1:
+            self.prev_team_btn = discord.ui.Button(
+                label="◀ Prev Squads",
+                style=discord.ButtonStyle.secondary,
+                disabled=(self.team_page <= 0),
+                row=3,
+            )
+            self.prev_team_btn.callback = self._on_prev_team_clicked
+            self.add_item(self.prev_team_btn)
+
+            self.next_team_btn = discord.ui.Button(
+                label="Next Squads ▶",
+                style=discord.ButtonStyle.secondary,
+                disabled=(self.team_page >= total_team_pages - 1),
+                row=3,
+            )
+            self.next_team_btn.callback = self._on_next_team_clicked
+            self.add_item(self.next_team_btn)
+
     async def on_timeout(self) -> None:
         try:
             if (
@@ -1713,16 +1754,31 @@ class ProjectAssignTeamView(discord.ui.View):
     def _get_selected_team(self) -> Team | None:
         return next((t for t in self.teams if t.id == self.selected_team_id), None)
 
+    async def _on_prev_team_clicked(self, interaction: discord.Interaction) -> None:
+        if self.team_page > 0:
+            self.team_page -= 1
+            self._rebuild_items()
+            await interaction.response.edit_message(view=self)
+
+    async def _on_next_team_clicked(self, interaction: discord.Interaction) -> None:
+        total_team_pages = max(1, math.ceil(len(self.teams) / 25))
+        if self.team_page < total_team_pages - 1:
+            self.team_page += 1
+            self._rebuild_items()
+            await interaction.response.edit_message(view=self)
+
     async def _on_project_changed(self, interaction: discord.Interaction) -> None:
-        self.selected_project_id = UUID(self.proj_select.values[0])
-        for opt in self.proj_select.options:
-            opt.default = opt.value == str(self.selected_project_id)
+        if self.proj_select.values and self.proj_select.values[0] != "none":
+            self.selected_project_id = UUID(self.proj_select.values[0])
+            for opt in self.proj_select.options:
+                opt.default = opt.value == str(self.selected_project_id)
         await interaction.response.edit_message(view=self)
 
     async def _on_team_changed(self, interaction: discord.Interaction) -> None:
-        self.selected_team_id = UUID(self.team_select.values[0])
-        for opt in self.team_select.options:
-            opt.default = opt.value == str(self.selected_team_id)
+        if self.team_select.values and self.team_select.values[0] != "none":
+            self.selected_team_id = UUID(self.team_select.values[0])
+            for opt in self.team_select.options:
+                opt.default = opt.value == str(self.selected_team_id)
         await interaction.response.edit_message(view=self)
 
     async def _on_assign_quick_clicked(self, interaction: discord.Interaction) -> None:
@@ -1784,6 +1840,9 @@ class ProjectAssignTeamView(discord.ui.View):
         )
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
+
+
+ProjectAssignSquadView = ProjectAssignTeamView
 
 
 class ProjectRoleSelectView(discord.ui.View):
