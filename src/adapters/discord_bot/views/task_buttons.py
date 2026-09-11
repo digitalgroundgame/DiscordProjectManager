@@ -383,3 +383,17 @@ class TaskActionView(discord.ui.View):
             row=1,
         )
         self.add_item(self.controls_btn)
+
+
+class TaskLinkButtonView(discord.ui.View):
+    """View containing a 1-click link button to open the task in Discord."""
+
+    def __init__(self, jump_url: str):
+        super().__init__(timeout=None)
+        self.add_item(
+            discord.ui.Button(
+                label="Open Task",
+                style=discord.ButtonStyle.link,
+                url=jump_url,
+            )
+        )

@@ -24,15 +24,22 @@ PRIORITY_LABELS = {
 }
 
 
+def resolve_task_jump_url(
+    guild_id: int | None,
+    thread_id: int | None,
+    message_id: int | None = None,
+) -> str | None:
+    """Generates direct Discord message or thread jump URL given IDs."""
+    if not guild_id or not thread_id:
+        return None
+    if message_id:
+        return f"https://discord.com/channels/{guild_id}/{thread_id}/{message_id}"
+    return f"https://discord.com/channels/{guild_id}/{thread_id}"
+
+
 def get_task_jump_url(task: Task) -> str | None:
     """Generates direct Discord message or thread jump URL for a task."""
-    if not task.guild_id:
-        return None
-    if task.discord_thread_id and task.discord_message_id:
-        return f"https://discord.com/channels/{task.guild_id}/{task.discord_thread_id}/{task.discord_message_id}"
-    if task.discord_thread_id:
-        return f"https://discord.com/channels/{task.guild_id}/{task.discord_thread_id}"
-    return None
+    return resolve_task_jump_url(task.guild_id, task.discord_thread_id, task.discord_message_id)
 
 
 def build_task_embed(

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import discord
 
 from src.adapters.discord_bot.views.forum_helpers import resolve_forum_tags
+from src.adapters.discord_bot.views.task_buttons import TaskLinkButtonView
+from src.adapters.discord_bot.views.task_embed import resolve_task_jump_url
 from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
 from src.domain.enums import EventType, NotificationPreference, PriorityLevel, TaskStatus
 from src.domain.models import OutboxEvent, Task
 from src.ports.notifier import INotificationDispatcher
 
 if TYPE_CHECKING:
+    from src.services.task_service import TaskService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.discord_notifier")
@@ -26,10 +29,12 @@ class DiscordNotifier(INotificationDispatcher):
         bot: discord.Client,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
+        task_service: TaskService | None = None,
     ):
         self.bot = bot
         self.user_service = user_service
         self.workspace = workspace
+        self.task_service = task_service or getattr(bot, "task_service", None)
 
     def _reconstruct_task(self, payload: dict) -> Task:
         """Reconstructs a transient Task domain model from outbox payload for workspace synchronization."""
@@ -78,14 +83,22 @@ class DiscordNotifier(INotificationDispatcher):
             logger.debug("Could not fetch user pref for %s: %s", user_id, e)
             return NotificationPreference.DM
 
-    async def _send_dm(self, user_id: int, embed: discord.Embed) -> bool:
+    async def _send_dm(
+        self,
+        user_id: int,
+        embed: discord.Embed,
+        view: discord.ui.View | None = None,
+    ) -> bool:
         """Helper to send a Direct Message to a Discord user."""
         try:
             if embed and not (embed.footer and embed.footer.text):
                 embed.set_footer(text=NOTIFICATION_FOOTER)
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             if user:
-                await user.send(embed=embed)
+                send_kwargs: dict[str, Any] = {"embed": embed}
+                if view is not None:
+                    send_kwargs["view"] = view
+                await user.send(**send_kwargs)
                 return True
         except discord.Forbidden:
             logger.warning("Cannot send DM to user %s (DMs closed or user blocked bot).", user_id)
@@ -101,6 +114,7 @@ class DiscordNotifier(INotificationDispatcher):
         embed: discord.Embed,
         thread: discord.Thread | None = None,
         mention_text: str | None = None,
+        view: discord.ui.View | None = None,
     ) -> None:
         if embed and not (embed.footer and embed.footer.text):
             embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -111,7 +125,7 @@ class DiscordNotifier(INotificationDispatcher):
 
         dm_success = False
         if pref in (NotificationPreference.DM, NotificationPreference.BOTH):
-            dm_success = await self._send_dm(user_id, embed)
+            dm_success = await self._send_dm(user_id, embed, view=view)
 
         # If user wants channel mentions, OR if DM failed (e.g. DMs closed) and thread exists
         if pref in (NotificationPreference.CHANNEL, NotificationPreference.BOTH) or (
@@ -120,7 +134,10 @@ class DiscordNotifier(INotificationDispatcher):
             if thread:
                 try:
                     text = mention_text or f"🔔 <@{user_id}>"
-                    await thread.send(content=text, embed=embed)
+                    send_kwargs: dict[str, Any] = {"content": text, "embed": embed}
+                    if view is not None:
+                        send_kwargs["view"] = view
+                    await thread.send(**send_kwargs)
                 except Exception as e:
                     logger.warning("Failed to send in-thread notification to %s: %s", user_id, e)
 
@@ -146,9 +163,37 @@ class DiscordNotifier(INotificationDispatcher):
 
         guild_id = payload.get("guild_id")
         thread_id = payload.get("discord_thread_id")
+        message_id = payload.get("discord_message_id")
         reminder_type = payload.get("reminder_type", "due")
         short_id = payload.get("short_id", "")
         title = payload.get("title", "")
+
+        # Query task_service if location IDs were omitted during initial scheduling
+        if not thread_id and self.task_service:
+            try:
+                task = None
+                task_id_raw = payload.get("task_id")
+                if task_id_raw:
+                    try:
+                        task_uuid = UUID(str(task_id_raw))
+                        task = await self.task_service.get_by_id(task_uuid)
+                    except (ValueError, TypeError):
+                        task = None
+
+                if not task and guild_id and short_id:
+                    task = await self.task_service.get_by_short_id(guild_id, short_id)
+
+                if task:
+                    if not guild_id and task.guild_id:
+                        guild_id = task.guild_id
+                    if not thread_id and task.discord_thread_id:
+                        thread_id = task.discord_thread_id
+                    if not message_id and task.discord_message_id:
+                        message_id = task.discord_message_id
+            except Exception as e:
+                logger.debug("Could not resolve task location from task_service for reminder: %s", e)
+
+        jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
 
         reminder_labels = {
             "24h": "due in 24 hours",
@@ -157,9 +202,14 @@ class DiscordNotifier(INotificationDispatcher):
         }
         label = reminder_labels.get(reminder_type, "approaching deadline")
 
+        desc = f"Your assigned task **[{short_id}] {title}** is **{label}**."
+        if jump_url:
+            desc += f"\n\n🔗 **Task Location:** [Open Task]({jump_url})"
+
         embed = discord.Embed(
             title=f"Task Deadline Reminder: [{short_id}]",
-            description=f"Your assigned task **[{short_id}] {title}** is **{label}**.",
+            url=jump_url,
+            description=desc,
             color=discord.Color.red() if reminder_type == "due" else discord.Color.gold(),
         )
         embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -176,12 +226,15 @@ class DiscordNotifier(INotificationDispatcher):
             except Exception:
                 pass
 
+        view = TaskLinkButtonView(jump_url) if jump_url else None
+
         await self._notify_user(
             guild_id=guild_id,
             user_id=assignee_id,
             embed=embed,
             thread=thread,
             mention_text=f"<@{assignee_id}> **Task Deadline Reminder:** [{short_id}] {title} is **{label}**!",
+            view=view,
         )
 
     async def _handle_status_changed(self, payload: dict) -> None:

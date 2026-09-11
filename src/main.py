@@ -67,7 +67,12 @@ async def run_app() -> None:
         squad_service=squad_service,
         user_service=user_service,
     )
-    notifier = DiscordNotifier(bot, user_service=user_service, workspace=bot.workspace)
+    notifier = DiscordNotifier(
+        bot,
+        user_service=user_service,
+        workspace=bot.workspace,
+        task_service=task_service,
+    )
 
     # 4. Wire Outbox Worker
     worker = OutboxWorker(

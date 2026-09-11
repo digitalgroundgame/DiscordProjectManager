@@ -533,3 +533,309 @@ async def test_discord_notifier_footers_and_creation_watcher_notifications(servi
     note_embed = dmd_users[5001].send.call_args.kwargs.get("embed")
     assert note_embed is not None
     assert note_embed.footer.text == NOTIFICATION_FOOTER
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_reminders_includes_discord_location_ids(services):
+    """Verify OutboxService.schedule_task_reminders includes discord_thread_id and discord_message_id in payload."""
+    from src.domain.models import Task
+
+    outbox_srv = services["outbox"]
+    now = datetime.now(UTC)
+    task = Task(
+        guild_id=123456,
+        short_id="TASK-42",
+        title="Deploy to Prod",
+        creator_discord_id=100,
+        assignee_discord_id=200,
+        due_at=now + timedelta(hours=48),
+        discord_thread_id=987654321,
+        discord_message_id=123456789,
+    )
+    events = await outbox_srv.schedule_task_reminders(task)
+    assert len(events) == 3
+    for evt in events:
+        assert evt.payload["discord_thread_id"] == 987654321
+        assert evt.payload["discord_message_id"] == 123456789
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_resolves_jump_url_and_view_from_payload(services):
+    """Verify TASK_DUE_REMINDER event includes jump URL in embed title/body and attaches Open Task link button."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    bot = MagicMock()
+    mock_user = MagicMock(spec=discord.User)
+    mock_user.send = AsyncMock()
+    bot.get_user = MagicMock(return_value=mock_user)
+    bot.fetch_user = AsyncMock(return_value=mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="rem_payload_loc",
+        payload={
+            "task_id": "test-task-1",
+            "short_id": "TASK-1",
+            "title": "Fix Critical Bug",
+            "guild_id": guild_id,
+            "assignee_discord_id": 5001,
+            "discord_thread_id": 111222,
+            "discord_message_id": 333444,
+            "reminder_type": "due",
+            "due_at": "2026-09-01T20:00:00Z",
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    assert mock_user.send.await_count == 1
+    call_kwargs = mock_user.send.call_args.kwargs
+    embed = call_kwargs["embed"]
+    view = call_kwargs.get("view")
+
+    expected_jump_url = f"https://discord.com/channels/{guild_id}/111222/333444"
+    assert embed.url == expected_jump_url
+    assert expected_jump_url in embed.description
+
+    assert view is not None
+    assert isinstance(view, discord.ui.View)
+    buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
+    assert len(buttons) == 1
+    assert buttons[0].style == discord.ButtonStyle.link
+    assert buttons[0].label == "Open Task"
+    assert buttons[0].url == expected_jump_url
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_resolves_location_from_task_service_when_omitted(services):
+    """Verify TASK_DUE_REMINDER queries task_service when location IDs are omitted from payload."""
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent, Task
+
+    user_srv = services["user"]
+    task_srv = services["task"]
+    guild_id = 999111
+
+    task_id = uuid4()
+    mock_task = Task(
+        id=task_id,
+        guild_id=guild_id,
+        short_id="TASK-99",
+        title="Async Worker Optimization",
+        creator_discord_id=100,
+        assignee_discord_id=5001,
+        discord_thread_id=555666,
+        discord_message_id=777888,
+    )
+    task_srv.get_by_id = AsyncMock(return_value=mock_task)
+
+    bot = MagicMock()
+    mock_user = MagicMock(spec=discord.User)
+    mock_user.send = AsyncMock()
+    bot.get_user = MagicMock(return_value=mock_user)
+    bot.fetch_user = AsyncMock(return_value=mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv, task_service=task_srv)
+
+    # Event payload has NO discord_thread_id and NO discord_message_id
+    evt = OutboxEvent(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="rem_lookup_loc",
+        payload={
+            "task_id": str(task_id),
+            "short_id": "TASK-99",
+            "title": "Async Worker Optimization",
+            "guild_id": guild_id,
+            "assignee_discord_id": 5001,
+            "reminder_type": "1h",
+            "due_at": "2026-09-01T20:00:00Z",
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    task_srv.get_by_id.assert_awaited_once_with(task_id)
+    assert mock_user.send.await_count == 1
+    call_kwargs = mock_user.send.call_args.kwargs
+    embed = call_kwargs["embed"]
+    view = call_kwargs.get("view")
+
+    expected_jump_url = f"https://discord.com/channels/{guild_id}/555666/777888"
+    assert embed.url == expected_jump_url
+    assert expected_jump_url in embed.description
+
+    assert view is not None
+    button = view.children[0]
+    assert button.url == expected_jump_url
+    assert button.label == "Open Task"
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_resolves_via_short_id_fallback(services):
+    """Verify TASK_DUE_REMINDER falls back to get_by_short_id when task_id lookup fails."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent, Task
+
+    user_srv = services["user"]
+    task_srv = services["task"]
+    guild_id = 999111
+
+    mock_task = Task(
+        guild_id=guild_id,
+        short_id="TASK-77",
+        title="Fallback Task",
+        creator_discord_id=100,
+        assignee_discord_id=5001,
+        discord_thread_id=333222,
+        discord_message_id=444333,
+    )
+    task_srv.get_by_id = AsyncMock(return_value=None)
+    task_srv.get_by_short_id = AsyncMock(return_value=mock_task)
+
+    bot = MagicMock()
+    mock_user = MagicMock(spec=discord.User)
+    mock_user.send = AsyncMock()
+    bot.get_user = MagicMock(return_value=mock_user)
+    bot.fetch_user = AsyncMock(return_value=mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv, task_service=task_srv)
+
+    evt = OutboxEvent(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="rem_short_id_fallback",
+        payload={
+            "task_id": "non-uuid-id",
+            "short_id": "TASK-77",
+            "title": "Fallback Task",
+            "guild_id": guild_id,
+            "assignee_discord_id": 5001,
+            "reminder_type": "due",
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    task_srv.get_by_short_id.assert_awaited_once_with(guild_id, "TASK-77")
+    call_kwargs = mock_user.send.call_args.kwargs
+    assert call_kwargs["embed"].url == f"https://discord.com/channels/{guild_id}/333222/444333"
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_thread_only_url_when_no_message_id(services):
+    """Verify TASK_DUE_REMINDER falls back to thread jump URL when message_id is absent.
+
+    Also verifies redundant DB queries are avoided when thread_id is already known.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    task_srv = services["task"]
+    task_srv.get_by_id = AsyncMock()
+    guild_id = 999111
+    bot = MagicMock()
+    mock_user = MagicMock(spec=discord.User)
+    mock_user.send = AsyncMock()
+    bot.get_user = MagicMock(return_value=mock_user)
+    bot.fetch_user = AsyncMock(return_value=mock_user)
+
+    # Wire task_service as in production
+    notifier = DiscordNotifier(bot, user_service=user_srv, task_service=task_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="rem_thread_only_loc",
+        payload={
+            "task_id": "test-task-thread-only",
+            "short_id": "TASK-2",
+            "title": "Fix Docs",
+            "guild_id": guild_id,
+            "assignee_discord_id": 5001,
+            "discord_thread_id": 111222,
+            "reminder_type": "24h",
+            "due_at": "2026-09-01T20:00:00Z",
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    # When discord_thread_id is already present in payload, no DB query needed
+    task_srv.get_by_id.assert_not_called()
+
+    call_kwargs = mock_user.send.call_args.kwargs
+    embed = call_kwargs["embed"]
+    view = call_kwargs.get("view")
+
+    expected_jump_url = f"https://discord.com/channels/{guild_id}/111222"
+    assert embed.url == expected_jump_url
+    assert expected_jump_url in embed.description
+
+    assert view is not None
+    assert view.children[0].url == expected_jump_url
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_channel_preference_receives_link_button_view(services):
+    """Verify in-thread reminder receives embed with jump URL and Open Task link button view."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType, NotificationPreference
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    assignee_id = 7001
+    await user_srv.set_preference(guild_id, assignee_id, NotificationPreference.CHANNEL)
+
+    bot = MagicMock()
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.send = AsyncMock()
+    bot.get_channel = MagicMock(return_value=mock_thread)
+    bot.fetch_channel = AsyncMock(return_value=mock_thread)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="rem_chan_pref",
+        payload={
+            "task_id": "test-task-chan",
+            "short_id": "TASK-3",
+            "title": "Channel Reminder",
+            "guild_id": guild_id,
+            "assignee_discord_id": assignee_id,
+            "discord_thread_id": 888111,
+            "discord_message_id": 888222,
+            "reminder_type": "due",
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    assert mock_thread.send.await_count == 1
+    call_kwargs = mock_thread.send.call_args.kwargs
+    expected_url = f"https://discord.com/channels/{guild_id}/888111/888222"
+    assert call_kwargs["embed"].url == expected_url
+    assert call_kwargs.get("view") is not None
+    assert call_kwargs["view"].children[0].url == expected_url

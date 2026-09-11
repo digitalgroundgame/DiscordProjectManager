@@ -46,22 +46,24 @@ class OutboxService:
         due_utc = task.due_at.astimezone(UTC)
         scheduled_events: list[OutboxEvent] = []
 
+        base_payload = {
+            "task_id": str(task.id),
+            "short_id": task.short_id,
+            "title": task.title,
+            "guild_id": task.guild_id,
+            "assignee_discord_id": task.assignee_discord_id,
+            "discord_thread_id": task.discord_thread_id,
+            "discord_message_id": task.discord_message_id,
+            "due_at": due_utc.isoformat(),
+        }
+
         # T-24h reminder
         t_24h = due_utc - timedelta(hours=24)
         if t_24h > now:
             evt = await self.enqueue_event(
                 event_type=EventType.TASK_DUE_REMINDER,
                 idempotency_key=f"task_due:{task.id}:24h",
-                payload={
-                    "task_id": str(task.id),
-                    "short_id": task.short_id,
-                    "title": task.title,
-                    "guild_id": task.guild_id,
-                    "assignee_discord_id": task.assignee_discord_id,
-                    "discord_thread_id": task.discord_thread_id,
-                    "reminder_type": "24h",
-                    "due_at": due_utc.isoformat(),
-                },
+                payload={**base_payload, "reminder_type": "24h"},
                 scheduled_for=t_24h,
                 outbox_repo=outbox_repo,
                 session=session,
@@ -74,16 +76,7 @@ class OutboxService:
             evt = await self.enqueue_event(
                 event_type=EventType.TASK_DUE_REMINDER,
                 idempotency_key=f"task_due:{task.id}:1h",
-                payload={
-                    "task_id": str(task.id),
-                    "short_id": task.short_id,
-                    "title": task.title,
-                    "guild_id": task.guild_id,
-                    "assignee_discord_id": task.assignee_discord_id,
-                    "discord_thread_id": task.discord_thread_id,
-                    "reminder_type": "1h",
-                    "due_at": due_utc.isoformat(),
-                },
+                payload={**base_payload, "reminder_type": "1h"},
                 scheduled_for=t_1h,
                 outbox_repo=outbox_repo,
                 session=session,
@@ -95,16 +88,7 @@ class OutboxService:
             evt = await self.enqueue_event(
                 event_type=EventType.TASK_DUE_REMINDER,
                 idempotency_key=f"task_due:{task.id}:due",
-                payload={
-                    "task_id": str(task.id),
-                    "short_id": task.short_id,
-                    "title": task.title,
-                    "guild_id": task.guild_id,
-                    "assignee_discord_id": task.assignee_discord_id,
-                    "discord_thread_id": task.discord_thread_id,
-                    "reminder_type": "due",
-                    "due_at": due_utc.isoformat(),
-                },
+                payload={**base_payload, "reminder_type": "due"},
                 scheduled_for=due_utc,
                 outbox_repo=outbox_repo,
                 session=session,
