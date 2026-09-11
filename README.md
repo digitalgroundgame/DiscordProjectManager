@@ -124,10 +124,19 @@ DISCORD_GUILD_ID=your_test_guild_id   # Optional: faster command syncing in dev
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dgg_pm
 ```
 
-### 3. Required Discord Bot Permissions & Intents
-When inviting the bot to your Discord server, ensure the following permissions are granted:
-- **Bot Permissions:** `Manage Channels` (for auto-tagging Forum channels), `Manage Threads`, `View Channels`, `Send Messages`, `Send Messages in Threads`, `Create Public Threads`, `Manage Messages`, `Embed Links`, `Read Message History`.
-- **Privileged Gateway Intents:** `Guilds`, `GuildMembers`. *(Note: `MessageContent` is explicitly **NOT** required).*
+### 3. Discord Developer Portal Configuration
+When configuring your application in the [Discord Developer Portal](https://discord.com/developers/applications) and inviting the bot:
+- **Privileged Gateway Intents**: Ensure **Server Members Intent** (`GuildMembers`) is enabled under the **Bot** tab. *(Note: `Message Content` is explicitly **NOT** required).*
+- **Bot Permissions**: Verify the bot invite URL contains the following permissions:
+  - `Manage Channels` (for auto-tagging Forum channels)
+  - `Manage Threads`
+  - `View Channels`
+  - `Send Messages`
+  - `Send Messages in Threads`
+  - `Create Public Threads`
+  - `Manage Messages`
+  - `Embed Links`
+  - `Read Message History`
 
 ### 4. Running with Docker Compose
 ```bash

@@ -26,6 +26,27 @@ flowchart TD
 
 ---
 
+## ⚙️ Prerequisites & Discord Developer Portal Setup
+
+Before creating projects and running commands in your server, configure your bot application and invite it to your Discord server:
+
+1. **Privileged Gateway Intents**:
+   - Ensure **Server Members Intent** (`GuildMembers`) is enabled in the [Discord Developer Portal](https://discord.com/developers/applications) under **Bot** ➔ **Privileged Gateway Intents** (required for squad roster synchronization and self-healing lead checks).
+   - *(Note: `Message Content` intent is explicitly **NOT** required).*
+2. **Bot Permissions**:
+   - Verify the bot invite URL contains the following permissions (under OAuth2 URL Generator with `bot` and `applications.commands` scopes):
+     - `Manage Channels` (for auto-tagging Forum channels)
+     - `Manage Threads`
+     - `View Channels`
+     - `Send Messages`
+     - `Send Messages in Threads`
+     - `Create Public Threads`
+     - `Manage Messages`
+     - `Embed Links`
+     - `Read Message History`
+
+---
+
 ## 🛠️ Step-by-Step Setup (Admins & Leads)
 
 ### 1. Create a Project & Map Discord Role (1 Step)

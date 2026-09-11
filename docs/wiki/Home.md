@@ -9,6 +9,7 @@ Welcome to the **DGG-PM** GitHub Wiki!
 ## 🧭 Wiki Navigation
 
 1. **[Workflow & Quickstart Guide](Workflow-Guide.md)**
+   - Discord Developer Portal configuration & bot permissions.
    - Initial server setup (Teams, Projects, Forums).
    - Zero-command workflows with Pinned Control Hubs.
    - Creating, assigning, and executing tasks.
