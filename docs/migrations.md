@@ -30,7 +30,7 @@ DGG-PM uses **Alembic** integrated natively into its Hexagonal Architecture:
 - **Configuration File**: [`alembic.ini`](file:///home/espdesign/git/dgg-pm/alembic.ini) at repository root.
 - **Migration Directory**: [`src/adapters/db/migrations/`](file:///home/espdesign/git/dgg-pm/src/adapters/db/migrations/)
   - `env.py`: Asynchronous migration environment utilizing SQLAlchemy's async engine over `asyncpg`.
-  - `script.py.mako`: Revision template matching modern Python 3.12 typing standards.
+  - `script.py.mako`: Revision template matching modern Python 3.13 typing standards.
   - `versions/`: Sequential migration files (e.g., `0001_initial_schema.py`).
 - **Database Engine**: Direct reuse of [`DATABASE_URL`](file:///home/espdesign/git/dgg-pm/src/config.py#L23) (`postgresql+asyncpg://...`). No secondary synchronous DB drivers (`psycopg2`) are needed.
 - **Metadata Target**: [`Base.metadata`](file:///home/espdesign/git/dgg-pm/src/adapters/db/tables.py#L20) (`src.adapters.db.tables`).

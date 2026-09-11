@@ -93,7 +93,7 @@ class TaskService:
         self.uow = uow
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncGenerator[IUnitOfWork, None]:
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
         """Manages an atomic transaction scope via UnitOfWork if configured, or fallback if omitted."""
         if self.uow is not None:
             async with self.uow as active_uow:

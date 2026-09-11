@@ -65,7 +65,7 @@ class BasePostgresRepo:
         return session is None and self._session is None
 
     @asynccontextmanager
-    async def _get_session(self, session: AsyncSession | None = None) -> AsyncGenerator[AsyncSession, None]:
+    async def _get_session(self, session: AsyncSession | None = None) -> AsyncGenerator[AsyncSession]:
         if session is not None:
             yield session
         elif self._session is not None:

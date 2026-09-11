@@ -1,6 +1,6 @@
 # dgg-pm: Discord-Native Task Management Platform
 
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/architecture-hexagonal-green.svg)](#architecture)
 [![Schema: RFC 5545 & MS Graph](https://img.shields.io/badge/schema-RFC%205545%20%2F%20MS%20Graph-orange.svg)](#data-standardization)
 
@@ -107,7 +107,7 @@ All bot operations are isolated under the unified `/pm` slash command namespace:
 ## Quickstart & Setup
 
 ### 1. Prerequisites
-- Python 3.12+
+- Python 3.13+
 - PostgreSQL 16+ (or Docker)
 - Discord Bot Application Token ([Discord Developer Portal](https://discord.com/developers/applications))
 
@@ -137,7 +137,7 @@ docker-compose up --build
 ### 5. Running with devenv (Nix)
 With [`devenv`](https://devenv.sh/) installed:
 ```bash
-# Enter the devenv developer shell (installs Python 3.12, dependencies via uv, PostgreSQL 16, tools)
+# Enter the devenv developer shell (installs Python 3.13, dependencies via uv, PostgreSQL 16, tools)
 devenv shell
 
 # Start background services (PostgreSQL & app)

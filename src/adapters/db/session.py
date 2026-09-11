@@ -102,7 +102,7 @@ async def close_db() -> None:
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_session() -> AsyncGenerator[AsyncSession]:
     """Context manager providing an isolated async database session."""
     async with async_session_factory() as session:
         try:

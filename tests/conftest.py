@@ -37,7 +37,7 @@ def event_loop():
 
 
 @pytest_asyncio.fixture(scope="function")
-async def async_engine() -> AsyncGenerator[AsyncEngine, None]:
+async def async_engine() -> AsyncGenerator[AsyncEngine]:
     engine = create_async_engine(TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -48,7 +48,7 @@ async def async_engine() -> AsyncGenerator[AsyncEngine, None]:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
     session_factory = async_sessionmaker(
         bind=async_engine,
         class_=AsyncSession,

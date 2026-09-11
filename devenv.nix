@@ -1,4 +1,10 @@
-{ pkgs, lib, config, inputs, ... }:
+{
+  pkgs,
+  lib,
+  config,
+  inputs,
+  ...
+}:
 
 {
   # Default environment variables for local development
@@ -22,7 +28,7 @@
   # Python language configuration
   languages.python = {
     enable = true;
-    package = pkgs.python312;
+    package = pkgs.python313;
     venv.enable = true;
     uv = {
       enable = true;
