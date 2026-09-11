@@ -105,3 +105,38 @@ async def test_run_migrations_logs_warning_on_schema_drift(caplog):
             await run_migrations(max_retries=1)
 
         assert any("Database schema drift detected" in record.message for record in caplog.records)
+
+
+def test_sequential_revision_id_generation(tmp_path):
+    """Validates that get_next_revision_id calculates the next 4-digit sequential integer."""
+    from scripts.generate_revision import get_next_revision_id
+
+    # Empty directory starts at 0001
+    assert get_next_revision_id(tmp_path) == "0001"
+
+    # With 0001_initial_schema.py, next is 0002
+    (tmp_path / "0001_initial_schema.py").write_text("")
+    assert get_next_revision_id(tmp_path) == "0002"
+
+    # With 0002_something.py, next is 0003
+    (tmp_path / "0002_something.py").write_text("")
+    assert get_next_revision_id(tmp_path) == "0003"
+
+
+def test_build_alembic_command_injects_rev_id(tmp_path):
+    """Validates that build_alembic_command auto-injects --rev-id when omitted."""
+    from scripts.generate_revision import build_alembic_command
+
+    (tmp_path / "0001_initial_schema.py").write_text("")
+
+    # Auto-injects --rev-id 0002 when omitted
+    cmd = build_alembic_command(["-m", "add_something"], tmp_path)
+    assert cmd == ["alembic", "revision", "--autogenerate", "--rev-id", "0002", "-m", "add_something"]
+
+    # Respects explicit --rev-id
+    cmd_custom = build_alembic_command(["--rev-id", "custom_123", "-m", "add_something"], tmp_path)
+    assert cmd_custom == ["alembic", "revision", "--autogenerate", "--rev-id", "custom_123", "-m", "add_something"]
+
+    # Handles --manual without --autogenerate
+    cmd_manual = build_alembic_command(["--manual", "-m", "manual_data"], tmp_path)
+    assert cmd_manual == ["alembic", "revision", "--rev-id", "0002", "-m", "manual_data"]

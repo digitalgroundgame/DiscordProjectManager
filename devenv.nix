@@ -90,7 +90,7 @@
     '';
 
     db-revision.exec = ''
-      alembic revision --autogenerate "$@"
+      python scripts/generate_revision.py "$@"
     '';
 
     db-clear.exec = ''
