@@ -45,7 +45,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run Pytest
-        run: uv run pytest -v
+        run: uv run pytest -n auto
 
   migrations:
     name: Migrations & Schema Drift Check

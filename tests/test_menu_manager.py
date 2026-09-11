@@ -79,8 +79,8 @@ async def test_schedule_toast_dismissal():
     inter.delete_original_response = AsyncMock()
 
     # Schedule with tiny delay for fast test
-    manager.schedule_toast_dismissal(inter, delay=0.05)
+    manager.schedule_toast_dismissal(inter, delay=0.01)
     inter.delete_original_response.assert_not_awaited()
 
-    await asyncio.sleep(0.08)
+    await asyncio.sleep(0.02)
     inter.delete_original_response.assert_awaited_once()

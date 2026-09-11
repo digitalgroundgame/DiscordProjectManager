@@ -209,9 +209,12 @@ async def test_outbox_worker_start_reclaims_and_dispatches_stranded_events(servi
     # Simulate a process crash: fetch marks the event PROCESSING, then "crashes" before dispatch.
     await outbox_repo.fetch_pending_batch(limit=10)
 
-    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=mock_notifier, poll_interval=0.05)
+    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=mock_notifier, poll_interval=0.005)
     task = asyncio.create_task(worker.start())
-    await asyncio.sleep(0.2)
+    for _ in range(50):
+        if mock_notifier.dispatched:
+            break
+        await asyncio.sleep(0.002)
     worker.stop()
     await task
 

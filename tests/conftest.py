@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -36,15 +37,21 @@ def event_loop():
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture(scope="session")
 async def async_engine() -> AsyncGenerator[AsyncEngine]:
     engine = create_async_engine(TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def _cleanup_db(async_engine: AsyncEngine):
+    yield
+    async with async_engine.begin() as conn:
+        for tbl in reversed(Base.metadata.sorted_tables):
+            await conn.execute(delete(tbl))
 
 
 @pytest_asyncio.fixture(scope="function")

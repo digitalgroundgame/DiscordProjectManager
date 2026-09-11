@@ -35,11 +35,11 @@ dev: run ## Alias for run
 
 .PHONY: test
 test: ## Run the pytest test suite (in-memory SQLite, fast)
-	$(UV) run --all-extras pytest -v tests/
+	$(UV) run --all-extras pytest -n 4 tests/
 
 .PHONY: test-cov
 test-cov: ## Run test suite with coverage report
-	$(UV) run --all-extras pytest --cov=src --cov-report=term-missing tests/
+	$(UV) run --all-extras pytest -n 4 --cov=src --cov-report=term-missing tests/
 
 .PHONY: lint
 lint: ## Run ruff linter
