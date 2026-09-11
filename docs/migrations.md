@@ -80,11 +80,11 @@ class TaskTable(Base):
 Generate a new migration script using the helper command or raw Alembic:
 
 ```bash
-# Using the devenv helper script
+# Using the devenv helper script (automatically assigns next 4-digit sequential ID, e.g. 0002)
 devenv shell -- db-revision -m "add_estimated_hours_to_tasks"
 
-# Or using alembic directly
-devenv shell -- alembic revision --autogenerate -m "add_estimated_hours_to_tasks"
+# Or using raw alembic directly (requires explicit --rev-id for sequential naming)
+devenv shell -- alembic revision --autogenerate --rev-id "0002" -m "add_estimated_hours_to_tasks"
 ```
 
 This creates a new file under `src/adapters/db/migrations/versions/0002_add_estimated_hours_to_tasks.py`.
@@ -135,12 +135,23 @@ Inspect revision history:
 devenv shell -- alembic history --verbose
 ```
 
+Verify schema alignment and check for unmigrated drift:
+
+```bash
+devenv shell -- db-check
+# or: devenv shell -- alembic check
+```
+
 Run the automated test suite (including migration validation tests):
 
 ```bash
 devenv shell -- pytest tests/test_migrations.py
 devenv shell -- run-tests
 ```
+
+> [!TIP]
+> **Continuous Integration (CI)**:
+> All migrations, schema drift verification (`alembic check`), and downgrade/upgrade rollback roundtrips are automatically tested against a live PostgreSQL 16 service container on every push and PR via GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 
