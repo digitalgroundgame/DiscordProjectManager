@@ -8,6 +8,7 @@
     API_PORT = "8000";
     OUTBOX_POLL_INTERVAL_SECONDS = "5.0";
     OUTBOX_BATCH_SIZE = "10";
+    AUTO_RUN_MIGRATIONS = "true";
   };
 
   # Packages available in the shell environment
@@ -72,6 +73,14 @@
 
     db-init.exec = ''
       python -c 'import asyncio; from src.adapters.db.session import init_db; asyncio.run(init_db())'
+    '';
+
+    db-migrate.exec = ''
+      alembic upgrade head
+    '';
+
+    db-revision.exec = ''
+      alembic revision --autogenerate "$@"
     '';
 
     db-clear.exec = ''

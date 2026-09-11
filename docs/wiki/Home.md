@@ -27,6 +27,10 @@ Welcome to the **DGG-PM** GitHub Wiki!
    - Automated pinned control center post creation.
    - Dynamic Task Action Cards & thread workspaces.
 
+5. **[Database Migrations Manual (Alembic)](../migrations.md)**
+   - Migration management with Alembic for development and production.
+   - Revision creation, testing, rollback runbooks, and zero-downtime rules.
+
 ---
 
 ## ⚡ Core Design Principles

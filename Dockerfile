@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
-# Copy application source
+# Copy application source & Alembic configuration
 COPY src/ ./src/
+COPY alembic.ini .
 
 ENV PYTHONPATH=/app
 

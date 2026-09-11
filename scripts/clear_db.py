@@ -19,8 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from sqlalchemy import text  # noqa: E402
 
-from src.adapters.db.session import async_session_factory, close_db, engine, init_db  # noqa: E402
-from src.adapters.db.tables import Base  # noqa: E402
+from src.adapters.db.session import async_session_factory, close_db, engine, init_db, run_migrations  # noqa: E402
 from src.config import settings  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -109,10 +108,11 @@ async def clear_database(guild_id: int | None = None) -> None:
                     text("DELETE FROM outbox_events"),
                 )
     else:
-        logger.info("🧹 Dropping and re-creating ALL database tables fresh...")
+        logger.info("🧹 Dropping and re-creating ALL database tables fresh via Alembic...")
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+        await run_migrations()
 
     logger.info("=" * 60)
     await close_db()

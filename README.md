@@ -15,6 +15,7 @@ Detailed guides, command references, and architecture documents are available in
 - ⌨️ **[Slash Commands Reference (`/pm`)](docs/wiki/Slash-Commands-Reference.md)**: Complete parameter and permission breakdown.
 - 👥 **[Teams & Authorization Matrix](docs/wiki/Teams-and-Authorization.md)**: Discord-native role rosters and self-healing leads.
 - 📌 **[Forum Channels & Interactive Hubs](docs/wiki/Forum-Channels-and-Hubs.md)**: Tag auto-provisioning and pinned control centers.
+- 🗄️ **[Database Migrations Manual (Alembic)](docs/migrations.md)**: Complete development and production migration runbook.
 
 ---
 
