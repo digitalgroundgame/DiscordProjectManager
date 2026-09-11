@@ -10,6 +10,11 @@ Discord-native project management platform designed to eliminate context-switchi
 A distinct unit of work anchored to a Project container with a title, status, priority, optional due date, assignee, watchers, and prerequisite dependencies.
 _Avoid_: Issue, ticket, work item, todo, standalone task
 
+**Overdue State**:
+An orthogonal temporal condition of an active task whose target due date has passed without completion, preserving its underlying lifecycle status while triggering warning indicators and forum tags.
+_Avoid_: Overdue status, expired status, late state
+
+
 **Project**:
 A high-level container aggregating related tasks, identified by a unique server prefix (e.g. `INF`), bound Discord channel, mapped Squad roles, and designated project lead.
 _Avoid_: Workspace, board, category, epic
