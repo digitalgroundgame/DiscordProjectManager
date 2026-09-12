@@ -49,7 +49,12 @@ def build_task_embed(
     dependents: list[Task] | None = None,
 ) -> discord.Embed:
     """Builds an Expanded Visual Card Discord Embed representing a task."""
-    color = discord.Color.dark_grey() if task.is_archived else STATUS_COLORS.get(task.status, discord.Color.blue())
+    if task.is_archived:
+        color = discord.Color.dark_grey()
+    elif task.is_overdue:
+        color = discord.Color.brand_red()
+    else:
+        color = STATUS_COLORS.get(task.status, discord.Color.blue())
 
     prefix_title = f"[{task.short_id}] {task.title}"
     if task.is_archived:
@@ -68,6 +73,8 @@ def build_task_embed(
 
     # 1. Status & Priority Section
     status_label = STATUS_EMOJIS.get(task.status, task.status.value)
+    if task.is_overdue:
+        status_label = f"{status_label} • ⏰ **Overdue**"
     priority_label = PRIORITY_LABELS.get(task.priority, task.priority.value)
     embed.add_field(
         name="Status & Priority",
@@ -111,7 +118,8 @@ def build_task_embed(
     time_lines.append(f"• **Created**: <t:{created_ts}:f> (<t:{created_ts}:R>)")
     if task.due_at:
         due_ts = int(task.due_at.astimezone(UTC).timestamp())
-        time_lines.append(f"• **Target Due Date**: <t:{due_ts}:f> (<t:{due_ts}:R>)")
+        due_warning = " ⚠️ *(Overdue)*" if task.is_overdue else ""
+        time_lines.append(f"• **Target Due Date**: <t:{due_ts}:f> (<t:{due_ts}:R>){due_warning}")
     else:
         time_lines.append("• **Target Due Date**: *No deadline set*")
 
@@ -142,6 +150,8 @@ def build_thread_workspace_content(task: Task) -> str:
         f"**Assignee**: {assignee_str}",
         f"**Priority**: {priority_str}",
     ]
+    if task.is_overdue:
+        meta_parts.append("⏰ Overdue")
     if task.watchers:
         watchers_str = " ".join(f"<@{uid}>" for uid in task.watchers)
         meta_parts.append(f"**Watchers**: {watchers_str}")

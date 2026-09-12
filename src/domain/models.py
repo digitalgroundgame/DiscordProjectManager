@@ -50,6 +50,14 @@ class Task(DomainModel):
     def is_archived(self) -> bool:
         return self.archived_at is not None
 
+    @property
+    def is_overdue(self) -> bool:
+        """Returns True if task has an active deadline in the past and is neither completed nor archived."""
+        if not self.due_at or self.is_completed or self.is_archived:
+            return False
+        due = self.due_at if self.due_at.tzinfo else self.due_at.replace(tzinfo=UTC)
+        return due < datetime.now(UTC)
+
 
 class TaskHistory(DomainModel):
     id: UUID = Field(default_factory=uuid4)
