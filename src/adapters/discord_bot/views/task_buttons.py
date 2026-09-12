@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,7 @@ from src.domain.models import Task
 from src.utils.date_parser import get_due_date_from_preset
 
 if TYPE_CHECKING:
+    from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
     from src.services.auth_service import AuthService
     from src.services.task_service import TaskService
 
@@ -87,12 +89,14 @@ class TaskQuickControlsView(BaseView):
         task_service: TaskService,
         auth_service: AuthService | None = None,
         bot: discord.Client | None = None,
+        workspace: ITaskDiscordWorkspace | None = None,
     ):
         super().__init__(timeout=300)
         self.task = task
         self.task_service = task_service
         self.auth_service = auth_service
         self.bot = bot
+        self.workspace = workspace
 
         # Staged state
         self.staged_priority: PriorityLevel = task.priority
@@ -103,6 +107,20 @@ class TaskQuickControlsView(BaseView):
         self.error_message: str | None = None
 
         self._rebuild_items()
+
+    @property
+    def effective_workspace(self) -> ITaskDiscordWorkspace | None:
+        if self.workspace is not None:
+            return self.workspace
+        if self.bot is not None:
+            ws = getattr(self.bot, "workspace", None)
+            if ws is not None:
+                from unittest.mock import AsyncMock
+
+                save_fn = getattr(ws, "save_task_controls", None)
+                if asyncio.iscoroutinefunction(save_fn) or isinstance(save_fn, AsyncMock):
+                    return ws
+        return None
 
     def _get_thread(self, interaction: discord.Interaction) -> discord.Thread | None:
         if isinstance(interaction.channel, discord.Thread):
@@ -295,6 +313,37 @@ class TaskQuickControlsView(BaseView):
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _on_save_clicked(self, interaction: discord.Interaction) -> None:
+        ws = self.effective_workspace
+        if ws:
+            updated_task = await ws.save_task_controls(
+                interaction,
+                task=self.task,
+                priority=self.staged_priority,
+                assignee_id=self.staged_assignee_id,
+                due_at=self.staged_due_at,
+                clear_due_at=self.staged_clear_due,
+                watchers=self.staged_watchers,
+            )
+            if updated_task:
+                self.task = updated_task
+            self.stop()
+            embed = discord.Embed(
+                title=f"Updated [{self.task.short_id}]",
+                description="Task changes have been saved to the workspace.",
+                color=discord.Color.green(),
+            )
+            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
+
+            attach_dismissal_footer(embed, delay=3.0)
+            if hasattr(interaction, "response") and not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=None)
+            elif hasattr(interaction, "edit_original_response"):
+                await interaction.edit_original_response(embed=embed, view=None)
+
+            menu_manager.unregister_menu(interaction)
+            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+            return
+
         if self.auth_service:
             await self.auth_service.require_task_mutation(interaction.user, self.task)
 

@@ -5,24 +5,20 @@ import discord
 from discord.ext import commands
 
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
-from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 from src.adapters.discord_bot.views.hub_menu import PmHubView
-from src.adapters.discord_bot.views.task_modals import TaskEditModal, TaskNoteModal
 from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
     ITaskDiscordWorkspace,
 )
 from src.config import settings
-from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
-from src.services.task_service import StaleVersionError, TaskService
+from src.services.task_service import TaskService
 from src.services.user_service import UserService
-from src.utils.date_parser import get_due_date_from_preset
 
 logger = logging.getLogger("dgg_pm.bot")
 
@@ -221,202 +217,4 @@ class DggPmBot(commands.Bot):
         action: str,
         task_id: UUID,
     ) -> None:
-        if interaction.response.is_done():
-            return
-
-        task = await self.task_service.get_by_id(task_id)
-        if not task:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Task not found in database.", ephemeral=True)
-            return
-
-        # Prevent cross-guild access: only allow acting on tasks that belong to the
-        # guild the interaction occurred in (if it occurred in a guild at all).
-        if interaction.guild_id is not None and task.guild_id != interaction.guild_id:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ This task does not belong to this server.", ephemeral=True)
-            return
-
-        # Check authorization
-        if not await self.auth_service.can_mutate_task(interaction.user, task):
-            msg = (
-                "❌ You do not have permission to modify this task. "
-                "You must be the assignee, creator, a member of the project squad, or a server manager."
-            )
-            if not interaction.response.is_done():
-                await interaction.response.send_message(msg, ephemeral=True)
-            else:
-                await interaction.followup.send(msg, ephemeral=True)
-            return
-
-        if action == "note":
-            modal = TaskNoteModal(
-                task_id=task_id,
-                short_id=task.short_id,
-                task_service=self.task_service,
-                auth_service=self.auth_service,
-            )
-            await interaction.response.send_modal(modal)
-            return
-
-        if action == "edit":
-            modal = TaskEditModal(
-                task=task,
-                task_service=self.task_service,
-                auth_service=self.auth_service,
-            )
-            await interaction.response.send_modal(modal)
-            return
-
-        if action == "deps":
-            try:
-                sibling_tasks = []
-                if task.project_id:
-                    sibling_tasks, _ = await self.task_service.list_tasks(
-                        guild_id=interaction.guild.id,
-                        project_id=task.project_id,
-                        include_archived=False,
-                        limit=50,
-                    )
-                prerequisites, dependents = await self.task_service.get_task_dependencies(task_id)
-                await self.workspace.render_task_controls(
-                    interaction=interaction,
-                    task=task,
-                    panel="dependencies",
-                    prerequisites=prerequisites,
-                    dependents=dependents,
-                    sibling_tasks=sibling_tasks,
-                )
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "opening task dependencies", logger, ephemeral=True)
-                return
-
-        if action == "controls":
-            try:
-                await self.workspace.render_task_controls(
-                    interaction=interaction,
-                    task=task,
-                    panel="quick_controls",
-                )
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "opening task controls", logger, ephemeral=True)
-                return
-
-        if action == "unassign":
-            try:
-                updated_task = await self.task_service.update_assignee(
-                    task_id=task_id,
-                    new_assignee_id=None,
-                    actor_discord_id=interaction.user.id,
-                )
-                await self.workspace.refresh_action_card(interaction, updated_task)
-                await self.workspace.sync_workspace(updated_task)
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "unassigning task", logger, ephemeral=True)
-                return
-
-        if action == "priority":
-            values = interaction.data.get("values", [])
-            if values:
-                try:
-                    new_priority = PriorityLevel(values[0])
-                    updated_task = await self.task_service.update_priority(
-                        task_id=task_id,
-                        new_priority=new_priority,
-                        actor_discord_id=interaction.user.id,
-                    )
-                    await self.workspace.refresh_action_card(interaction, updated_task)
-                    await self.workspace.sync_workspace(updated_task)
-                    return
-                except Exception as e:
-                    await send_interaction_error(interaction, e, "updating task priority", logger, ephemeral=True)
-                    return
-
-        if action == "assignee":
-            values = interaction.data.get("values", [])
-            try:
-                new_assignee_id = int(values[0]) if values else None
-                if new_assignee_id and self.auth_service:
-                    await self.auth_service.require_task_assignee_eligibility(
-                        interaction.guild, new_assignee_id, task.project_id
-                    )
-                updated_task = await self.task_service.update_assignee(
-                    task_id=task_id,
-                    new_assignee_id=new_assignee_id,
-                    actor_discord_id=interaction.user.id,
-                )
-                await self.workspace.refresh_action_card(interaction, updated_task)
-                await self.workspace.sync_workspace(updated_task)
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "updating task assignee", logger, ephemeral=True)
-                return
-
-        if action == "due":
-            values = interaction.data.get("values", [])
-            if values:
-                try:
-                    due_at, is_clear = get_due_date_from_preset(values[0])
-                    updated_task = await self.task_service.update_details(
-                        task_id=task_id,
-                        actor_discord_id=interaction.user.id,
-                        due_at=due_at,
-                        clear_due_at=is_clear,
-                    )
-                    await self.workspace.refresh_action_card(interaction, updated_task)
-                    await self.workspace.sync_workspace(updated_task)
-                    return
-                except Exception as e:
-                    await send_interaction_error(interaction, e, "updating task due date", logger, ephemeral=True)
-                    return
-
-        if action == "watchers":
-            values = interaction.data.get("values", [])
-            try:
-                watchers = [int(uid) for uid in values] if values else []
-                updated_task = await self.task_service.update_details(
-                    task_id=task_id,
-                    actor_discord_id=interaction.user.id,
-                    watchers=watchers,
-                )
-                await self.workspace.refresh_action_card(interaction, updated_task)
-                await self.workspace.sync_workspace(updated_task)
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "updating task watchers", logger, ephemeral=True)
-                return
-
-        target_status = TaskStatus.IN_PROGRESS if action in ("start", "reopen") else TaskStatus.COMPLETED
-        if action == "notstarted":
-            target_status = TaskStatus.NOT_STARTED
-        try:
-            note_action = "reopened" if action == "reopen" else f"updated to {target_status.value}"
-            updated_task = await self.task_service.update_status(
-                task_id=task_id,
-                new_status=target_status,
-                expected_version=task.version,
-                actor_discord_id=interaction.user.id,
-                notes=f"Status {note_action} via button",
-            )
-            await self.workspace.refresh_action_card(interaction, updated_task)
-            await self.workspace.sync_workspace(updated_task)
-
-        except StaleVersionError:
-            latest_task = await self.task_service.get_by_id(task_id)
-            if latest_task:
-                await self.workspace.refresh_action_card(interaction, latest_task)
-                await self.workspace.sync_workspace(latest_task)
-                await interaction.followup.send(
-                    "⚠️ This task was already modified by another squad member. The card has been refreshed.",
-                    ephemeral=True,
-                )
-            else:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Task no longer exists.", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ Task no longer exists.", ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "processing task button action", logger, ephemeral=True)
+        await self.workspace.handle_action(interaction, action, task_id)

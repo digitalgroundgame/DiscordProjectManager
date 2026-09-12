@@ -8,9 +8,11 @@ from uuid import UUID
 
 import discord
 
+from src.domain.enums import PriorityLevel
 from src.domain.models import Project, Squad, Task, TaskHistory
 
 TaskControlPanel = Literal["quick_controls", "dependencies", "history"]
+_UNSET: Any = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +99,29 @@ class ITaskDiscordWorkspace(Protocol):
         sibling_tasks: list[Task] | None = None,
     ) -> None:
         """Renders interactive ephemeral control panels (Quick Controls, Dependencies, Audit Trail)."""
+        ...
+
+    async def handle_action(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        task_id: UUID,
+    ) -> None:
+        """Dispatches and executes a component interaction action (e.g. from Task Action Card) for a task."""
+        ...
+
+    async def save_task_controls(
+        self,
+        interaction: discord.Interaction,
+        task: Task,
+        *,
+        priority: PriorityLevel | None = None,
+        assignee_id: Any = _UNSET,
+        due_at: Any = _UNSET,
+        clear_due_at: bool = False,
+        watchers: list[int] | None = None,
+    ) -> Task | None:
+        """Applies staged task control adjustments atomically, syncing thread tags and action card."""
         ...
 
 

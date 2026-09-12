@@ -293,3 +293,138 @@ async def test_render_task_controls_panels(services):
     interaction.response.send_message.reset_mock()
     await adapter.render_task_controls(interaction, task, panel="history", history=[])
     interaction.response.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_action_status_and_permissions(services):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Actions Proj", prefix="ACT")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Action Test Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+    )
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    # 1. Unauthorized user attempt
+    unauth_interaction = MagicMock(spec=discord.Interaction)
+    unauth_interaction.guild_id = guild_id
+    unauth_interaction.user = MagicMock(id=9999)  # random user
+    unauth_interaction.user.guild_permissions = discord.Permissions(0)
+    unauth_interaction.response = MagicMock()
+    unauth_interaction.response.is_done.return_value = False
+    unauth_interaction.response.send_message = AsyncMock()
+
+    await adapter.handle_action(unauth_interaction, "start", task.id)
+    unauth_interaction.response.send_message.assert_awaited_once()
+    assert "You do not have permission" in unauth_interaction.response.send_message.call_args[0][0]
+
+    # Task should remain NOT_STARTED
+    cur_task = await task_srv.get_by_id(task.id)
+    assert cur_task.status == TaskStatus.NOT_STARTED
+
+    # 2. Authorized user changes status to start (IN_PROGRESS)
+    auth_interaction = MagicMock(spec=discord.Interaction)
+    auth_interaction.guild_id = guild_id
+    auth_interaction.user = MagicMock(id=1001)  # creator
+    auth_interaction.response = MagicMock()
+    auth_interaction.response.is_done.return_value = False
+    auth_interaction.response.edit_message = AsyncMock()
+
+    await adapter.handle_action(auth_interaction, "start", task.id)
+    cur_task = await task_srv.get_by_id(task.id)
+    assert cur_task.status == TaskStatus.IN_PROGRESS
+
+    # 3. Authorized user completes task
+    await adapter.handle_action(auth_interaction, "complete", task.id)
+    cur_task = await task_srv.get_by_id(task.id)
+    assert cur_task.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_handle_action_unassign_and_priority(services):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Unassign Proj", prefix="UNA")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Unassign Test",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        priority=PriorityLevel.NORMAL,
+    )
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild_id = guild_id
+    interaction.user = MagicMock(id=1001)
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.edit_message = AsyncMock()
+
+    # Priority update
+    interaction.data = {"values": ["high"]}
+    await adapter.handle_action(interaction, "priority", task.id)
+    cur_task = await task_srv.get_by_id(task.id)
+    assert cur_task.priority == PriorityLevel.HIGH
+
+    # Unassign
+    await adapter.handle_action(interaction, "unassign", task.id)
+    cur_task = await task_srv.get_by_id(task.id)
+    assert cur_task.assignee_discord_id is None
+
+
+@pytest.mark.asyncio
+async def test_save_task_controls_batched(services):
+    from datetime import UTC, datetime
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Save Controls Proj", prefix="SAV")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Save Controls Test",
+        project_id=project.id,
+        creator_discord_id=1001,
+        priority=PriorityLevel.LOW,
+    )
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild_id = guild_id
+    interaction.user = MagicMock(id=1001)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.channel = None
+
+    due = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    updated = await adapter.save_task_controls(
+        interaction,
+        task=task,
+        priority=PriorityLevel.HIGH,
+        assignee_id=3003,
+        due_at=due,
+        watchers=[4004, 5005],
+    )
+
+    assert updated is not None
+    assert updated.priority == PriorityLevel.HIGH
+    assert updated.assignee_discord_id == 3003
+    assert updated.due_at is not None
+    assert updated.due_at.replace(tzinfo=UTC) == due
+    assert updated.watchers == [4004, 5005]
