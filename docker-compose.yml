@@ -1,7 +1,9 @@
+name: discord-project-manager
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: dgg_pm_postgres
+    container_name: discord_project_manager_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: dgg_pm
@@ -19,17 +21,16 @@ services:
 
   app:
     build: .
-    container_name: dgg_pm_app
+    container_name: discord_project_manager_app
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@postgres:5432/dgg_pm
       AUTO_RUN_MIGRATIONS: "true"
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
       OUTBOX_POLL_INTERVAL_SECONDS: 5.0
       API_HOST: 0.0.0.0
       API_PORT: 8000
@@ -44,3 +45,4 @@ services:
 
 volumes:
   postgres_data:
+    name: discord_project_manager_postgres_data

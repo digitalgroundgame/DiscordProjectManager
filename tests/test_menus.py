@@ -1495,3 +1495,62 @@ async def test_pm_dashboard_view_and_embed(services):
     inter.response.edit_message.assert_awaited_once()
     guides_view = inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(guides_view, PmDashboardOverviewView)
+
+
+def test_build_hub_welcome_embed_squad_roles():
+    from src.domain.models import Project, Squad
+
+    guild_id = 778899
+
+    # 1. Single Project with a Squad Role
+    p1 = Project(guild_id=guild_id, name="Dev & Platform", prefix="DEV", description="Core platform development.")
+    s1 = Squad(guild_id=guild_id, name="Dev Team", discord_role_id=123456)
+    embed1 = build_hub_welcome_embed(
+        channel_name="💻-dev-platform",
+        bound_projects=[p1],
+        project_squads_map={p1.id: [s1]},
+    )
+    assert "**[DEV] Dev & Platform**" in embed1.description
+    assert "> **Squad Role**: <@&123456>" in embed1.description
+
+    # 2. Single Project without any Squad Roles (Open)
+    p2 = Project(guild_id=guild_id, name="Open Project", prefix="OPEN", description="Open for all.")
+    embed2 = build_hub_welcome_embed(
+        channel_name="🌐-open-hub",
+        bound_projects=[p2],
+        project_squads_map={p2.id: []},
+    )
+    assert "> **Squad Role**: *Open (No role required)*" in embed2.description
+
+    # 3. Multi-Project Channel with Multi-Roles and Fallbacks
+    p_ne = Project(guild_id=guild_id, name="Northeast Chapter", prefix="NE", description="NE organizing.")
+    p_west = Project(guild_id=guild_id, name="West Coast Chapter", prefix="WEST", description="West organizing.")
+    p_open = Project(guild_id=guild_id, name="Global Chapter", prefix="GLB", description="Global organizing.")
+
+    s_ne1 = Squad(guild_id=guild_id, name="Northeast", discord_role_id=111111)
+    s_ne2 = Squad(guild_id=guild_id, name="Northeast Leads", discord_role_id=222222)
+    s_west = Squad(guild_id=guild_id, name="West Team", discord_role_id=0)  # No valid discord role ID
+
+    squads_map = {
+        p_ne.id: [s_ne1, s_ne2],
+        p_west.id: [s_west],
+        p_open.id: [],
+    }
+
+    embed_multi = build_hub_welcome_embed(
+        channel_name="🌐-regional-organizing",
+        bound_projects=[p_ne, p_west, p_open],
+        project_squads_map=squads_map,
+    )
+
+    desc = embed_multi.description
+    assert "### Bound Projects in this Channel" in desc
+    # Multi-roles comma separated
+    assert "**[NE] Northeast Chapter**" in desc
+    assert "> **Squad Roles**: <@&111111>, <@&222222>" in desc
+    # Fallback when role ID is 0
+    assert "**[WEST] West Coast Chapter**" in desc
+    assert "> **Squad Role**: **West Team**" in desc
+    # Open project
+    assert "**[GLB] Global Chapter**" in desc
+    assert "> **Squad Role**: *Open (No role required)*" in desc

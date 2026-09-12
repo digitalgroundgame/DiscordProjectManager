@@ -25,7 +25,8 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - **Database Check**: `make db-check` (or `uv run alembic check`)
    - **Database Revision**: `make db-revision MSG="description"`
    - **Database Clear/Wipe**: `make db-clear`
-   - **Database Reset & Re-seed**: `make db-reset`
+   - **Declarative Seeding (Non-destructive)**: `make seed` (or `uv run python scripts/seed.py --no-reset`)
+   - **Database Reset & Full Re-seed**: `make db-reset` (or `uv run python scripts/seed.py`)
    - **Database Shell**: `make db-shell`
 
 3. **Background Services**:

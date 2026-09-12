@@ -90,13 +90,17 @@ db-revision: ## Generate a sequential migration revision (usage: make db-revisio
 db-clear: ## Wipe all database tables (development safe)
 	$(PYTHON) scripts/clear_db.py
 
+.PHONY: seed
+seed: ## Seed declarative state preserving Discord channels and threads (usage: make seed [PROFILE=...])
+	$(PYTHON) scripts/seed.py --no-reset $(if $(PROFILE),--profile $(PROFILE),) $(if $(GUILD_ID),--guild-id $(GUILD_ID),)
+
 .PHONY: db-reset
-db-reset: ## Wipe database tables and re-seed with test data
-	$(PYTHON) scripts/clear_db.py --seed
+db-reset: ## Wipe database tables and Discord category, then re-seed fresh (usage: make db-reset [PROFILE=...])
+	$(PYTHON) scripts/seed.py $(if $(PROFILE),--profile $(PROFILE),) $(if $(GUILD_ID),--guild-id $(GUILD_ID),)
 
 .PHONY: db-seed-tree
-db-seed-tree: ## Seed tech tree forum structure
-	$(PYTHON) scripts/seed_tech_tree_forum.py
+db-seed-tree: ## Seed development projects with DAG example trees
+	$(PYTHON) scripts/seed.py $(if $(GUILD_ID),--guild-id $(GUILD_ID),)
 
 .PHONY: db-shell
 db-shell: ## Open interactive psql shell inside postgres container

@@ -70,3 +70,14 @@ _Avoid_: Dependency graph, gantt chart, blocker list
 **Notification Preference**:
 A member-configured delivery setting (`DM`, `CHANNEL`, `BOTH`, or `SILENT`) that governs how task updates and watcher summaries are dispatched.
 _Avoid_: Alert setting, notification channel, delivery mode
+
+### Development & Environment Fixtures
+
+**Seed Manifest**:
+A declarative YAML specification defining the canonical baseline state of Squads, Projects, Workspaces, Tasks, and Tech Trees for a development environment.
+_Avoid_: Seed script, fixture dump, mock data file
+
+**Seed Profile**:
+A composable configuration overlay that bundles a targeted task workload or testing scenario (such as a Tech Tree or scale benchmark) atop the base Seed Manifest.
+_Avoid_: Seed preset, test suite fixture, seed tag
+

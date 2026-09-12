@@ -22,12 +22,31 @@ When a project is bound to a `discord.ForumChannel` (or via `/pm project setup-f
 In Discord Forum Channels, users cannot type slash commands at the forum root level. 
 
 To make forum channels completely self-sufficient:
-- When a project is created and linked to a forum channel, the bot automatically creates and **pins** a permanent thread post: **`📌 📊 [Project Name] • Control Hub`**.
+- When projects are linked to a forum channel, the bot automatically creates and **pins** a permanent thread post: **`📌 📊 [Channel Name / Project] • Control Hub`**.
 - The post contains persistent interactive buttons:
-  - **`➕ New Task`**: Opens the interactive Task Creation Builder (Title & Description modal followed by a private Task Draft card with native Discord `UserSelect` member picker, quick due date presets, and priority selector).
+  - **`➕ New Task`**: Opens the interactive Task Creation Builder (in multi-project channels, first prompts with a project selection menu).
   - **`👤 My Tasks`**: Launches a private personal dashboard showing assigned tasks, deadlines, and status.
   - **`📁 Projects Hub`**: Launches a private project directory workspace.
-  - **`🌲 Visual Graph`**: Renders the interactive visual dependency DAG diagram.
+  - **`🌲 Visual Graph`**: Renders the interactive visual dependency DAG diagram (with project selector if multiple projects are bound).
+
+### Single-Project vs. Multi-Project Forums
+
+1. **Single-Project Hub**:
+   - Focuses directly on the bound project with its mapped squad role and description.
+2. **Multi-Project Hub (e.g. `#🌐-regional-organizing`)**:
+   - Outlines all bound projects in Discord blockquote cards:
+     ```text
+     ### Bound Projects in this Channel
+
+     **[INTL] International Chapter**
+     > **Squad Role**: @international
+     > *Global community organizing, language translation working groups, and timezone coordination.*
+
+     **[MW] Midwest Chapter**
+     > **Squad Role**: @midwest
+     > *Regional organizing across Midwest counties, grassroots hubs, and community networks.*
+     ```
+   - When a user clicks **`➕ New Task`** or **`🌲 Visual Graph`**, an ephemeral selector prompts the user to choose which project container to target.
 
 ```
 ┌──────────────────────────────────────────────────────────┐

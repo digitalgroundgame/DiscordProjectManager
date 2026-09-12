@@ -1,0 +1,489 @@
+# Base Development Seed Manifest
+# Realistic configuration modeled after production Discord community organization.
+
+squads:
+  - name: "Dev Team"
+    role_name: "dev team"
+  - name: "Research Team"
+    role_name: "research team"
+  - name: "Media Team"
+    role_name: "media team"
+  - name: "Events Team"
+    role_name: "events team"
+  - name: "Welcome Team"
+    role_name: "welcome team"
+  - name: "Northeast"
+    role_name: "northeast"
+  - name: "West"
+    role_name: "west"
+  - name: "Midwest"
+    role_name: "midwest"
+  - name: "South"
+    role_name: "south"
+  - name: "International"
+    role_name: "international"
+
+projects:
+  - name: "Dev & Platform"
+    prefix: "DEV"
+    category: "Engineering"
+    description: "Core platform development, bot features, and technical infrastructure."
+    squads: ["Dev Team"]
+
+  - name: "Research & Policy"
+    prefix: "RES"
+    category: "Research"
+    description: "In-depth investigations, data analysis, and strategic policy research."
+    squads: ["Research Team"]
+
+  - name: "Media & Content"
+    prefix: "MED"
+    category: "Media"
+    description: "Digital media production, video editing, graphic design, and social publishing."
+    squads: ["Media Team"]
+
+  - name: "Community Events"
+    prefix: "EVT"
+    category: "Community"
+    description: "Town halls, virtual conferences, AMA sessions, and community gatherings."
+    squads: ["Events Team"]
+
+  - name: "Welcome & Onboarding"
+    prefix: "WLC"
+    category: "Community"
+    description: "New member orientation, onboarding guides, and server hospitality."
+    squads: ["Welcome Team"]
+
+  - name: "Northeast Chapter"
+    prefix: "NE"
+    category: "Grassroots"
+    description: "Regional organizing across Northeast states, city hubs, and campus chapters."
+    squads: ["Northeast"]
+
+  - name: "West Coast Chapter"
+    prefix: "WEST"
+    category: "Grassroots"
+    description: "Regional organizing across West Coast communities, tech hubs, and local chapters."
+    squads: ["West"]
+
+  - name: "Midwest Chapter"
+    prefix: "MW"
+    category: "Grassroots"
+    description: "Regional organizing across Midwest counties, grassroots hubs, and community networks."
+    squads: ["Midwest"]
+
+  - name: "Southern Chapter"
+    prefix: "SO"
+    category: "Grassroots"
+    description: "Regional organizing, civic outreach, and coalition building across Southern states."
+    squads: ["South"]
+
+  - name: "International Chapter"
+    prefix: "INTL"
+    category: "Grassroots"
+    description: "Global community organizing, language translation working groups, and timezone coordination."
+    squads: ["International"]
+
+  - name: "Legacy Monolith"
+    prefix: "LEG"
+    category: "Archive"
+    description: "Retired legacy systems and past campaigns."
+    archived: true
+
+channels:
+  - name: "💻-dev-platform"
+    type: "forum"
+    topic: "Developer workspace for bot development, infrastructure, and technical initiatives"
+    projects: ["DEV"]
+
+  - name: "🔬-research-hub"
+    type: "forum"
+    topic: "Research hub for policy briefs, data collection, and investigation reports"
+    projects: ["RES"]
+
+  - name: "🎬-media-content"
+    type: "forum"
+    topic: "Media production, asset library, video editing, and campaign graphics"
+    projects: ["MED"]
+
+  - name: "🎉-events-planning"
+    type: "forum"
+    topic: "Event scheduling, speaker coordination, town halls, and community meetups"
+    projects: ["EVT"]
+
+  - name: "👋-welcome-desk"
+    type: "forum"
+    topic: "Member onboarding workflows, orientation resources, and welcoming initiatives"
+    projects: ["WLC"]
+
+  - name: "🌐-regional-organizing"
+    type: "forum"
+    topic: "Multi-project grassroots organizing hub for Northeast, West, Midwest, South, and International chapters"
+    projects: ["NE", "WEST", "MW", "SO", "INTL"]
+
+tasks:
+  # --- Dev & Platform (DEV) ---
+  - slug: "dev_ci_pipeline"
+    project: "DEV"
+    title: "Setup GitHub Actions CI & Automated Linting Pipeline"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Configure GitHub Actions workflows for ruff linting, pytest suites, and type checking."
+    prerequisites: []
+
+  - slug: "dev_db_backup"
+    project: "DEV"
+    title: "Setup PostgreSQL database backup automation"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Configure automated WAL archiving and daily snapshot dumps."
+    prerequisites: []
+
+  - slug: "dev_auth_validation"
+    project: "DEV"
+    title: "Refactor task assignee role permission validation"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 1
+    body: "Provide friendly actionable feedback when a user is missing the required squad role."
+    prerequisites: ["dev_ci_pipeline"]
+
+  - slug: "dev_bot_hub"
+    project: "DEV"
+    title: "Implement Discord bot interactive control hub"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 2
+    body: "Mount interactive button matrix and ephemeral project selection views in Control Hub."
+    prerequisites: ["dev_ci_pipeline"]
+
+  - slug: "dev_rate_limit"
+    project: "DEV"
+    title: "Design API rate-limiting middleware"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 5
+    body: "Implement sliding-window token bucket algorithm with Redis backend."
+    prerequisites: ["dev_db_backup"]
+
+  - slug: "dev_websocket_sync"
+    project: "DEV"
+    title: "Integrate WebSocket live task updates on client"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 6
+    body: "Listen for outbox task update events over WebSocket and update UI cache optimistically."
+    prerequisites: ["dev_bot_hub"]
+
+  - slug: "dev_metrics_telemetry"
+    project: "DEV"
+    title: "Configure Prometheus & Grafana telemetry dashboards"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 8
+    body: "OpenTelemetry distributed trace header propagation and correlation ID logging."
+    prerequisites: ["dev_rate_limit", "dev_websocket_sync"]
+
+  - slug: "dev_canary_deployment"
+    project: "DEV"
+    title: "Deploy zero-downtime canary release pipeline"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 14
+    body: "Autonomous progressive deployment with automated rollback on healthcheck failure."
+    prerequisites: ["dev_auth_validation", "dev_metrics_telemetry"]
+
+  # --- Research & Policy (RES) ---
+  - slug: "res_survey_analysis"
+    project: "RES"
+    title: "Analyze community survey responses on platform usability"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Aggregate qualitative feedback from 200+ community participants."
+    prerequisites: []
+
+  - slug: "res_data_pipeline"
+    project: "RES"
+    title: "Build automated survey response ingestion pipeline"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Set up ingestion connectors for Typeform and Discord community polls."
+    prerequisites: []
+
+  - slug: "res_policy_brief"
+    project: "RES"
+    title: "Compile comprehensive digital ground game policy report"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 4
+    body: "Draft policy recommendations on decentralized grassroots coordination."
+    prerequisites: ["res_survey_analysis"]
+
+  - slug: "res_coordination_paper"
+    project: "RES"
+    title: "Draft research paper on decentralized coordination models"
+    priority: "LOW"
+    status: "NOT_STARTED"
+    days_offset: 10
+    body: "Comparative analysis of digital organizing frameworks across community servers."
+    prerequisites: ["res_survey_analysis", "res_data_pipeline"]
+
+  - slug: "res_whitepaper_pub"
+    project: "RES"
+    title: "Publish open research whitepaper and executive strategy deck"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 14
+    body: "Finalize open-access whitepaper publication and brief server leadership on findings."
+    prerequisites: ["res_policy_brief", "res_coordination_paper"]
+
+  # --- Media & Content (MED) ---
+  - slug: "med_brand_kit"
+    project: "MED"
+    title: "Finalize community brand identity and vector assets"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Produce typography standards, color palettes, vector badges, and media banners."
+    prerequisites: []
+
+  - slug: "med_townhall_graphics"
+    project: "MED"
+    title: "Create graphic assets for upcoming community town hall"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Produce banner, stream overlays, and social media promo cards."
+    prerequisites: ["med_brand_kit"]
+
+  - slug: "med_video_tutorial"
+    project: "MED"
+    title: "Produce tutorial video on using Discord forum task boards"
+    priority: "NORMAL"
+    status: "IN_PROGRESS"
+    days_offset: 3
+    body: "Record walkthrough showing task status mutations, dependencies, and action cards."
+    prerequisites: ["med_brand_kit"]
+
+  - slug: "med_highlight_reel"
+    project: "MED"
+    title: "Edit weekly highlight reel for social channels"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 5
+    body: "Assemble clips from community workshops and volunteer presentations."
+    prerequisites: ["med_townhall_graphics", "med_video_tutorial"]
+
+  - slug: "med_multichannel_campaign"
+    project: "MED"
+    title: "Launch multi-channel social media distribution campaign"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 10
+    body: "Coordinate scheduled releases across YouTube, Bluesky, Mastodon, and Discord announcements."
+    prerequisites: ["med_highlight_reel"]
+
+  # --- Community Events (EVT) ---
+  - slug: "evt_kickoff_calls"
+    project: "EVT"
+    title: "Schedule regional kickoff calls across all timezones"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Publish timezone poll and create Discord scheduled events."
+    prerequisites: []
+
+  - slug: "evt_townhall_q2"
+    project: "EVT"
+    title: "Organize Q2 Community Town Hall & AMA"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 3
+    body: "Confirm agenda, invite guest speakers, and configure stage channel permissions."
+    prerequisites: ["evt_kickoff_calls"]
+
+  - slug: "evt_hackathon_workshops"
+    project: "EVT"
+    title: "Coordinate virtual hackathon workshop sessions"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 8
+    body: "Align volunteer mentors and prepare technical workshop curriculum."
+    prerequisites: ["evt_kickoff_calls"]
+
+  - slug: "evt_annual_summit"
+    project: "EVT"
+    title: "Host annual global community unconference"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 21
+    body: "Organize keynote speakers, breakout stages, and live community project showcases."
+    prerequisites: ["evt_townhall_q2", "evt_hackathon_workshops"]
+
+  # --- Welcome & Onboarding (WLC) ---
+  - slug: "wlc_greeting_flow"
+    project: "WLC"
+    title: "Review and streamline new member greeting flow"
+    priority: "HIGH"
+    status: "COMPLETED"
+    body: "Audit onboarding bot messages and update role selection prompts."
+    prerequisites: []
+
+  - slug: "wlc_faq_update"
+    project: "WLC"
+    title: "Update FAQ post in server orientation channel"
+    priority: "NORMAL"
+    status: "IN_PROGRESS"
+    days_offset: 2
+    body: "Add instructions on how to join squads and find regional chapters."
+    prerequisites: ["wlc_greeting_flow"]
+
+  - slug: "wlc_team_shifts"
+    project: "WLC"
+    title: "Set up welcome team shift schedule"
+    priority: "LOW"
+    status: "NOT_STARTED"
+    days_offset: 7
+    body: "Create coverage calendar to ensure 24/7 greeting response for new joins."
+    prerequisites: ["wlc_greeting_flow"]
+
+  - slug: "wlc_mentor_program"
+    project: "WLC"
+    title: "Launch volunteer peer mentorship pairing program"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 14
+    body: "Pair newly onboarded community members with experienced squad leads."
+    prerequisites: ["wlc_faq_update", "wlc_team_shifts"]
+
+  # --- Northeast Chapter (NE) ---
+  - slug: "ne_community_hub"
+    project: "NE"
+    title: "Launch Northeast community coordination thread"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Establish local communication hub for Northeast members."
+    prerequisites: []
+
+  - slug: "ne_campus_drive"
+    project: "NE"
+    title: "Coordinate Northeast campus ambassador outreach"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 3
+    body: "Connect with campus student organizations across Boston, Philadelphia, and NYC."
+    prerequisites: ["ne_community_hub"]
+
+  - slug: "ne_regional_meetup"
+    project: "NE"
+    title: "Host Northeast quarterly volunteer meetup"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 12
+    body: "Organize in-person and hybrid gathering for Northeast members."
+    prerequisites: ["ne_campus_drive"]
+
+  # --- West Coast Chapter (WEST) ---
+  - slug: "west_venue_sourcing"
+    project: "WEST"
+    title: "Source venues for West coast community town halls"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Review accessible meeting spaces across Bay Area, Seattle, and Los Angeles."
+    prerequisites: []
+
+  - slug: "west_meetup"
+    project: "WEST"
+    title: "Coordinate West coast community meetup"
+    priority: "HIGH"
+    status: "IN_PROGRESS"
+    days_offset: 4
+    body: "RSVP tracking and logistics for West chapter meetup."
+    prerequisites: ["west_venue_sourcing"]
+
+  - slug: "west_tech_workshop"
+    project: "WEST"
+    title: "Deliver West regional developer workshop"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 10
+    body: "Hands-on session with volunteer devs on building community organizing tools."
+    prerequisites: ["west_meetup"]
+
+  # --- Midwest Chapter (MW) ---
+  - slug: "mw_liaison_network"
+    project: "MW"
+    title: "Establish Midwest county liaison network"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Identify points of contact across Michigan, Ohio, Wisconsin, and Illinois."
+    prerequisites: []
+
+  - slug: "mw_summit_planning"
+    project: "MW"
+    title: "Organize Midwest grassroots summit"
+    priority: "NORMAL"
+    status: "IN_PROGRESS"
+    days_offset: 5
+    body: "Plan agenda, keynote speakers, and regional breakout rooms."
+    prerequisites: ["mw_liaison_network"]
+
+  - slug: "mw_canvass_drive"
+    project: "MW"
+    title: "Launch Midwest volunteer canvassing drive"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 14
+    body: "Coordinate regional volunteer canvassing weekends across Midwest chapters."
+    prerequisites: ["mw_summit_planning"]
+
+  # --- Southern Chapter (SO) ---
+  - slug: "so_coalition_map"
+    project: "SO"
+    title: "Map Southern grassroots coalitions and partners"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Compile list of community organizers and partner organizations across the South."
+    prerequisites: []
+
+  - slug: "so_outreach_drive"
+    project: "SO"
+    title: "Plan Southern regional volunteer outreach drive"
+    priority: "NORMAL"
+    status: "NOT_STARTED"
+    days_offset: 7
+    body: "Partner with local organizations and campus groups across the South."
+    prerequisites: ["so_coalition_map"]
+
+  - slug: "so_leadership_retreat"
+    project: "SO"
+    title: "Host Southern organizers training retreat"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 18
+    body: "Intensive field organizer skills training and leadership workshop."
+    prerequisites: ["so_outreach_drive"]
+
+  # --- International Chapter (INTL) ---
+  - slug: "intl_translator_pool"
+    project: "INTL"
+    title: "Assemble volunteer translator working group"
+    priority: "NORMAL"
+    status: "COMPLETED"
+    body: "Recruit fluent speakers for Spanish, French, German, and Japanese translations."
+    prerequisites: []
+
+  - slug: "intl_subgroups"
+    project: "INTL"
+    title: "Establish International chapter language sub-groups"
+    priority: "NORMAL"
+    status: "IN_PROGRESS"
+    days_offset: 4
+    body: "Organize language-specific Discord discussion channels and meeting schedules."
+    prerequisites: ["intl_translator_pool"]
+
+  - slug: "intl_global_townhall"
+    project: "INTL"
+    title: "Host multi-timezone International Town Hall"
+    priority: "HIGH"
+    status: "NOT_STARTED"
+    days_offset: 15
+    body: "Conduct worldwide town hall with live translated captions and regional speakers."
+    prerequisites: ["intl_subgroups"]

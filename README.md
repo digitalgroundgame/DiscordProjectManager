@@ -168,9 +168,24 @@ make db-up       # Start Postgres container
 make db-down     # Stop Postgres container
 make db-migrate  # Apply pending Alembic migrations
 make db-check    # Check migration status
-make db-reset    # Wipe tables and re-seed sample data
+make seed        # Declarative sync (non-destructive; preserves Discord channels & threads)
+make db-reset    # Hard wipe tables & Discord category and re-seed from scratch
 make db-shell    # Open interactive psql shell
 ```
+
+#### Declarative Seeding:
+DGG-PM features a declarative seeding engine powered by YAML manifests (`seeds/base/manifest.yaml`):
+```bash
+# Non-destructive seed (preserves channels, reuses existing task threads, syncs DB & tags)
+make seed
+
+# Destructive reset (drops tables, deletes PM Discord category, and re-provisions cleanly)
+make db-reset
+
+# Fast database-only seed (no Discord API calls required, ideal for offline/CI test DBs)
+uv run python scripts/seed.py --no-discord
+```
+
 
 ### 5. NixOS / Nix Flakes Development
 

@@ -13,7 +13,7 @@ from src.adapters.discord_bot.views.task_menu import (
     TaskSelectProjectView,
     build_task_board_embed,
 )
-from src.domain.models import Project
+from src.domain.models import Project, Squad
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
 from src.services.task_service import TaskService
@@ -315,7 +315,19 @@ class PmHubView(discord.ui.View):
             else:
                 channel_name = getattr(channel_obj, "name", None)
 
-            updated_embed = build_hub_welcome_embed(channel_name=channel_name, bound_projects=channel_projects)
+            project_squads_map: dict[UUID, list[Squad]] = {}
+            for p in channel_projects:
+                try:
+                    squads = await self.project_service.list_squads_for_project(p.id)
+                    project_squads_map[p.id] = squads
+                except Exception as sq_err:
+                    logger.debug("Could not fetch squads for project %s: %s", p.id, sq_err)
+
+            updated_embed = build_hub_welcome_embed(
+                channel_name=channel_name,
+                bound_projects=channel_projects,
+                project_squads_map=project_squads_map,
+            )
             updated_view = PmHubView(
                 project_service=self.project_service,
                 team_service=self.team_service,
@@ -634,9 +646,27 @@ class PmHubView(discord.ui.View):
         )
 
 
+def _format_squad_roles(squads: list[Squad] | None) -> str:
+    """Formats list of squad roles as Discord mentions or fallback labels."""
+    if not squads:
+        return "**Squad Role**: *Open (No role required)*"
+
+    role_mentions: list[str] = []
+    for s in squads:
+        if s.discord_role_id and s.discord_role_id > 0:
+            role_mentions.append(f"<@&{s.discord_role_id}>")
+        else:
+            role_mentions.append(f"**{s.name}**")
+
+    if len(role_mentions) == 1:
+        return f"**Squad Role**: {role_mentions[0]}"
+    return f"**Squad Roles**: {', '.join(role_mentions)}"
+
+
 def build_hub_welcome_embed(
     channel_name: str | None = None,
     bound_projects: list[Project] | None = None,
+    project_squads_map: dict[UUID, list[Squad]] | None = None,
 ) -> discord.Embed:
     if channel_name:
         title = f"#{channel_name} • Forum Control Hub"
@@ -651,18 +681,27 @@ def build_hub_welcome_embed(
     if bound_projects:
         if len(bound_projects) == 1:
             p = bound_projects[0]
+            squads = (project_squads_map or {}).get(p.id)
+            role_line = _format_squad_roles(squads)
+            desc_text = p.description or "Active contributor task feed and discussion board."
             desc = (
-                f"> **Bound Project**: **{p.name}** (`[{p.prefix}]`)\n"
-                f"> {p.description or 'Active contributor task feed and discussion board.'}\n\n"
+                f"**[{p.prefix}] {p.name}**\n"
+                f"> {role_line}\n"
+                f"> *{desc_text}*\n\n"
                 "Click any button below to manage tasks, explore dependencies, or view projects."
             )
         else:
-            projects_summary = "\n".join(
-                f"• **{p.name}** (`[{p.prefix}]`)" + (f" — *{p.description}*" if p.description else "")
-                for p in bound_projects
-            )
+            project_blocks: list[str] = []
+            for p in bound_projects:
+                squads = (project_squads_map or {}).get(p.id)
+                role_line = _format_squad_roles(squads)
+                desc_text = f"> *{p.description}*\n" if p.description else ""
+                project_blocks.append(f"**[{p.prefix}] {p.name}**\n> {role_line}\n{desc_text}".rstrip())
+
+            projects_summary = "\n\n".join(project_blocks)
             desc = (
-                f"> **Bound Projects in this Channel**:\n{projects_summary}\n\n"
+                f"### Bound Projects in this Channel\n\n"
+                f"{projects_summary}\n\n"
                 "Click any button below to manage tasks, explore dependencies, or view projects."
             )
     else:

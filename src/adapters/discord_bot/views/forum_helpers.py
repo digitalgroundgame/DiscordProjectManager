@@ -324,16 +324,47 @@ async def ensure_pinned_hub_post(
         ]
 
     channel_name = getattr(channel, "name", None)
-    embed = build_hub_welcome_embed(channel_name=channel_name, bound_projects=bound_projects)
+    project_squads_map = {}
+    if project_service and bound_projects:
+        for bp in bound_projects:
+            try:
+                project_squads_map[bp.id] = await project_service.list_squads_for_project(bp.id)
+            except Exception as e:
+                logger.debug("Could not fetch squads for project %s in hub post: %s", bp.id, e)
+
+    embed = build_hub_welcome_embed(
+        channel_name=channel_name,
+        bound_projects=bound_projects,
+        project_squads_map=project_squads_map,
+    )
 
     view = None
-    if project_service and team_service and task_service:
-        view = PmHubView(
-            project_service=project_service,
-            team_service=team_service,
-            task_service=task_service,
-            user_service=user_service,
-        )
+    if project_service and task_service:
+        if not team_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
+            try:
+                from src.adapters.db.postgres_repo import PostgresTeamRepo
+                from src.services.team_service import TeamService
+
+                team_service = TeamService(PostgresTeamRepo(task_service.uow.session_factory))
+            except Exception as e:
+                logger.debug("Could not auto-create team_service for hub: %s", e)
+
+        if not user_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
+            try:
+                from src.adapters.db.postgres_repo import PostgresUserPreferenceRepo
+                from src.services.user_service import UserService
+
+                user_service = UserService(PostgresUserPreferenceRepo(task_service.uow.session_factory))
+            except Exception as e:
+                logger.debug("Could not auto-create user_service for hub: %s", e)
+
+        if team_service:
+            view = PmHubView(
+                project_service=project_service,
+                team_service=team_service,
+                task_service=task_service,
+                user_service=user_service,
+            )
 
     if isinstance(channel, discord.ForumChannel):
         # 1. Setup standard tags first
