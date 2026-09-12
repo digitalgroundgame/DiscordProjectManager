@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -59,6 +60,17 @@ class DiscordNotifier(INotificationDispatcher):
         msg_id = payload.get("discord_message_id")
         watchers = payload.get("watchers") or []
 
+        due_at = None
+        due_raw = payload.get("due_at")
+        if due_raw:
+            if isinstance(due_raw, datetime):
+                due_at = due_raw
+            elif isinstance(due_raw, str):
+                try:
+                    due_at = datetime.fromisoformat(due_raw)
+                except (ValueError, TypeError):
+                    due_at = None
+
         return Task(
             id=task_id,
             guild_id=guild_id,
@@ -72,6 +84,7 @@ class DiscordNotifier(INotificationDispatcher):
             watchers=watchers,
             discord_thread_id=thread_id,
             discord_message_id=msg_id,
+            due_at=due_at,
         )
 
     async def _get_pref(self, guild_id: int | None, user_id: int) -> NotificationPreference:
@@ -158,9 +171,6 @@ class DiscordNotifier(INotificationDispatcher):
 
     async def _handle_due_reminder(self, payload: dict) -> None:
         assignee_id = payload.get("assignee_discord_id")
-        if not assignee_id:
-            return
-
         guild_id = payload.get("guild_id")
         thread_id = payload.get("discord_thread_id")
         message_id = payload.get("discord_message_id")
@@ -168,10 +178,10 @@ class DiscordNotifier(INotificationDispatcher):
         short_id = payload.get("short_id", "")
         title = payload.get("title", "")
 
-        # Query task_service if location IDs were omitted during initial scheduling
-        if not thread_id and self.task_service:
+        task = None
+        # Query task_service if available for authoritative task state
+        if self.task_service:
             try:
-                task = None
                 task_id_raw = payload.get("task_id")
                 if task_id_raw:
                     try:
@@ -192,6 +202,34 @@ class DiscordNotifier(INotificationDispatcher):
                         message_id = task.discord_message_id
             except Exception as e:
                 logger.debug("Could not resolve task location from task_service for reminder: %s", e)
+
+        if not task:
+            task = self._reconstruct_task(payload)
+
+        # At T=0 (due deadline reached), synchronize thread tags to reflect overdue state
+        if reminder_type == "due":
+            if self.workspace and (thread_id or task.discord_thread_id):
+                try:
+                    await self.workspace.sync_workspace(task, sync_tags=True, sync_starter_card=True)
+                except Exception as sync_err:
+                    logger.warning("Failed to sync workspace on due reminder for %s: %s", task.short_id, sync_err)
+            elif thread_id:
+                try:
+                    chan = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+                    if isinstance(chan, discord.Thread) and isinstance(chan.parent, discord.ForumChannel):
+                        tags = resolve_forum_tags(
+                            chan.parent,
+                            task=task,
+                            existing_tags=getattr(chan, "applied_tags", None),
+                        )
+                        if hasattr(chan, "edit"):
+                            await chan.edit(applied_tags=tags)
+                except Exception as err:
+                    logger.debug("Could not sync thread tags directly for due reminder: %s", err)
+
+        # If no assignee, skip user DM / thread alert
+        if not assignee_id:
+            return
 
         jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
 

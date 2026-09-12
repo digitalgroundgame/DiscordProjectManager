@@ -68,6 +68,7 @@ PRIORITY_KEYWORDS = {
 }
 
 UNASSIGNED_KEYWORDS = ["unassigned", "not assigned", "un-assigned", "no assignee", "needs assignee"]
+OVERDUE_KEYWORDS = ["overdue", "late", "past due"]
 
 STANDARD_PM_TAG_DEFINITIONS = [
     {"name": "Not Started", "emoji": "⏳", "keywords": ["not started", "to do", "todo", "backlog", "open"]},
@@ -84,6 +85,11 @@ STANDARD_PM_TAG_DEFINITIONS = [
         "name": "Unassigned",
         "emoji": "👤",
         "keywords": UNASSIGNED_KEYWORDS,
+    },
+    {
+        "name": "Overdue",
+        "emoji": "⏰",
+        "keywords": OVERDUE_KEYWORDS,
     },
 ]
 
@@ -121,14 +127,16 @@ def resolve_forum_tags(
     status: TaskStatus | None = None,
     priority: PriorityLevel | None = None,
     is_unassigned: bool | None = None,
+    is_overdue: bool | None = None,
     project_name: str | None = None,
     existing_tags: list[discord.ForumTag] | None = None,
 ) -> list[discord.ForumTag]:
-    """Finds matching ForumTag objects for a task's status, priority, and unassigned state.
+    """Finds matching ForumTag objects for a task's status, priority, overdue, and unassigned state.
 
     Applies the per-project tag when a ``project_name`` is provided. Preserves any
-    non-status/priority/unassigned/project custom tags already applied on the thread
-    (up to Discord's maximum limit of 5 applied tags per thread).
+    non-status/priority/overdue/unassigned/project custom tags already applied on the thread
+    (up to Discord's maximum limit of 5 applied tags per thread, prioritizing status,
+    priority, overdue, and project/squad tags over unassigned state).
     """
     if not hasattr(forum_channel, "available_tags") or not forum_channel.available_tags:
         return []
@@ -138,10 +146,13 @@ def resolve_forum_tags(
         priority = priority or task.priority
         if is_unassigned is None:
             is_unassigned = task.assignee_discord_id is None
+        if is_overdue is None:
+            is_overdue = task.is_overdue
 
     target_status = status or TaskStatus.NOT_STARTED
     target_priority = priority or PriorityLevel.NORMAL
     unassigned_flag = bool(is_unassigned)
+    overdue_flag = bool(is_overdue)
 
     available = forum_channel.available_tags
     applied: list[discord.ForumTag] = []
@@ -161,15 +172,15 @@ def resolve_forum_tags(
                 applied.append(tag)
             break
 
-    # 3. Match Unassigned tag if unassigned
-    if unassigned_flag:
+    # 3. Match Overdue tag if task is overdue
+    if overdue_flag:
         for tag in available:
-            if _matches_keyword(tag.name, UNASSIGNED_KEYWORDS):
+            if _matches_keyword(tag.name, OVERDUE_KEYWORDS):
                 if tag not in applied:
                     applied.append(tag)
                 break
 
-    # 3b. Match per-project tag
+    # 4. Match per-project tag
     if project_name:
         for tag in available:
             if _matches_project_tag(tag.name, project_name):
@@ -177,20 +188,62 @@ def resolve_forum_tags(
                     applied.append(tag)
                 break
 
-    # 4. Preserve custom tags that don't represent status, priority, unassigned, or project state
+    # 5. Preserve custom tags (e.g. squad or category tags) that don't represent
+    # status, priority, overdue, unassigned, or project state
     if existing_tags:
         all_managed_kws = [
             kw
-            for kws in list(STATUS_KEYWORDS.values()) + list(PRIORITY_KEYWORDS.values()) + [UNASSIGNED_KEYWORDS]
+            for kws in list(STATUS_KEYWORDS.values())
+            + list(PRIORITY_KEYWORDS.values())
+            + [UNASSIGNED_KEYWORDS, OVERDUE_KEYWORDS]
             for kw in kws
         ]
         for tag in existing_tags:
-            # If tag is not a recognized status/priority/unassigned/project tag and not already added
             if not _matches_keyword(tag.name, all_managed_kws) and not _matches_project_tag(tag.name, project_name):
                 if tag not in applied:
                     applied.append(tag)
 
+    # 6. Match Unassigned tag if unassigned (lowest priority under the 5-tag cap)
+    if unassigned_flag:
+        for tag in available:
+            if _matches_keyword(tag.name, UNASSIGNED_KEYWORDS):
+                if tag not in applied:
+                    applied.append(tag)
+                break
+
     return applied[:5]
+
+
+async def sync_thread_forum_tags(
+    thread: discord.Thread,
+    task: Task,
+    *,
+    project_name: str | None = None,
+) -> list[discord.ForumTag]:
+    """Synchronizes forum tags on a thread workspace to reflect the current task state.
+
+    Resolves tags via resolve_forum_tags (applying ⏰ Overdue when task is overdue,
+    alongside status, priority, project, and squad tags up to the 5-tag cap) and
+    updates the thread if tags have changed.
+    """
+    parent = getattr(thread, "parent", None)
+    if not isinstance(parent, discord.ForumChannel):
+        return []
+
+    existing = getattr(thread, "applied_tags", None) or []
+    tags = resolve_forum_tags(
+        parent,
+        task=task,
+        project_name=project_name,
+        existing_tags=existing,
+    )
+
+    if hasattr(thread, "edit"):
+        edit_res = thread.edit(applied_tags=tags)
+        if hasattr(edit_res, "__await__"):
+            await edit_res
+
+    return tags
 
 
 async def setup_forum_tags(forum_channel: discord.ForumChannel) -> tuple[int, int, str | None]:
