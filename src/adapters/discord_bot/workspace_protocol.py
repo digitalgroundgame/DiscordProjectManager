@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 import discord
@@ -168,3 +168,39 @@ class IProjectDiscordWorkspace(Protocol):
     ) -> ProjectWorkspaceRef:
         """Migrates a Project to a new channel, updating DB links, tags, and Control Hubs."""
         ...
+
+    async def rebuild_workspace(
+        self,
+        project_id: UUID,
+        *,
+        guild: discord.Guild,
+        target_channel: discord.abc.GuildChannel | int | None = None,
+        progress_callback: Any | None = None,
+    ) -> RebuildWorkspaceResult:
+        """Reconstructs and reconciles a Project's Discord presence from database state."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class RebuildProgress:
+    """Progress snapshot during workspace rebuilding."""
+
+    step: str
+    current: int
+    total: int
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class RebuildWorkspaceResult:
+    """Result of a Project Workspace rebuild and reconciliation operation."""
+
+    project: Project
+    channel_id: int
+    forum_created: bool
+    tags_created: int
+    hub_rebuilt: bool
+    tasks_reconciled: int
+    tasks_recreated: int
+    tasks_archived: int
+    warnings: tuple[str, ...] = ()

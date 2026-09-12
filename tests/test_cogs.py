@@ -986,3 +986,129 @@ async def test_pm_menu_command_and_bot_wiring(services):
     kwargs = interaction.response.send_message.call_args.kwargs
     assert "embed" in kwargs
     assert "view" in kwargs
+
+
+def test_project_rebuild_command_parameters():
+    """Verify that project rebuild command requires 'project_name' and accepts optional 'forum'."""
+    cmd = PmCog.project_rebuild
+    params = {p.name: p for p in cmd.parameters}
+
+    assert "project_name" in params
+    assert params["project_name"].required is True
+
+    assert "forum" in params
+    assert params["forum"].required is False
+
+
+@pytest.mark.asyncio
+async def test_project_rebuild_execution_shows_confirmation(services):
+    """Verifies that invoking /pm project rebuild displays an ephemeral confirmation view."""
+    proj_srv = services["project"]
+    guild_id = 9999999999
+    bot = MagicMock()
+
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Security App",
+        prefix="SEC",
+        discord_channel_id=12345,
+    )
+
+    mock_project_workspace = MagicMock()
+    cog = PmCog(bot=bot, project_service=proj_srv, project_workspace=mock_project_workspace)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.guild_permissions = discord.Permissions(manage_guild=True)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await cog.project_rebuild.callback(
+        cog,
+        interaction=interaction,
+        project_name=project.name,
+    )
+
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    assert "view" in kwargs
+    assert "embed" in kwargs
+
+    # Now test clicking Confirm
+    confirm_view = kwargs["view"]
+    btn_interaction = MagicMock(spec=discord.Interaction)
+    btn_interaction.guild = interaction.guild
+    btn_interaction.response = MagicMock()
+    btn_interaction.response.edit_message = AsyncMock()
+    btn_interaction.edit_original_response = AsyncMock()
+
+    from src.adapters.discord_bot.workspace_protocol import RebuildWorkspaceResult
+
+    mock_project_workspace.rebuild_workspace = AsyncMock(
+        return_value=RebuildWorkspaceResult(
+            project=project,
+            channel_id=12345,
+            forum_created=False,
+            tags_created=6,
+            hub_rebuilt=True,
+            tasks_reconciled=3,
+            tasks_recreated=1,
+            tasks_archived=1,
+            warnings=(),
+        )
+    )
+
+    await confirm_view.confirm.callback(btn_interaction)
+
+    mock_project_workspace.rebuild_workspace.assert_awaited_once()
+    btn_interaction.edit_original_response.assert_awaited()
+    final_kwargs = btn_interaction.edit_original_response.call_args.kwargs
+    assert "embed" in final_kwargs
+    assert "Workspace Rebuilt" in final_kwargs["embed"].title
+
+
+@pytest.mark.asyncio
+async def test_project_rebuild_cancel_button_cancels(services):
+    """Verifies that clicking Cancel aborts the rebuild."""
+    proj_srv = services["project"]
+    guild_id = 9999999999
+    bot = MagicMock()
+
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Security App 2",
+        prefix="SEC2",
+        discord_channel_id=12345,
+    )
+
+    mock_project_workspace = MagicMock()
+    cog = PmCog(bot=bot, project_service=proj_srv, project_workspace=mock_project_workspace)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(spec=discord.Member)
+    interaction.user.guild_permissions = discord.Permissions(manage_guild=True)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await cog.project_rebuild.callback(
+        cog,
+        interaction=interaction,
+        project_name=project.name,
+    )
+
+    kwargs = interaction.response.send_message.call_args.kwargs
+    confirm_view = kwargs["view"]
+
+    btn_interaction = MagicMock(spec=discord.Interaction)
+    btn_interaction.response = MagicMock()
+    btn_interaction.response.edit_message = AsyncMock()
+
+    await confirm_view.cancel.callback(btn_interaction)
+
+    mock_project_workspace.rebuild_workspace.assert_not_called()
+    btn_interaction.response.edit_message.assert_awaited_once()
+    cancel_kwargs = btn_interaction.response.edit_message.call_args.kwargs
+    assert "cancelled" in cancel_kwargs["content"].lower()

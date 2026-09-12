@@ -57,6 +57,14 @@ _Avoid_: Pinned post, dashboard message, channel header
 A native Discord forum channel configured with standardized PM tags (Status, Priority, Squad) and bound to a Project.
 _Avoid_: Forum, board, category
 
+**Workspace Rebuild**:
+The administrative reconciliation and reconstruction of a Project Workspace's Discord presence (Forum Channel, standard PM tags, pinned Control Hub, and Thread Workspaces with Task Action Cards) from canonical database records following accidental channel deletion, desynchronization, or project unarchival.
+_Avoid_: Discord resync, project restore, database import, channel fix
+
+**Thread Reconciliation**:
+The process of inspecting registered tasks against live Discord thread snowflakes, resynchronizing intact workspaces, re-provisioning missing thread workspaces, and locking/archiving historical tasks to satisfy the Archive Invariant.
+_Avoid_: Thread recreation, task repair, snowflake remapping
+
 ### Asynchronous Pipeline & Dependencies
 
 **Outbox Event**:

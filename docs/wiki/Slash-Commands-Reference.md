@@ -46,6 +46,7 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 | **`archive`** | `project_name` (required) | Archives a project container and cascades thread archiving. | `Manage Server` |
 | **`unarchive`** | `project_name` (required) | Restores an archived project container and reopens task threads. | `Manage Server` |
 | **`setup_forum`** | `forum` (required) | Automatically configures standard PM tags on a Discord Forum Channel. | `Manage Server` |
+| **`rebuild`** | `project_name` (required)<br>`forum` (optional: `#Channel`) | Reconstructs and reconciles a project's Discord presence (forum channel, tags, control hub, and task thread workspaces) from database state. | `Manage Server` |
 
 ---
 

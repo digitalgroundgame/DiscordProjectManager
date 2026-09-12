@@ -53,8 +53,9 @@ async def test_project_menu_and_modal(services):
 
     # 1. Test ProjectMenuView and embed
     view = ProjectMenuView(proj_srv, team_srv, task_service=services["task"])
-    # 8 buttons: New Project, Active Projects, Set Squad Role, Set Lead, Archive, Restore, Tech Tree, Hub
-    assert len(view.children) == 8
+    # 9 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
+    # Archive, Restore, Rebuild Workspace, Tech Tree, Hub
+    assert len(view.children) == 9
 
     # Test clicking New Project opens ProjectChannelSelectView
     new_proj_interaction = MagicMock(spec=discord.Interaction)

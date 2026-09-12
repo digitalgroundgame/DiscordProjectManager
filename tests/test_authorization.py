@@ -674,12 +674,13 @@ async def test_permission_aware_project_menu_ui(services):
     manager_member = _make_mock_member(1001, manage_guild=True)
     manager_view = ProjectMenuView(proj_srv, team_srv, task_srv, user=manager_member)
     assert manager_view.is_server_manager is True
-    assert len(manager_view.children) == 8
+    assert len(manager_view.children) == 9
     assert manager_view.new_project_btn is not None
     assert manager_view.set_role_btn is not None
     assert manager_view.set_lead_btn is not None
     assert manager_view.archive_btn is not None
     assert manager_view.restore_btn is not None
+    assert manager_view.rebuild_btn is not None
     assert manager_view.list_projects_btn is not None
     assert manager_view.tech_tree_btn is not None
     assert manager_view.hub_btn is not None
@@ -688,6 +689,7 @@ async def test_permission_aware_project_menu_ui(services):
     assert "New Project" in manager_embed.description
     assert "Set Squad Role" in manager_embed.description
     assert "Archive Project" in manager_embed.description
+    assert "Rebuild Workspace" in manager_embed.description
 
     # 2. Non-server Manager view
     regular_member = _make_mock_member(2002, manage_guild=False, administrator=False)

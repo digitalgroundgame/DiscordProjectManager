@@ -13,6 +13,7 @@ from discord.ext import commands
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
 from src.adapters.discord_bot.views.hub_menu import build_hub_welcome_embed
+from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
 from src.adapters.discord_bot.views.task_embed import (
     build_task_embed,
     build_task_history_embed,
@@ -1349,6 +1350,76 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await send_interaction_error(
                 interaction, e, f"configuring forum tags for <#{forum.id}>", logger, ephemeral=True
             )
+
+    @project_group.command(
+        name="rebuild",
+        description="Rebuild and reconcile a project's Discord forum, tags, hub, and task threads.",
+    )
+    @app_commands.describe(
+        project_name="Name of the project to rebuild",
+        forum="Optional target Forum Channel to rebind to (auto-creates if omitted and missing)",
+    )
+    @app_commands.autocomplete(project_name=project_autocomplete)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def project_rebuild(
+        self,
+        interaction: discord.Interaction,
+        project_name: str,
+        forum: discord.ForumChannel | None = None,
+    ) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            return
+
+        project = await self.project_service.get_by_name(interaction.guild.id, project_name)
+        if not project:
+            # Check if archived
+            projects = await self.project_service.list_projects(interaction.guild.id, include_archived=True)
+            project = next((p for p in projects if p.name.lower() == project_name.lower()), None)
+            if not project:
+                await interaction.response.send_message(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                return
+
+        # Fetch task count for preview
+        task_count = 0
+        if self.task_service:
+            _, task_count = await self.task_service.list_tasks(
+                guild_id=interaction.guild.id, project_id=project.id, include_archived=True
+            )
+
+        channel_status = (
+            f"Rebind to <#{forum.id}>"
+            if forum
+            else (
+                f"Existing: <#{project.discord_channel_id}>"
+                if project.discord_channel_id and interaction.guild.get_channel(project.discord_channel_id)
+                else "Auto-create new ForumChannel"
+            )
+        )
+
+        embed = discord.Embed(
+            title=f"⚠️ Confirm Workspace Rebuild: [{project.prefix}] {project.name}",
+            description=(
+                f"Are you sure you want to rebuild the Discord workspace for **{project.name}**?\n\n"
+                f"**Planned Actions:**\n"
+                f"• **Channel Target:** {channel_status}\n"
+                f"• **Forum Tags:** Configure standard status, priority, and project tags\n"
+                f"• **Control Hub:** Mount and pin interactive Control Hub post\n"
+                f"• **Task Threads:** Reconcile **{task_count}** tasks "
+                "(recreate missing threads and enforce Archive Invariant)\n"
+                f"• **Project Status:** {'Unarchive and restore' if project.is_archived else 'Active'}\n\n"
+                "⚠️ *This will pace Discord API calls to respect rate limits.*"
+            ),
+            color=discord.Color.orange(),
+        )
+        view = RebuildConfirmView(
+            project_workspace=self.project_workspace,
+            project=project,
+            target_channel=forum,
+            interaction=interaction,
+            task_count=task_count,
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     # ==========================================
     # Squad Subgroup: /pm squad <cmd>
