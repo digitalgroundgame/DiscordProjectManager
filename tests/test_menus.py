@@ -546,7 +546,7 @@ async def test_pm_hub_navigation(services):
     hub_view = PmHubView(proj_srv, team_srv, task_srv, user_service=user_srv)
     welcome_embed = build_hub_welcome_embed()
     assert "Control Hub" in welcome_embed.title
-    assert len(hub_view.children) == 4  # New Task, Task Board, Projects, Tech Tree
+    assert len(hub_view.children) == 5  # New Task, Task Board, Projects, Tech Tree, Overdue
 
     mock_interaction = MagicMock(spec=discord.Interaction)
     mock_interaction.guild = MagicMock()

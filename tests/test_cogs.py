@@ -1221,3 +1221,133 @@ async def test_project_rebuild_cancel_button_cancels(services):
     btn_interaction.response.edit_message.assert_awaited_once()
     cancel_kwargs = btn_interaction.response.edit_message.call_args.kwargs
     assert "cancelled" in cancel_kwargs["content"].lower()
+
+
+def test_task_list_command_parameters_include_overdue():
+    """Verify that /task list command includes the overdue parameter."""
+    cmd = PmCog.task_list
+    params = {p.name: p for p in cmd.parameters}
+
+    assert "overdue" in params
+    assert params["overdue"].required is False
+
+
+@pytest.mark.asyncio
+async def test_task_list_command_execution_with_overdue(services):
+    """Verify that /task list with overdue=True passes overdue_only=True to task_service."""
+    task_srv = services["task"]
+    proj_srv = services["project"]
+    guild_id = 999111888
+
+    task_srv.list_tasks = AsyncMock(return_value=([], 0))
+
+    bot = MagicMock()
+    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_list.callback(
+        cog,
+        interaction=interaction,
+        overdue=True,
+    )
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    task_srv.list_tasks.assert_awaited_once()
+    kwargs = task_srv.list_tasks.call_args.kwargs
+    assert kwargs.get("overdue_only") is True
+
+    interaction.followup.send.assert_awaited_once()
+    send_kwargs = interaction.followup.send.call_args.kwargs
+    embed = send_kwargs.get("embed")
+    assert embed is not None
+    assert "Overdue" in embed.title
+
+
+@pytest.mark.asyncio
+async def test_task_list_view_overdue_button():
+    """Verify TaskListView has a working '⏰ Overdue' button that filters for overdue tasks."""
+    from datetime import datetime, timedelta
+    from uuid import uuid4
+
+    from src.adapters.discord_bot.views.task_list_view import TaskListView
+    from src.domain.enums import TaskStatus
+    from src.domain.models import Task
+
+    now = datetime.now(UTC)
+    t1 = Task(
+        id=uuid4(),
+        short_id="TST-1",
+        guild_id=123,
+        title="Late task",
+        status=TaskStatus.IN_PROGRESS,
+        due_at=now - timedelta(hours=2),
+        creator_discord_id=1001,
+    )
+    t2 = Task(
+        id=uuid4(),
+        short_id="TST-2",
+        guild_id=123,
+        title="On time task",
+        status=TaskStatus.IN_PROGRESS,
+        due_at=now + timedelta(hours=2),
+        creator_discord_id=1001,
+    )
+
+    view = TaskListView([t1, t2], total_count=2, title_context="Active Tasks")
+    overdue_btn = next((b for b in view.children if getattr(b, "custom_id", None) == "task_list:overdue"), None)
+    assert overdue_btn is not None
+    assert "Overdue" in overdue_btn.label
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.edit_message = AsyncMock()
+
+    # Click overdue button to filter
+    await overdue_btn.callback(interaction)
+    interaction.response.edit_message.assert_awaited_once()
+    kwargs = interaction.response.edit_message.call_args.kwargs
+    embed = kwargs.get("embed")
+    assert "Overdue" in embed.title
+    assert "TST-1" in embed.description
+    assert "TST-2" not in embed.description
+
+
+@pytest.mark.asyncio
+async def test_pm_hub_view_overdue_button(services):
+    """Verify PmHubView has an interactive '⏰ Overdue' button on row 0."""
+    from src.adapters.discord_bot.views.hub_menu import PmHubView
+
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+
+    hub_view = PmHubView(proj_srv, team_srv, task_srv)
+    overdue_btn = next((b for b in hub_view.children if getattr(b, "custom_id", None) == "pm_hub:overdue"), None)
+    assert overdue_btn is not None
+    assert overdue_btn.row == 0
+    assert "Overdue" in overdue_btn.label
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=12345)
+    interaction.channel = MagicMock(id=555, parent_id=None)
+    interaction.user = MagicMock(id=999)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    task_srv.list_tasks = AsyncMock(return_value=([], 0))
+
+    await overdue_btn.callback(interaction)
+    task_srv.list_tasks.assert_awaited_once()
+    call_kwargs = task_srv.list_tasks.call_args.kwargs
+    assert call_kwargs.get("overdue_only") is True
+
+    interaction.response.send_message.assert_awaited_once()
+    send_kwargs = interaction.response.send_message.call_args.kwargs
+    assert send_kwargs.get("ephemeral") is True
+    assert "Overdue" in send_kwargs.get("embed").title

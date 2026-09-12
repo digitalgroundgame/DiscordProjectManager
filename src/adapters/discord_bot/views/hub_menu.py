@@ -660,6 +660,62 @@ class PmHubView(BaseView):
             ephemeral=True,
         )
 
+    @discord.ui.button(
+        label="⏰ Overdue",
+        style=discord.ButtonStyle.danger,
+        row=0,
+        custom_id="pm_hub:overdue",
+    )
+    async def overdue_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not interaction.guild:
+            return
+        from src.adapters.discord_bot.menu_manager import menu_manager
+        from src.adapters.discord_bot.views.task_menu import TaskMenuView, build_task_board_embed
+
+        await menu_manager.register_menu(interaction)
+
+        projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
+        await self._refresh_hub_message(interaction, projects=projects)
+        channel_id = interaction.channel.id if interaction.channel else None
+        parent_id = getattr(interaction.channel, "parent_id", None)
+
+        channel_ids = {cid for cid in (channel_id, parent_id) if cid}
+        channel_projects = [p for p in projects if p.discord_channel_id and p.discord_channel_id in channel_ids]
+        selected_project_id = channel_projects[0].id if channel_projects else None
+
+        tasks, total = await self.task_service.list_tasks(
+            guild_id=interaction.guild.id,
+            project_id=selected_project_id,
+            overdue_only=True,
+            limit=15,
+        )
+
+        project_label = "All Projects (Global Scope)"
+        if selected_project_id:
+            match = channel_projects[0]
+            project_label = f"[{match.prefix}] {match.name} (This Channel)"
+
+        view = TaskMenuView(
+            self.task_service,
+            self.project_service,
+            self.team_service,
+            projects=projects,
+            current_channel_id=channel_id,
+            parent_channel_id=parent_id,
+            initial_project_id=selected_project_id,
+            initial_interaction=interaction,
+        )
+        embed = build_task_board_embed(
+            tasks=tasks,
+            total_count=total,
+            project_label=project_label,
+            status_label="⏰ Overdue Tasks (Past Deadline & Incomplete)",
+            assignee_label="All Members",
+        )
+        embed.title = f"⏰ Overdue Tasks ({total})"
+        embed.color = discord.Color.red()
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 def _format_squad_roles(squads: list[Squad] | None) -> str:
     """Formats list of squad roles as Discord mentions or fallback labels."""

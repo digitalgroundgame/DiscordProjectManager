@@ -542,6 +542,7 @@ class TaskService:
         status: TaskStatus | None = None,
         include_archived: bool = False,
         exclude_completed: bool = False,
+        overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Task], int]:
@@ -552,6 +553,7 @@ class TaskService:
             status=status,
             include_archived=include_archived,
             exclude_completed=exclude_completed,
+            overdue_only=overdue_only,
             limit=limit,
             offset=offset,
         )

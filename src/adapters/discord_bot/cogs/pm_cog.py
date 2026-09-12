@@ -457,6 +457,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         project_name="Filter by project name",
         user="Filter by assignee",
         status="Filter by execution status",
+        overdue="Filter for overdue tasks only",
     )
     @app_commands.choices(
         status=[
@@ -474,6 +475,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         project_name: str | None = None,
         user: discord.Member | None = None,
         status: str | None = None,
+        overdue: bool = False,
     ) -> None:
         if not interaction.guild:
             return
@@ -493,20 +495,25 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             if user:
                 title_parts.append(f"Assignee: {user.display_name}")
 
+            if overdue:
+                title_parts.append("Status: ⏰ Overdue")
+
             exclude_completed = False
             filter_status = None
             if status == "all":
                 filter_status = None
                 exclude_completed = False
-                title_parts.append("Status: All")
+                if not overdue:
+                    title_parts.append("Status: All")
             elif status in ("inProgress", "notStarted", "completed"):
                 filter_status = TaskStatus(status)
                 exclude_completed = False
-                title_parts.append(f"Status: {filter_status.value}")
+                if not overdue:
+                    title_parts.append(f"Status: {filter_status.value}")
             else:
                 filter_status = None
                 exclude_completed = True
-                if status == "active":
+                if status == "active" and not overdue:
                     title_parts.append("Status: Active")
 
             tasks, total_count = await self.task_service.list_tasks(
@@ -516,6 +523,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 status=filter_status,
                 include_archived=False,
                 exclude_completed=exclude_completed,
+                overdue_only=overdue,
                 limit=100,
             )
 

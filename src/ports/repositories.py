@@ -81,6 +81,7 @@ class ITaskRepo(ABC):
         status: TaskStatus | None = None,
         include_archived: bool = False,
         exclude_completed: bool = False,
+        overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Task], int]:

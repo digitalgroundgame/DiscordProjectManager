@@ -76,6 +76,10 @@ class TaskListView(BaseView):
         self.tasks = tasks
         self.total_count = total_count
         self.title_context = title_context
+        self._all_tasks = list(tasks)
+        self._all_total_count = total_count
+        self._all_title_context = title_context
+        self.is_overdue_filtered = False
         self.current_page = current_page
         self.total_pages = max(1, math.ceil(total_count / PAGE_SIZE))
         self._initial_interaction = initial_interaction
@@ -111,3 +115,26 @@ class TaskListView(BaseView):
             self._update_buttons()
             embed = build_page_embed(self.tasks, self.current_page, self.total_count, self.title_context)
             await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="⏰ Overdue", style=discord.ButtonStyle.danger, custom_id="task_list:overdue")
+    async def overdue_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.is_overdue_filtered = not self.is_overdue_filtered
+        if self.is_overdue_filtered:
+            filtered = [t for t in self._all_tasks if t.is_overdue]
+            self.tasks = filtered
+            self.total_count = len(filtered)
+            self.title_context = f"{self._all_title_context} (⏰ Overdue Only)"
+            button.style = discord.ButtonStyle.secondary
+            button.label = "📋 Show All"
+        else:
+            self.tasks = list(self._all_tasks)
+            self.total_count = self._all_total_count
+            self.title_context = self._all_title_context
+            button.style = discord.ButtonStyle.danger
+            button.label = "⏰ Overdue"
+
+        self.current_page = 0
+        self.total_pages = max(1, math.ceil(self.total_count / PAGE_SIZE))
+        self._update_buttons()
+        embed = build_page_embed(self.tasks, self.current_page, self.total_count, self.title_context)
+        await interaction.response.edit_message(embed=embed, view=self)

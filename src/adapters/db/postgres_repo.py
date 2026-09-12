@@ -379,6 +379,7 @@ class PostgresTaskRepo(BasePostgresRepo, ITaskRepo):
         status: TaskStatus | None = None,
         include_archived: bool = False,
         exclude_completed: bool = False,
+        overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Task], int]:
@@ -394,6 +395,12 @@ class PostgresTaskRepo(BasePostgresRepo, ITaskRepo):
                 filters.append(TaskTable.status == status.value)
             elif exclude_completed:
                 filters.append(TaskTable.status != TaskStatus.COMPLETED.value)
+            if overdue_only:
+                now = datetime.now(UTC)
+                filters.append(TaskTable.due_at.is_not(None))
+                filters.append(TaskTable.due_at < now)
+                filters.append(TaskTable.status != TaskStatus.COMPLETED.value)
+                filters.append(TaskTable.archived_at.is_(None))
 
             # Count total
             count_stmt = select(func.count()).select_from(TaskTable).where(*filters)
