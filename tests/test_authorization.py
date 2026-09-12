@@ -6,7 +6,7 @@ import pytest
 from src.adapters.discord_bot.bot import DggPmBot
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.views.task_modals import TaskEditModal, TaskNoteModal
-from src.domain.enums import TeamRoleType
+from src.domain.enums import PriorityLevel, TeamRoleType
 from src.domain.exceptions import PermissionDeniedError
 from src.services.auth_service import AuthService
 
@@ -343,7 +343,7 @@ async def test_task_assignment_role_eligibility_enforcement(services):
 
     interaction_fail.followup.send.assert_awaited_once()
     fail_msg = interaction_fail.followup.send.await_args.args[0]
-    assert "does not hold the squad Discord role for this project" in fail_msg
+    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in fail_msg
 
     # 3. Dynamic button assignee selection with ineligible member fails
     dgg_bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
@@ -361,7 +361,7 @@ async def test_task_assignment_role_eligibility_enforcement(services):
     await dgg_bot._handle_dynamic_task_button(dynamic_fail, "assignee", task.id)
     dynamic_fail.response.send_message.assert_awaited_once()
     dyn_err = dynamic_fail.response.send_message.await_args.args[0]
-    assert "does not hold the squad Discord role for this project" in dyn_err
+    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in dyn_err
 
 
 @pytest.mark.asyncio
@@ -1032,3 +1032,291 @@ async def test_tech_tree_visual_graph_permission_gating(services):
     send_kwargs = interaction_allowed.followup.send.await_args.kwargs
     assert send_kwargs.get("embed") is not None
     assert send_kwargs.get("file") is not None
+
+
+@pytest.mark.asyncio
+async def test_can_assign_task_to_user_uncached_member_fallback_fetch(services):
+    """Verifies that can_assign_task_to_user fetches uncached members via guild.fetch_member."""
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990020
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Uncached",
+        prefix="UNC",
+        discord_role_id=5555,
+    )
+
+    uncached_user_id = 2001
+    uncached_member = _make_mock_member(uncached_user_id, role_ids=[5555])
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.get_member = MagicMock(return_value=None)
+    mock_guild.fetch_member = AsyncMock(return_value=uncached_member)
+
+    # Calling with uncached user ID should fall back to fetch_member and return True
+    eligible = await auth_srv.can_assign_task_to_user(mock_guild, uncached_user_id, project.id)
+
+    mock_guild.get_member.assert_called_once_with(uncached_user_id)
+    mock_guild.fetch_member.assert_awaited_once_with(uncached_user_id)
+    assert eligible is True
+
+
+@pytest.mark.asyncio
+async def test_can_assign_task_to_user_fetch_member_error_handling(services):
+    """Verifies that can_assign_task_to_user gracefully handles Discord API errors on fetch_member."""
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990021
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Error Handling",
+        prefix="ERR",
+        discord_role_id=5555,
+    )
+
+    user_id = 2002
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.get_member = MagicMock(return_value=None)
+
+    # 1. NotFound error
+    mock_guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "User not found"))
+    assert await auth_srv.can_assign_task_to_user(mock_guild, user_id, project.id) is False
+
+    # 2. HTTPException error
+    mock_guild.fetch_member = AsyncMock(side_effect=discord.HTTPException(MagicMock(), "Discord API error"))
+    assert await auth_srv.can_assign_task_to_user(mock_guild, user_id, project.id) is False
+
+
+@pytest.mark.asyncio
+async def test_require_task_assignee_eligibility_error_message_details(services):
+    """Verifies that require_task_assignee_eligibility formats a descriptive error naming the project and roles."""
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990022
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Apollo",
+        prefix="APO",
+        discord_role_ids=[7001, 7002],
+    )
+
+    ineligible_user_id = 2003
+    ineligible_member = _make_mock_member(ineligible_user_id, role_ids=[9999])
+
+    role_7001 = MagicMock(spec=discord.Role)
+    role_7001.id = 7001
+    role_7001.name = "Engineering"
+
+    role_7002 = MagicMock(spec=discord.Role)
+    role_7002.id = 7002
+    role_7002.name = "Design"
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+    mock_guild.get_member = MagicMock(return_value=ineligible_member)
+    mock_guild.get_role.side_effect = lambda rid: {
+        7001: role_7001,
+        7002: role_7002,
+    }.get(rid)
+
+    with pytest.raises(PermissionDeniedError) as exc_info:
+        await auth_srv.require_task_assignee_eligibility(mock_guild, ineligible_member, project.id)
+
+    err_msg = str(exc_info.value)
+    assert f"<@{ineligible_user_id}>" in err_msg
+    assert "Project Apollo" in err_msg
+    assert "@Engineering" in err_msg
+    assert "@Design" in err_msg
+    assert "Project Lead" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_can_assign_task_to_user_project_lead_exempt(services):
+    """Verifies that Project Leads are always eligible for assignment without squad roles or member fetching."""
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990023
+    lead_id = 1111
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Lead Exemption",
+        prefix="PLE",
+        discord_role_ids=[8888],
+        lead_discord_id=lead_id,
+    )
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.get_member = MagicMock(return_value=None)
+    mock_guild.fetch_member = AsyncMock()
+
+    # 1. Check can_assign_task_to_user returns True without fetching member
+    eligible = await auth_srv.can_assign_task_to_user(mock_guild, lead_id, project.id)
+    assert eligible is True
+    mock_guild.fetch_member.assert_not_awaited()
+
+    # 2. Check require_task_assignee_eligibility does not raise
+    await auth_srv.require_task_assignee_eligibility(mock_guild, lead_id, project.id)
+
+
+@pytest.mark.asyncio
+async def test_task_action_controls_ineligible_assignee_error_feedback(services):
+    """Verifies that selecting an ineligible member in TaskActionControlsView catches PermissionDeniedError,
+    responds immediately with an ephemeral error message, and preserves the prior assignee."""
+    from src.adapters.discord_bot.views.task_buttons import TaskActionControlsView
+
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990024
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Phoenix",
+        prefix="PHX",
+        discord_role_ids=[3333],
+    )
+
+    prior_assignee_id = 1001
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Phoenix Core",
+        creator_discord_id=prior_assignee_id,
+        assignee_discord_id=prior_assignee_id,
+        project_id=project.id,
+    )
+
+    view = TaskActionControlsView(task, task_srv, auth_srv)
+
+    ineligible_id = 9999
+    ineligible_member = _make_mock_member(ineligible_id, role_ids=[1234])
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+    mock_guild.get_member.return_value = ineligible_member
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = mock_guild
+    interaction.user = _make_mock_member(prior_assignee_id)
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.edit_message = AsyncMock()
+
+    # User selected an ineligible member in the select component
+    view.assignee_select._values = [ineligible_member]
+
+    await view._on_assignee_selected(interaction)
+
+    # 1. Ephemeral card edited in-place with error banner and red color
+    interaction.response.edit_message.assert_awaited_once()
+    embed = interaction.response.edit_message.await_args.kwargs["embed"]
+    assert "does not hold an eligible squad Discord role for project 'Project Phoenix'" in embed.description
+    assert embed.color == discord.Color.red()
+
+    # 2. Staged assignee reset to prior assignee; task in db unchanged
+    assert view.staged_assignee_id == prior_assignee_id
+    assert view.task.assignee_discord_id == prior_assignee_id
+    db_task = await task_srv.get_by_id(task.id)
+    assert db_task.assignee_discord_id == prior_assignee_id
+
+    # 3. Dropdown reconstructed with canonical default (resetting invalid selection)
+    assert len(view.assignee_select.default_values) == 1
+    assert view.assignee_select.default_values[0].id == prior_assignee_id
+
+
+@pytest.mark.asyncio
+async def test_task_action_controls_save_and_cancel_workflow(services):
+    """Verifies that Quick Controls stages changes across dropdowns and commits them on Save,
+    while Cancel dismisses without persisting."""
+    from src.adapters.discord_bot.views.task_buttons import TaskActionControlsView
+
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+    auth_srv = AuthService(proj_srv, team_srv)
+
+    guild_id = 9990025
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Project Confirm",
+        prefix="CFM",
+        discord_role_ids=[3333],
+    )
+
+    prior_assignee_id = 1001
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Confirm Workflow Test",
+        creator_discord_id=prior_assignee_id,
+        assignee_discord_id=prior_assignee_id,
+        project_id=project.id,
+    )
+
+    view = TaskActionControlsView(task, task_srv, auth_srv)
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+
+    interaction_clear = MagicMock(spec=discord.Interaction)
+    interaction_clear.guild = mock_guild
+    interaction_clear.user = _make_mock_member(prior_assignee_id)
+    interaction_clear.response = MagicMock()
+    interaction_clear.response.edit_message = AsyncMock()
+
+    # 1. User clears assignee (staged, not yet saved to DB)
+    view.assignee_select._values = []
+    await view._on_assignee_selected(interaction_clear)
+    interaction_clear.response.edit_message.assert_awaited_once()
+    assert view.staged_assignee_id is None
+    db_task = await task_srv.get_by_id(task.id)
+    assert db_task.assignee_discord_id == prior_assignee_id  # Not yet committed!
+
+    # 2. User changes priority to High (staged)
+    interaction_prio = MagicMock(spec=discord.Interaction)
+    interaction_prio.guild = mock_guild
+    interaction_prio.user = _make_mock_member(prior_assignee_id)
+    interaction_prio.response = MagicMock()
+    interaction_prio.response.edit_message = AsyncMock()
+
+    view.priority_select._values = ["high"]
+    await view._on_priority_selected(interaction_prio)
+    assert view.staged_priority == PriorityLevel.HIGH
+
+    # 3. User clicks Save Changes -> commits all staged changes atomically
+    interaction_save = MagicMock(spec=discord.Interaction)
+    interaction_save.guild = mock_guild
+    interaction_save.user = _make_mock_member(prior_assignee_id)
+    interaction_save.channel = MagicMock(spec=discord.Thread)
+    interaction_save.response = MagicMock()
+    interaction_save.response.edit_message = AsyncMock()
+
+    await view._on_save_clicked(interaction_save)
+    interaction_save.response.edit_message.assert_awaited_once()
+    saved_embed = interaction_save.response.edit_message.await_args.kwargs["embed"]
+    assert "Updated" in saved_embed.title
+    assert saved_embed.color == discord.Color.green()
+
+    db_task = await task_srv.get_by_id(task.id)
+    assert db_task.assignee_discord_id is None
+    assert db_task.priority == PriorityLevel.HIGH
+
+    # 4. Cancel button calls delete_original_response
+    interaction_cancel = MagicMock(spec=discord.Interaction)
+    interaction_cancel.guild_id = guild_id
+    interaction_cancel.user = _make_mock_member(prior_assignee_id)
+    interaction_cancel.response = MagicMock()
+    interaction_cancel.response.defer = AsyncMock()
+    interaction_cancel.delete_original_response = AsyncMock()
+
+    cancel_view = TaskActionControlsView(task, task_srv, auth_srv)
+    await cancel_view._on_cancel_clicked(interaction_cancel)
+    interaction_cancel.delete_original_response.assert_awaited_once()

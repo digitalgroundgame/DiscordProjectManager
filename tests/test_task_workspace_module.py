@@ -262,13 +262,25 @@ async def test_render_task_controls_panels(services):
     )
 
     interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild_id = 999
+    interaction.user = MagicMock(id=1001)
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
+    interaction.delete_original_response = AsyncMock()
 
-    # Quick Controls
+    # Quick Controls (first open)
     await adapter.render_task_controls(interaction, task, panel="quick_controls")
     interaction.response.send_message.assert_awaited_once()
     assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
+
+    # Quick Controls (second open by same user - dismisses previous)
+    interaction_second = MagicMock(spec=discord.Interaction)
+    interaction_second.guild_id = 999
+    interaction_second.user = MagicMock(id=1001)
+    interaction_second.response = MagicMock()
+    interaction_second.response.send_message = AsyncMock()
+    await adapter.render_task_controls(interaction_second, task, panel="quick_controls")
+    interaction.delete_original_response.assert_awaited_once()
 
     # Dependencies
     interaction.response.send_message.reset_mock()

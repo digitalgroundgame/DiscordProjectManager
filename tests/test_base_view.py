@@ -80,6 +80,30 @@ async def test_base_view_on_error_stale_version_error():
 
 
 @pytest.mark.asyncio
+async def test_base_view_on_error_domain_error():
+    """Verify that DggPmError/DomainError is translated to a user-facing error message."""
+    from src.domain.exceptions import PermissionDeniedError
+
+    view = BaseView()
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+
+    item = MagicMock(spec=discord.ui.Item)
+    item.custom_id = "test_btn_perm"
+
+    error = PermissionDeniedError("<@123> does not hold the required squad role.")
+
+    await view.on_error(interaction, error, item)
+
+    interaction.response.send_message.assert_awaited_once()
+    args, kwargs = interaction.response.send_message.call_args
+    assert "❌ <@123> does not hold the required squad role." in args[0]
+    assert kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
 async def test_base_view_on_error_logs_interaction_details(caplog):
     """Verify that unhandled exceptions log interaction details (user ID, guild ID, channel ID, custom ID)."""
     view = BaseView()

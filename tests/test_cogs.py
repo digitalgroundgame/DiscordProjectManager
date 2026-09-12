@@ -858,8 +858,7 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_priority_selected(prio_interaction)
     prio_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.priority == PriorityLevel.HIGH
-    mock_bot.sync_root_task_message.assert_awaited_once()
+    assert controls_view.staged_priority == PriorityLevel.HIGH
 
     # 2. Assignee change
     mock_member = MagicMock(spec=discord.Member)
@@ -873,7 +872,7 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_assignee_selected(assign_interaction)
     assign_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.assignee_discord_id == 4001
+    assert controls_view.staged_assignee_id == 4001
 
     # 2b. Clear Assignee directly via dropdown deselect
     controls_view.assignee_select._values = []
@@ -885,10 +884,11 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_assignee_selected(clear_assign_interaction)
     clear_assign_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.assignee_discord_id is None
+    assert controls_view.staged_assignee_id is None
 
     # 3. Unassign button
-    controls_view.task.assignee_discord_id = 4001
+    controls_view.staged_assignee_id = 4001
+    controls_view._rebuild_items()
     unassign_interaction = MagicMock(spec=discord.Interaction)
     unassign_interaction.user = MagicMock(id=1001)
     unassign_interaction.response = MagicMock()
@@ -896,7 +896,7 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_unassign_clicked(unassign_interaction)
     unassign_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.assignee_discord_id is None
+    assert controls_view.staged_assignee_id is None
 
     # 4. Due date
     controls_view.due_select._values = ["tomorrow"]
@@ -907,7 +907,7 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_due_selected(due_interaction)
     due_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.due_at is not None
+    assert controls_view.staged_due_at is not None
 
     # 5. Watchers
     mock_w = MagicMock(spec=discord.Member)
@@ -920,7 +920,7 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_watchers_selected(watchers_interaction)
     watchers_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.watchers == [5001]
+    assert controls_view.staged_watchers == [5001]
 
     # 5b. Remove watchers directly via dropdown deselect
     controls_view.watchers_select._values = []
@@ -931,17 +931,27 @@ async def test_task_quick_controls_view_callbacks(services):
 
     await controls_view._on_watchers_selected(clear_watchers_interaction)
     clear_watchers_interaction.response.edit_message.assert_awaited_once()
-    assert controls_view.task.watchers == []
+    assert controls_view.staged_watchers == []
 
-    # 6. Done button
-    done_interaction = MagicMock(spec=discord.Interaction)
-    done_interaction.response = MagicMock()
-    done_interaction.response.edit_message = AsyncMock()
+    # 6. Save Changes button commits all staged changes atomically
+    controls_view.staged_priority = PriorityLevel.HIGH
+    controls_view.staged_assignee_id = 4001
+    controls_view.staged_watchers = [5001]
 
-    await controls_view._on_done_clicked(done_interaction)
-    done_interaction.response.edit_message.assert_awaited_once()
-    done_embed = done_interaction.response.edit_message.call_args.kwargs["embed"]
-    assert "Updated" in done_embed.title
+    save_interaction = MagicMock(spec=discord.Interaction)
+    save_interaction.user = MagicMock(id=1001)
+    save_interaction.response = MagicMock()
+    save_interaction.response.edit_message = AsyncMock()
+
+    await controls_view._on_save_clicked(save_interaction)
+    save_interaction.response.edit_message.assert_awaited_once()
+    saved_embed = save_interaction.response.edit_message.call_args.kwargs["embed"]
+    assert "Updated" in saved_embed.title
+    assert controls_view.task.priority == PriorityLevel.HIGH
+    assert controls_view.task.assignee_discord_id == 4001
+    assert controls_view.task.watchers == [5001]
+    mock_bot.sync_root_task_message.assert_awaited_once()
+    mock_bot.sync_task_thread.assert_awaited_once()
 
 
 @pytest.mark.asyncio
