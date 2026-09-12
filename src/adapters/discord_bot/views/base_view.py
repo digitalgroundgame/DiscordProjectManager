@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from src.domain.exceptions import StaleVersionError
+from src.domain.exceptions import DggPmError, StaleVersionError
 
 logger = logging.getLogger("dgg_pm.adapters.discord_bot.views.base_view")
 
@@ -47,6 +47,8 @@ async def _handle_component_error(
 
     if isinstance(error, StaleVersionError):
         msg = "⚠️ This task was already modified by another user. Please refresh the card and try again."
+    elif isinstance(error, DggPmError):
+        msg = f"❌ {error}"
     else:
         msg = "⚠️ An unexpected error occurred while processing this action. Please try again later."
 

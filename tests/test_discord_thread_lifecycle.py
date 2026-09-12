@@ -398,8 +398,9 @@ async def test_task_quick_controls_completed_task_unarchives_and_rearchives(serv
     interaction.response = MagicMock()
     interaction.response.edit_message = AsyncMock()
 
-    # Click Unassign
+    # Click Unassign, then click Save Changes
     await controls_view._on_unassign_clicked(interaction)
+    await controls_view._on_save_clicked(interaction)
 
     # Verify unarchive (archived=False) and re-archive (archived=True) were both called
     edit_calls = mock_thread.edit.call_args_list

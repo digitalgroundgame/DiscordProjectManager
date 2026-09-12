@@ -416,6 +416,9 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
     ) -> None:
         """Renders interactive ephemeral control panels (Quick Controls, Dependencies, Audit Trail)."""
         if panel == "quick_controls":
+            from src.adapters.discord_bot.menu_manager import menu_manager
+
+            await menu_manager.register_menu(interaction)
             view = TaskQuickControlsView(
                 task=task,
                 task_service=self.task_service,

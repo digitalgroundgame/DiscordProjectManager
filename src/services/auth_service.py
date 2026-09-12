@@ -246,8 +246,14 @@ class AuthService:
         member: Any = None
         if hasattr(target_user, "roles"):
             member = target_user
-        elif guild and user_id and hasattr(guild, "get_member"):
-            member = guild.get_member(user_id)
+        elif guild and user_id:
+            if hasattr(guild, "get_member"):
+                member = guild.get_member(user_id)
+            if member is None and hasattr(guild, "fetch_member"):
+                try:
+                    member = await guild.fetch_member(user_id)
+                except (discord.NotFound, discord.HTTPException):
+                    member = None
 
         if not member:
             return False
@@ -269,9 +275,29 @@ class AuthService:
         """Raises PermissionDeniedError if the target user is not eligible for assignment."""
         if not await self.can_assign_task_to_user(guild, target_user, project_id):
             user_id = target_user.id if hasattr(target_user, "id") else target_user
+            project = await self.project_service.get_by_id(project_id) if project_id else None
+            role_names: list[str] = []
+            if project:
+                project_roles = await self.get_project_role_ids(project)
+                for rid in sorted(project_roles):
+                    role = guild.get_role(rid) if (guild and hasattr(guild, "get_role")) else None
+                    if role:
+                        role_names.append(f"@{role.name}")
+                    elif self.squad_service or self.team_service:
+                        squad_svc = self.squad_service or self.team_service
+                        squad = await squad_svc.get_by_role_id(project.guild_id, rid)
+                        if squad:
+                            role_names.append(f"@{squad.name}")
+                        else:
+                            role_names.append(f"<@&{rid}>")
+                    else:
+                        role_names.append(f"<@&{rid}>")
+
+            roles_str = ", ".join(role_names) if role_names else "a squad role"
+            proj_str = f"project '{project.name}'" if project else "this project"
             raise PermissionDeniedError(
-                f"<@{user_id}> does not hold the squad Discord role for this project. "
-                "Only members with the project's Discord role or the Project Lead can be assigned."
+                f"<@{user_id}> does not hold an eligible squad Discord role for {proj_str}. "
+                f"Required role(s): {roles_str}. Only members with these roles or the Project Lead can be assigned."
             )
 
     async def can_manage_squad_leads(self, user: discord.Member | discord.User, squad_id: UUID) -> bool:
