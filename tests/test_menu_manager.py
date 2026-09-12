@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -104,3 +105,53 @@ async def test_schedule_toast_dismissal_none():
     manager = MenuSessionManager()
     manager.schedule_toast_dismissal(None, delay=0.01)
     assert len(manager._background_tasks) == 0
+
+
+def test_attach_dismissal_notice_no_existing_description():
+    from datetime import datetime
+
+    import discord
+
+    from src.adapters.discord_bot.menu_manager import attach_dismissal_notice
+
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
+    target_ts = int(base_time.timestamp()) + 8
+
+    embed = discord.Embed(title="Toast Title")
+    result = attach_dismissal_notice(embed, delay=8.0, base_time=base_time)
+
+    assert result is embed
+    assert result.description == f"⏱️ Auto-dismisses <t:{target_ts}:R>"
+
+
+def test_attach_dismissal_notice_with_existing_description():
+    from datetime import datetime
+
+    import discord
+
+    from src.adapters.discord_bot.menu_manager import attach_dismissal_footer
+
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
+    target_ts = int(base_time.timestamp()) + 10
+
+    embed = discord.Embed(title="Task Created", description="Details")
+    embed.set_footer(text="Task UUID: 12345", icon_url="https://example.com/icon.png")
+    result = attach_dismissal_footer(embed, delay=10.0, base_time=base_time)
+
+    assert result.description == f"Details\n\n⏱️ Auto-dismisses <t:{target_ts}:R>"
+    assert result.footer.text == "Task UUID: 12345"
+    assert result.footer.icon_url == "https://example.com/icon.png"
+
+
+def test_format_toast_message():
+    from datetime import datetime
+
+    from src.adapters.discord_bot.menu_manager import format_toast_message
+
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
+    target_ts = int(base_time.timestamp()) + 10
+
+    msg = "❌ Invalid date expression: `xyz`"
+    formatted = format_toast_message(msg, delay=10.0, base_time=base_time)
+
+    assert formatted == f"❌ Invalid date expression: `xyz`\n\n*⏱️ Auto-dismisses <t:{target_ts}:R>*"

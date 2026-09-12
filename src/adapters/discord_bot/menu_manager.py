@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 
@@ -87,3 +88,42 @@ class MenuSessionManager:
 
 
 menu_manager = MenuSessionManager()
+
+
+def attach_dismissal_notice(
+    embed: discord.Embed,
+    delay: float = 8.0,
+    *,
+    base_time: datetime | None = None,
+    prefix: str = "⏱️ Auto-dismisses",
+) -> discord.Embed:
+    """Appends dynamic Discord relative countdown to embed description where Markdown is parsed and rendered."""
+    base = base_time or datetime.now(UTC)
+    target_ts = int((base + timedelta(seconds=delay)).timestamp())
+    timer_str = f"<t:{target_ts}:R>"
+    notice = f"{prefix} {timer_str}"
+
+    if embed.description:
+        embed.description = f"{embed.description}\n\n{notice}"
+    else:
+        embed.description = notice
+
+    return embed
+
+
+# Alias to maintain backwards compatibility
+attach_dismissal_footer = attach_dismissal_notice
+
+
+def format_toast_message(
+    text: str,
+    delay: float = 8.0,
+    *,
+    base_time: datetime | None = None,
+    prefix: str = "⏱️ Auto-dismisses",
+) -> str:
+    """Appends dynamic Discord relative countdown to text-only toasts."""
+    base = base_time or datetime.now(UTC)
+    target_ts = int((base + timedelta(seconds=delay)).timestamp())
+    timer_str = f"<t:{target_ts}:R>"
+    return f"{text}\n\n*{prefix} {timer_str}*"

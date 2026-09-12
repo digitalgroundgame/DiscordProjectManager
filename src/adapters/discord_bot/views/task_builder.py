@@ -136,13 +136,17 @@ class TaskCustomDueModal(BaseModal):
             self.target_view._rebuild_items()
             embed = self._render_parent_embed(interaction)
             await interaction.response.edit_message(embed=embed, view=self.target_view)
-            toast = await interaction.followup.send(
+            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+
+            msg = format_toast_message(
                 f"❌ Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
+                delay=10.0,
+            )
+            toast = await interaction.followup.send(
+                msg,
                 ephemeral=True,
                 wait=True,
             )
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
             menu_manager.schedule_toast_dismissal(toast, delay=10.0)
             return
 
@@ -651,9 +655,10 @@ class TaskCreateDraftView(BaseView):
             description="The task draft was discarded.",
             color=discord.Color.dark_grey(),
         )
-        await interaction.response.edit_message(embed=embed, view=None)
-        from src.adapters.discord_bot.menu_manager import menu_manager
+        from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
+        attach_dismissal_footer(embed, delay=3.0)
+        await interaction.response.edit_message(embed=embed, view=None)
         menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
 
     async def _on_confirm_clicked(self, interaction: discord.Interaction) -> None:
@@ -790,10 +795,10 @@ class TaskCreateDraftView(BaseView):
                 color=discord.Color.green(),
             )
             success_embed.set_footer(text=f"Task UUID: {task.id}")
+            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
+            attach_dismissal_footer(success_embed, delay=8.0)
             await interaction.response.edit_message(embed=success_embed, view=None)
-
-            from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:

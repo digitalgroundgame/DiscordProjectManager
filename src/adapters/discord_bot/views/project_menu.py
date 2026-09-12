@@ -293,8 +293,10 @@ class ProjectCreateDraftView(BaseView):
                 description="Project draft was discarded.",
                 color=discord.Color.dark_grey(),
             )
+            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
+
+            attach_dismissal_footer(embed, delay=3.0)
             await interaction.response.edit_message(embed=embed, view=None)
-            from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
         except Exception as e:
@@ -349,9 +351,10 @@ class ProjectCreateDraftView(BaseView):
             if project.category:
                 embed.add_field(name="Category", value=project.category, inline=True)
             embed.set_footer(text=f"Project ID: {project.id}")
+            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
+            attach_dismissal_footer(embed, delay=8.0)
             await interaction.response.edit_message(embed=embed, view=None)
-            from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:

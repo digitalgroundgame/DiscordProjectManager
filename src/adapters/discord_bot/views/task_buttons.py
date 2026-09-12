@@ -337,12 +337,13 @@ class TaskQuickControlsView(BaseView):
                 description="Task changes have been saved to the workspace.",
                 color=discord.Color.green(),
             )
+            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
+
+            attach_dismissal_footer(embed, delay=3.0)
             await interaction.response.edit_message(embed=embed, view=None)
             if self.bot and hasattr(self.bot, "sync_root_task_message"):
                 await self.bot.sync_root_task_message(updated_task)
                 await self.bot.sync_task_thread(updated_task, sync_archive=False)
-
-            from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.unregister_menu(interaction)
             menu_manager.schedule_toast_dismissal(interaction, delay=3.0)

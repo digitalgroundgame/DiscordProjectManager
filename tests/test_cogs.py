@@ -948,6 +948,7 @@ async def test_task_quick_controls_view_callbacks(services):
     save_interaction.response.edit_message.assert_awaited_once()
     saved_embed = save_interaction.response.edit_message.call_args.kwargs["embed"]
     assert "Updated" in saved_embed.title
+    assert "⏱️ Auto-dismisses <t:" in saved_embed.description
     assert controls_view.task.priority == PriorityLevel.HIGH
     assert controls_view.task.assignee_discord_id == 4001
     assert controls_view.task.watchers == [5001]
@@ -1016,6 +1017,7 @@ async def test_quick_controls_custom_due_date_flow(services):
         invalid_interaction.response.edit_message.assert_awaited_once()
         invalid_interaction.followup.send.assert_awaited_once()
         assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
+        assert "*⏱️ Auto-dismisses <t:" in invalid_interaction.followup.send.call_args[0][0]
         assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
         assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
