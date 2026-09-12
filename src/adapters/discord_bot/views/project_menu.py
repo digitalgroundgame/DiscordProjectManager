@@ -10,6 +10,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
+from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
@@ -75,8 +76,8 @@ def build_project_draft_embed(
     return embed
 
 
-class ProjectCreateDraftView(discord.ui.View):
-    """Interactive multi-step Project Creation Builder (Role & Lead picker).
+class ProjectCreateDraftView(BaseView):
+    """Interactive button controls displayed on the ephemeral project draft card.
 
     Allows users to select an optional Squad Discord Role and an optional Project Lead
     prior to creating the project container and binding the channel/forum.
@@ -357,7 +358,7 @@ class ProjectCreateDraftView(discord.ui.View):
             await send_interaction_error(interaction, e, f"creating project '{self.name}'", logger, ephemeral=True)
 
 
-class ProjectCreateModal(discord.ui.Modal):
+class ProjectCreateModal(BaseModal):
     def __init__(
         self,
         project_service: ProjectService,
@@ -503,7 +504,7 @@ class ProjectCreateModal(discord.ui.Modal):
             await interaction.response.send_message(embed=embed, view=draft_view, ephemeral=True)
 
 
-class ProjectChannelSelectView(discord.ui.View):
+class ProjectChannelSelectView(BaseView):
     """Interactive view allowing the user to select a Forum channel for a new project."""
 
     def __init__(
@@ -644,7 +645,7 @@ class ProjectChannelSelectView(discord.ui.View):
             await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectSearchModal(discord.ui.Modal):
+class ProjectSearchModal(BaseModal):
     """Modal to enter a search query for filtering projects."""
 
     def __init__(self, on_search_callback: Callable[[discord.Interaction, str], Any], current_query: str = ""):
@@ -707,7 +708,7 @@ def build_active_projects_embed(
     return embed
 
 
-class ProjectActiveListView(discord.ui.View):
+class ProjectActiveListView(BaseView):
     """Paginated and searchable view for active projects."""
 
     def __init__(
@@ -861,7 +862,7 @@ class ProjectActiveListView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectArchiveConfirmView(discord.ui.View):
+class ProjectArchiveConfirmView(BaseView):
     """Interactive confirmation view prior to archiving a project and active tasks."""
 
     def __init__(
@@ -972,7 +973,7 @@ class ProjectArchiveConfirmView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectRestoreConfirmView(discord.ui.View):
+class ProjectRestoreConfirmView(BaseView):
     """Interactive confirmation view prior to restoring an archived project."""
 
     def __init__(
@@ -1101,7 +1102,7 @@ def build_archive_select_embed(
     return embed
 
 
-class ProjectArchiveSelectView(discord.ui.View):
+class ProjectArchiveSelectView(BaseView):
     """Interactive select menu to choose an active project to archive with search and pagination."""
 
     PAGE_SIZE = 25
@@ -1340,7 +1341,7 @@ def build_restore_select_embed(
     return embed
 
 
-class ProjectRestoreSelectView(discord.ui.View):
+class ProjectRestoreSelectView(BaseView):
     """Interactive select menu to choose an archived project to restore with search and pagination."""
 
     PAGE_SIZE = 25
@@ -1549,7 +1550,7 @@ class ProjectRestoreSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class RebuildConfirmView(discord.ui.View):
+class RebuildConfirmView(BaseView):
     """Ephemeral confirmation view for project workspace rebuilds."""
 
     def __init__(
@@ -1633,7 +1634,7 @@ class RebuildConfirmView(discord.ui.View):
         )
 
 
-class ProjectRebuildSelectView(discord.ui.View):
+class ProjectRebuildSelectView(BaseView):
     """Interactive select menu to choose a project to rebuild."""
 
     def __init__(
@@ -1731,7 +1732,7 @@ class ProjectRebuildSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectAssignTimelineModal(discord.ui.Modal):
+class ProjectAssignTimelineModal(BaseModal):
     """Modal to specify timeline when assigning a team to a project."""
 
     def __init__(
@@ -1791,7 +1792,7 @@ class ProjectAssignTimelineModal(discord.ui.Modal):
             )
 
 
-class ProjectAssignTeamView(discord.ui.View):
+class ProjectAssignTeamView(BaseView):
     """Interactive view to map a team to a project with optional timeline."""
 
     def __init__(
@@ -2028,7 +2029,7 @@ class ProjectAssignTeamView(discord.ui.View):
 ProjectAssignSquadView = ProjectAssignTeamView
 
 
-class ProjectRoleSelectView(discord.ui.View):
+class ProjectRoleSelectView(BaseView):
     """Interactive view to map or clear a contributor Discord role for a project."""
 
     def __init__(
@@ -2288,7 +2289,7 @@ class ProjectRoleSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectLeadSelectView(discord.ui.View):
+class ProjectLeadSelectView(BaseView):
     """Interactive view to designate or clear a Project Lead for a project."""
 
     def __init__(
@@ -2457,7 +2458,7 @@ class ProjectLeadSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectMenuView(discord.ui.View):
+class ProjectMenuView(BaseView):
     """Control Center View for Project Operations."""
 
     def __init__(

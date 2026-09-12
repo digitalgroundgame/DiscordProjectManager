@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.exceptions import ValidationError
 from src.domain.models import Task
@@ -54,8 +55,8 @@ def build_dependency_embed(task: Task, prerequisites: list[Task], dependents: li
     return embed
 
 
-class TaskDependencyView(discord.ui.View):
-    """Interactive ephemeral view with multi-select dropdown to manage task dependencies."""
+class TaskDependencyView(BaseView):
+    """Interactive view allowing members to assign or unassign prerequisite tasks."""
 
     def __init__(
         self,

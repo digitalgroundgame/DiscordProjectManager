@@ -3,6 +3,7 @@ from datetime import UTC
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.models import Task
 
@@ -60,7 +61,7 @@ def build_page_embed(
     return embed
 
 
-class TaskListView(discord.ui.View):
+class TaskListView(BaseView):
     """Interactive paginated view for /task-list."""
 
     def __init__(

@@ -8,6 +8,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.base_view import BaseModal
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.domain.enums import TaskStatus
 from src.domain.models import Task
@@ -27,7 +28,7 @@ def _extract_user_ids(text: str | None) -> list[int]:
     return [int(uid) for uid in set(ids)]
 
 
-class TaskNoteModal(discord.ui.Modal):
+class TaskNoteModal(BaseModal):
     def __init__(
         self,
         task_id: UUID,
@@ -79,7 +80,7 @@ class TaskNoteModal(discord.ui.Modal):
             )
 
 
-class TaskEditModal(discord.ui.Modal):
+class TaskEditModal(BaseModal):
     """Modal for editing task title, description, due date, and watchers."""
 
     def __init__(
