@@ -1,3 +1,4 @@
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -950,6 +951,102 @@ async def test_task_quick_controls_view_callbacks(services):
     assert controls_view.task.priority == PriorityLevel.HIGH
     assert controls_view.task.assignee_discord_id == 4001
     assert controls_view.task.watchers == [5001]
+    mock_bot.sync_root_task_message.assert_awaited_once()
+    mock_bot.sync_task_thread.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_quick_controls_custom_due_date_flow(services):
+    """Verify custom due date entry with auto-reset error handling in TaskQuickControlsView."""
+    from src.adapters.discord_bot.views.task_builder import TaskCustomDueModal
+    from src.adapters.discord_bot.views.task_buttons import TaskControlsView, TaskQuickControlsView
+
+    # Verify alias compatibility
+    assert TaskControlsView is TaskQuickControlsView
+
+    task_srv = services["task"]
+    proj_srv = services["project"]
+    guild_id = 99887766
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Controls Project", prefix="CP")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Controls Due Date Task",
+        creator_discord_id=123,
+        project_id=project.id,
+    )
+
+    mock_bot = MagicMock()
+    mock_bot.sync_root_task_message = AsyncMock()
+    mock_bot.sync_task_thread = AsyncMock()
+
+    controls_view = TaskQuickControlsView(task=task, task_service=task_srv, bot=mock_bot)
+
+    # 1. Verify 'custom' option exists in due_select
+    custom_opts = [opt for opt in controls_view.due_select.options if opt.value == "custom"]
+    assert len(custom_opts) == 1
+    assert "Custom Date / Time..." in custom_opts[0].label
+
+    # 2. Selecting 'custom' sends TaskCustomDueModal
+    custom_interaction = MagicMock(spec=discord.Interaction)
+    custom_interaction.user = MagicMock(id=123)
+    custom_interaction.response = MagicMock()
+    custom_interaction.response.send_modal = AsyncMock()
+    controls_view.due_select._values = ["custom"]
+
+    await controls_view._on_due_selected(custom_interaction)
+    custom_interaction.response.send_modal.assert_awaited_once()
+    modal = custom_interaction.response.send_modal.call_args.args[0]
+    assert isinstance(modal, TaskCustomDueModal)
+
+    # 3A. Invalid date expression submitted to modal
+    from unittest.mock import patch
+
+    modal.due_input._value = "not a real date xyz"
+    invalid_interaction = MagicMock(spec=discord.Interaction)
+    invalid_interaction.user = MagicMock(id=123)
+    invalid_interaction.response = MagicMock()
+    invalid_interaction.response.edit_message = AsyncMock()
+    invalid_interaction.followup = MagicMock()
+    mock_toast = MagicMock()
+    invalid_interaction.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(invalid_interaction)
+        invalid_interaction.response.edit_message.assert_awaited_once()
+        invalid_interaction.followup.send.assert_awaited_once()
+        assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
+        assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
+        assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
+        mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
+
+    # Verify dropdown reset to placeholder 'Set due date...' and staged_due_at untouched
+    assert controls_view.due_select.placeholder == "Set due date..."
+    assert controls_view.staged_due_at is None
+
+    # 3B. Valid date expression in modal
+    modal_valid = TaskCustomDueModal(controls_view)
+    modal_valid.due_input._value = "friday 5pm"
+    valid_interaction = MagicMock(spec=discord.Interaction)
+    valid_interaction.user = MagicMock(id=123)
+    valid_interaction.response = MagicMock()
+    valid_interaction.response.edit_message = AsyncMock()
+
+    await modal_valid.on_submit(valid_interaction)
+    valid_interaction.response.edit_message.assert_awaited_once()
+    assert controls_view.staged_due_at is not None
+    assert controls_view.staged_clear_due is False
+
+    # 4. Save Changes button commits the custom due date and synchronizes thread/root message
+    save_interaction = MagicMock(spec=discord.Interaction)
+    save_interaction.user = MagicMock(id=123)
+    save_interaction.response = MagicMock()
+    save_interaction.response.edit_message = AsyncMock()
+
+    await controls_view._on_save_clicked(save_interaction)
+    save_interaction.response.edit_message.assert_awaited_once()
+    assert controls_view.task.due_at is not None
+    assert controls_view.task.due_at.replace(tzinfo=UTC) == controls_view.staged_due_at
     mock_bot.sync_root_task_message.assert_awaited_once()
     mock_bot.sync_task_thread.assert_awaited_once()
 

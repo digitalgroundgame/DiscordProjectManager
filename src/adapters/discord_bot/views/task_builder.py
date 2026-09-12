@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -90,13 +90,21 @@ def build_task_draft_embed(
 class TaskCustomDueModal(BaseModal):
     """Modal for entering a custom natural-language due date/time."""
 
-    def __init__(self, draft_view: TaskCreateDraftView):
+    def __init__(self, target_view: Any):
         super().__init__(title="Set Custom Due Date")
-        self.draft_view = draft_view
+        self.target_view = target_view
+        self.draft_view = target_view
 
         default_val = ""
-        if self.draft_view.due_at:
-            default_val = self.draft_view.due_at.strftime("%Y-%m-%d %H:%M")
+        current_due = None
+        if hasattr(target_view, "staged_due_at"):
+            is_cleared = getattr(target_view, "staged_clear_due", False)
+            current_due = target_view.staged_due_at if not is_cleared else None
+        elif hasattr(target_view, "due_at"):
+            current_due = target_view.due_at
+
+        if current_due:
+            default_val = current_due.strftime("%Y-%m-%d %H:%M")
 
         self.due_input = discord.ui.TextInput(
             label="Due Date / Time Expression",
@@ -107,22 +115,27 @@ class TaskCustomDueModal(BaseModal):
         )
         self.add_item(self.due_input)
 
+    def _render_parent_embed(self, interaction: discord.Interaction) -> discord.Embed:
+        if hasattr(self.target_view, "_build_embed"):
+            return self.target_view._build_embed()
+        return build_task_draft_embed(
+            title=self.target_view.title,
+            description=self.target_view.description,
+            project=self.target_view.project,
+            assignee_id=self.target_view.assignee_id,
+            priority=self.target_view.priority,
+            due_at=self.target_view.due_at,
+            watchers=self.target_view.watchers,
+            target_channel=self.target_view.target_channel or interaction.channel,
+        )
+
     async def on_submit(self, interaction: discord.Interaction) -> None:
         val = self.due_input.value.strip()
         parsed = parse_natural_date(val)
         if not parsed:
-            self.draft_view._rebuild_items()
-            embed = build_task_draft_embed(
-                title=self.draft_view.title,
-                description=self.draft_view.description,
-                project=self.draft_view.project,
-                assignee_id=self.draft_view.assignee_id,
-                priority=self.draft_view.priority,
-                due_at=self.draft_view.due_at,
-                watchers=self.draft_view.watchers,
-                target_channel=self.draft_view.target_channel or interaction.channel,
-            )
-            await interaction.response.edit_message(embed=embed, view=self.draft_view)
+            self.target_view._rebuild_items()
+            embed = self._render_parent_embed(interaction)
+            await interaction.response.edit_message(embed=embed, view=self.target_view)
             toast = await interaction.followup.send(
                 f"❌ Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
                 ephemeral=True,
@@ -133,19 +146,16 @@ class TaskCustomDueModal(BaseModal):
             menu_manager.schedule_toast_dismissal(toast, delay=10.0)
             return
 
-        self.draft_view.due_at = parsed
-        self.draft_view._rebuild_items()
-        embed = build_task_draft_embed(
-            title=self.draft_view.title,
-            description=self.draft_view.description,
-            project=self.draft_view.project,
-            assignee_id=self.draft_view.assignee_id,
-            priority=self.draft_view.priority,
-            due_at=self.draft_view.due_at,
-            watchers=self.draft_view.watchers,
-            target_channel=self.draft_view.target_channel or interaction.channel,
-        )
-        await interaction.response.edit_message(embed=embed, view=self.draft_view)
+        if hasattr(self.target_view, "staged_due_at"):
+            self.target_view.staged_due_at = parsed
+            self.target_view.staged_clear_due = False
+            self.target_view.error_message = None
+        else:
+            self.target_view.due_at = parsed
+
+        self.target_view._rebuild_items()
+        embed = self._render_parent_embed(interaction)
+        await interaction.response.edit_message(embed=embed, view=self.target_view)
 
 
 class TaskDetailsModal(BaseModal):

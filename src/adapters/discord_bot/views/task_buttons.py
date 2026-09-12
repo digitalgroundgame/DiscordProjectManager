@@ -203,6 +203,7 @@ class TaskQuickControlsView(BaseView):
             discord.SelectOption(label="In 1 Week", value="1week"),
             discord.SelectOption(label="In 2 Weeks", value="2weeks"),
             discord.SelectOption(label="In 1 Month", value="1month"),
+            discord.SelectOption(label="Custom Date / Time...", value="custom"),
             discord.SelectOption(label="Clear Due Date", value="clear"),
         ]
         self.due_select = discord.ui.Select(
@@ -271,6 +272,13 @@ class TaskQuickControlsView(BaseView):
 
     async def _on_due_selected(self, interaction: discord.Interaction) -> None:
         val = self.due_select.values[0]
+        if val == "custom":
+            from src.adapters.discord_bot.views.task_builder import TaskCustomDueModal
+
+            modal = TaskCustomDueModal(self)
+            await interaction.response.send_modal(modal)
+            return
+
         due_at, is_clear = get_due_date_from_preset(val)
         self.staged_due_at = due_at
         self.staged_clear_due = is_clear
@@ -465,5 +473,6 @@ class TaskLinkButtonView(BaseView):
         )
 
 
-# Semantic alias to maintain backwards-compatibility with Issue #13 specification
+# Semantic aliases to maintain backwards-compatibility
 TaskActionControlsView = TaskQuickControlsView
+TaskControlsView = TaskQuickControlsView
