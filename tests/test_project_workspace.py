@@ -24,7 +24,7 @@ def _create_mock_tag(tag_id: int, name: str) -> MagicMock:
 async def test_provision_project_forum_channel(services):
     """Verifies atomic project provisioning, squad mapping, tags, and Control Hub in a Forum Channel."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 11223344
@@ -33,7 +33,7 @@ async def test_provision_project_forum_channel(services):
     adapter = DiscordProjectWorkspaceAdapter(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
     )
@@ -74,13 +74,13 @@ async def test_provision_project_forum_channel(services):
     assert ref.project.prefix == "INF"
     assert ref.project.discord_channel_id == mock_forum.id
     assert ref.project.discord_role_id == mock_role.id
-    assert ref.team is not None
-    assert ref.team.discord_role_id == mock_role.id
+    assert ref.squad is not None
+    assert ref.squad.discord_role_id == mock_role.id
 
-    # Verify team was mapped to project in database
-    teams = await proj_srv.list_teams_for_project(ref.project.id)
-    assert len(teams) == 1
-    assert teams[0].id == ref.team.id
+    # Verify squad was mapped to project in database
+    squads = await proj_srv.list_squads_for_project(ref.project.id)
+    assert len(squads) == 1
+    assert squads[0].id == ref.squad.id
 
     # Verify forum tags were configured and Control Hub thread was created
     mock_forum.create_thread.assert_awaited_once()
@@ -244,7 +244,7 @@ async def test_rebind_channel_nonexistent_project(services):
 async def test_rebuild_workspace_provisions_missing_forum_channel(services):
     """Verifies that rebuilding a project with a deleted forum auto-creates a new Forum Channel."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 11223344
@@ -253,7 +253,7 @@ async def test_rebuild_workspace_provisions_missing_forum_channel(services):
     adapter = DiscordProjectWorkspaceAdapter(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
     )

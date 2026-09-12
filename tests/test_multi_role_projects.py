@@ -55,9 +55,9 @@ async def test_multi_role_project_creation_and_persistence(services):
 @pytest.mark.asyncio
 async def test_multi_role_authorization(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 7770002
     frontend_role = 101
@@ -106,8 +106,8 @@ async def test_multi_role_authorization(services):
     assert await auth_srv.can_create_task_in_project(unrelated_member, project.id) is False
 
     # Dynamically assign QA squad to the project
-    qa_team = await team_srv.get_or_create_team_for_role(guild_id, qa_role, "QA Squad")
-    await proj_srv.assign_team_to_project(project.id, qa_team.id)
+    qa_squad = await squad_srv.get_or_create_squad_for_role(guild_id, qa_role, "QA Squad")
+    await proj_srv.assign_squad_to_project(project.id, qa_squad.id)
 
     # QA member now has access
     assert await auth_srv.can_create_task_in_project(qa_member, project.id) is True
@@ -115,9 +115,9 @@ async def test_multi_role_authorization(services):
     assert await auth_srv.can_view_project(qa_member, project.id) is True
 
     # Remove frontend squad
-    fe_team = await team_srv.get_by_role_id(guild_id, frontend_role)
-    assert fe_team is not None
-    await proj_srv.remove_team_from_project(project.id, fe_team.id)
+    fe_squad = await squad_srv.get_by_role_id(guild_id, frontend_role)
+    assert fe_squad is not None
+    await proj_srv.remove_squad_from_project(project.id, fe_squad.id)
 
     # Frontend member lost access, but backend still has access
     assert await auth_srv.can_create_task_in_project(frontend_member, project.id) is False
@@ -127,14 +127,14 @@ async def test_multi_role_authorization(services):
 @pytest.mark.asyncio
 async def test_project_workspace_provision_spec_multiple_roles(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     mock_bot = MagicMock()
     workspace_adapter = DiscordProjectWorkspaceAdapter(
         bot=mock_bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=services["user"],
     )
@@ -165,17 +165,17 @@ async def test_project_workspace_provision_spec_multiple_roles(services):
     project = ref.project
     assert set(project.discord_role_ids) == {8801, 8802}
 
-    # Verify both teams were mapped
-    teams = await proj_srv.list_teams_for_project(project.id)
-    team_role_ids = {t.discord_role_id for t in teams}
-    assert 8801 in team_role_ids
-    assert 8802 in team_role_ids
+    # Verify both squads were mapped
+    squads = await proj_srv.list_squads_for_project(project.id)
+    squad_role_ids = {s.discord_role_id for s in squads}
+    assert 8801 in squad_role_ids
+    assert 8802 in squad_role_ids
 
 
 @pytest.mark.asyncio
 async def test_project_role_select_view_multiple_roles(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     guild_id = 7770004
@@ -185,7 +185,7 @@ async def test_project_role_select_view_multiple_roles(services):
         prefix="VMR",
     )
 
-    role_view = ProjectRoleSelectView([project], proj_srv, team_srv, task_srv)
+    role_view = ProjectRoleSelectView([project], proj_srv, squad_srv, task_srv)
 
     role_x = MagicMock(spec=discord.Role)
     role_x.id = 901

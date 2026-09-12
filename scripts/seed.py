@@ -24,8 +24,8 @@ import discord  # noqa: E402
 from src.adapters.db.postgres_repo import (  # noqa: E402
     PostgresOutboxRepo,
     PostgresProjectRepo,
+    PostgresSquadRepo,
     PostgresTaskRepo,
-    PostgresTeamRepo,
     PostgresUserPreferenceRepo,
 )
 from src.adapters.db.session import async_session_factory, close_db, init_db  # noqa: E402
@@ -41,8 +41,8 @@ from src.services.seed.discord_provisioner import (  # noqa: E402
 )
 from src.services.seed.manifest_loader import load_seed_manifest  # noqa: E402
 from src.services.seed.seed_service import SeedDbResult, seed_database  # noqa: E402
+from src.services.squad_service import SquadService  # noqa: E402
 from src.services.task_service import TaskService  # noqa: E402
-from src.services.team_service import TeamService  # noqa: E402
 from src.services.user_service import UserService  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -160,12 +160,12 @@ async def run_seed(
         task_repo = PostgresTaskRepo(sess_factory)
         project_repo = PostgresProjectRepo(sess_factory)
         outbox_repo = PostgresOutboxRepo(sess_factory)
-        team_repo = PostgresTeamRepo(sess_factory)
+        squad_repo = PostgresSquadRepo(sess_factory)
         user_repo = PostgresUserPreferenceRepo(sess_factory)
         uow = SqlAlchemyUnitOfWork(sess_factory)
 
         project_service = ProjectService(project_repo)
-        team_service = TeamService(team_repo)
+        squad_service = SquadService(squad_repo)
         user_service = UserService(user_repo)
         outbox_service = OutboxService(outbox_repo)
         task_service = TaskService(task_repo, project_service, outbox_service, uow=uow)
@@ -176,7 +176,7 @@ async def run_seed(
                 manifest=manifest,
                 db_result=db_result,
                 task_service=task_service,
-                team_service=team_service,
+                squad_service=squad_service,
                 user_service=user_service,
                 category_name=DEFAULT_MANAGED_CATEGORY,
             )

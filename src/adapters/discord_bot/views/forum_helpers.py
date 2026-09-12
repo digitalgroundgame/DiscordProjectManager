@@ -11,8 +11,8 @@ from src.domain.enums import PriorityLevel, TaskStatus
 if TYPE_CHECKING:
     from src.domain.models import Task
     from src.services.project_service import ProjectService
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.views.forum_helpers")
@@ -348,7 +348,7 @@ async def ensure_project_tag(forum_channel: discord.ForumChannel, project_name: 
 async def ensure_pinned_hub_post(
     channel: discord.ForumChannel | discord.TextChannel,
     project_service: ProjectService | None = None,
-    team_service: TeamService | None = None,
+    squad_service: SquadService | None = None,
     task_service: TaskService | None = None,
     user_service: UserService | None = None,
     project_name: str | None = None,
@@ -393,14 +393,14 @@ async def ensure_pinned_hub_post(
 
     view = None
     if project_service and task_service:
-        if not team_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
+        if not squad_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
             try:
-                from src.adapters.db.postgres_repo import PostgresTeamRepo
-                from src.services.team_service import TeamService
+                from src.adapters.db.postgres_repo import PostgresSquadRepo
+                from src.services.squad_service import SquadService
 
-                team_service = TeamService(PostgresTeamRepo(task_service.uow.session_factory))
+                squad_service = SquadService(PostgresSquadRepo(task_service.uow.session_factory))
             except Exception as e:
-                logger.debug("Could not auto-create team_service for hub: %s", e)
+                logger.debug("Could not auto-create squad_service for hub: %s", e)
 
         if not user_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
             try:
@@ -411,10 +411,10 @@ async def ensure_pinned_hub_post(
             except Exception as e:
                 logger.debug("Could not auto-create user_service for hub: %s", e)
 
-        if team_service:
+        if squad_service:
             view = PmHubView(
                 project_service=project_service,
-                team_service=team_service,
+                squad_service=squad_service,
                 task_service=task_service,
                 user_service=user_service,
             )

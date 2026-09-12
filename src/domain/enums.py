@@ -55,9 +55,6 @@ class SquadRoleType(StrEnum):
     LEAD = "lead"
 
 
-TeamRoleType = SquadRoleType
-
-
 class OutboxStatus(StrEnum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"

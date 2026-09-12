@@ -23,13 +23,13 @@ from src.adapters.discord_bot.workspace_protocol import (
     RebuildWorkspaceResult,
 )
 from src.domain.exceptions import ProjectNotFoundError
-from src.domain.models import Project, Team
+from src.domain.models import Project, Squad
 
 if TYPE_CHECKING:
     from src.services.auth_service import AuthService
     from src.services.project_service import ProjectService
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.project_workspace")
@@ -49,7 +49,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
         self,
         bot: discord.Client,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         auth_service: AuthService | None = None,
@@ -57,7 +57,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
     ):
         self.bot = bot
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.auth_service = auth_service
@@ -157,20 +157,20 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
         )
 
         # 2. 1:1 Squad Role Mapping
-        team: Team | None = None
-        if self.team_service:
+        squad: Squad | None = None
+        if self.squad_service:
             for rid, rname in role_info_list:
                 try:
-                    t = await self.team_service.get_or_create_team_for_role(
+                    s = await self.squad_service.get_or_create_squad_for_role(
                         guild_id=spec.guild_id,
                         role_id=rid,
                         role_name=rname,
                     )
-                    await self.project_service.assign_team_to_project(project_id=project.id, team_id=t.id)
-                    if team is None:
-                        team = t
+                    await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=s.id)
+                    if squad is None:
+                        squad = s
                 except Exception as e:
-                    logger.warning("Failed to map squad team %s for project %s: %s", rid, project.id, e)
+                    logger.warning("Failed to map squad %s for project %s: %s", rid, project.id, e)
 
         # 3. Discord Workspace Tag Setup and Control Hub Mounting
         tags_created = 0
@@ -194,7 +194,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
                 hub_ok, hub_status = await ensure_pinned_hub_post(
                     channel=validated_channel,
                     project_service=self.project_service,
-                    team_service=self.team_service,
+                    squad_service=self.squad_service,
                     task_service=self.task_service,
                     user_service=self.user_service,
                     project_name=project.name,
@@ -232,7 +232,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
 
         return ProjectWorkspaceRef(
             project=project,
-            team=team,
+            squad=squad,
             channel_id=channel_id,
             control_hub_thread_id=hub_thread_id,
             control_hub_message_id=hub_msg_id,
@@ -280,7 +280,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
             hub_ok, hub_status = await ensure_pinned_hub_post(
                 channel=validated,
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 project_name=proj_name,
@@ -339,7 +339,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
                 hub_ok, hub_status = await ensure_pinned_hub_post(
                     channel=validated,
                     project_service=self.project_service,
-                    team_service=self.team_service,
+                    squad_service=self.squad_service,
                     task_service=self.task_service,
                     user_service=self.user_service,
                     project_name=updated_project.name,
@@ -513,7 +513,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
                 hub_ok, hub_status = await ensure_pinned_hub_post(
                     channel=resolved_channel,
                     project_service=self.project_service,
-                    team_service=self.team_service,
+                    squad_service=self.squad_service,
                     task_service=self.task_service,
                     user_service=self.user_service,
                     project_name=project.name,

@@ -78,8 +78,8 @@ async def test_provision_discord_workspaces_hub_buttons():
     from src.services.seed.discord_provisioner import provision_discord_workspaces
     from src.services.seed.manifest_loader import ChannelSeedSpec, ProjectSeedSpec, SeedManifest
     from src.services.seed.seed_service import SeedDbResult
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
 
     mock_guild = MagicMock(spec=discord.Guild)
     mock_guild.id = 12345
@@ -117,14 +117,14 @@ async def test_provision_discord_workspaces_hub_buttons():
     mock_task_service.project_service.list_projects = AsyncMock(return_value=[project])
     mock_task_service.project_service.update_project_channel = AsyncMock()
 
-    mock_team_service = MagicMock(spec=TeamService)
+    mock_squad_service = MagicMock(spec=SquadService)
 
     await provision_discord_workspaces(
         guild=mock_guild,
         manifest=manifest,
         db_result=db_result,
         task_service=mock_task_service,
-        team_service=mock_team_service,
+        squad_service=mock_squad_service,
     )
 
     hub_call = mock_forum.create_thread.call_args

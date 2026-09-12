@@ -18,10 +18,10 @@ from src.adapters.discord_bot.workspace_protocol import (
     RebuildProgress,
 )
 from src.domain.enums import TaskStatus
-from src.domain.models import Project, Team
+from src.domain.models import Project, Squad
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService
 
 if TYPE_CHECKING:
     from src.services.user_service import UserService
@@ -94,7 +94,7 @@ class ProjectCreateDraftView(BaseView):
         role: discord.Role | None = None,
         roles: list[discord.Role] | None = None,
         lead: discord.Member | discord.User | None = None,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: Any = None,
         initial_interaction: discord.Interaction | None = None,
@@ -112,7 +112,7 @@ class ProjectCreateDraftView(BaseView):
             self.roles.insert(0, role)
         self.role = self.roles[0] if self.roles else None
         self.lead = lead
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -124,7 +124,7 @@ class ProjectCreateDraftView(BaseView):
             self.project_workspace = project_workspace or DiscordProjectWorkspaceAdapter(
                 client,
                 project_service,
-                team_service,
+                squad_service,
                 task_service,
                 user_service,
             )
@@ -275,7 +275,7 @@ class ProjectCreateDraftView(BaseView):
         modal = ProjectCreateModal(
             project_service=self.project_service,
             channel=self.channel,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             draft_view=self,
@@ -366,7 +366,7 @@ class ProjectCreateModal(BaseModal):
         self,
         project_service: ProjectService,
         channel: discord.ForumChannel | discord.TextChannel | discord.Thread,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: Any = None,
         draft_view: ProjectCreateDraftView | None = None,
@@ -378,7 +378,7 @@ class ProjectCreateModal(BaseModal):
     ):
         self.project_service = project_service
         self.channel = channel
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.draft_view = draft_view
@@ -526,7 +526,7 @@ class ProjectCreateModal(BaseModal):
                 prefix=prefix,
                 description=desc,
                 category=cat,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 initial_interaction=interaction,
@@ -549,7 +549,7 @@ class ProjectChannelSelectView(BaseView):
     def __init__(
         self,
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
         user_service: UserService | None = None,
@@ -557,7 +557,7 @@ class ProjectChannelSelectView(BaseView):
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
@@ -624,7 +624,7 @@ class ProjectChannelSelectView(BaseView):
         modal = ProjectCreateModal(
             self.project_service,
             channel=chan,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             parent_view=self,
@@ -644,7 +644,7 @@ class ProjectChannelSelectView(BaseView):
         modal = ProjectCreateModal(
             self.project_service,
             channel=interaction.channel,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
         )
         await interaction.response.send_modal(modal)
@@ -665,7 +665,7 @@ class ProjectChannelSelectView(BaseView):
             )
             view = PmDashboardView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 self.user_service,
                 initial_interaction=interaction,
@@ -682,7 +682,7 @@ class ProjectChannelSelectView(BaseView):
         else:
             view = ProjectMenuView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 initial_interaction=interaction,
                 user_service=self.user_service,
@@ -762,7 +762,7 @@ class ProjectActiveListView(BaseView):
         self,
         projects: list[Project],
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         current_page: int = 0,
         query: str = "",
@@ -772,7 +772,7 @@ class ProjectActiveListView(BaseView):
         super().__init__(timeout=180)
         self.all_projects = projects
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.current_page = current_page
         self.query = query
@@ -901,7 +901,7 @@ class ProjectActiveListView(BaseView):
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -916,7 +916,7 @@ class ProjectArchiveConfirmView(BaseView):
         self,
         project: Project,
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -924,7 +924,7 @@ class ProjectArchiveConfirmView(BaseView):
         super().__init__(timeout=180)
         self.project = project
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -983,7 +983,7 @@ class ProjectArchiveConfirmView(BaseView):
                         await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
-                            team_service=self.team_service,
+                            squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
@@ -992,7 +992,7 @@ class ProjectArchiveConfirmView(BaseView):
 
             view = ProjectMenuView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 user_service=self.user_service,
                 initial_interaction=interaction,
@@ -1012,7 +1012,7 @@ class ProjectArchiveConfirmView(BaseView):
     async def _on_cancel_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -1027,7 +1027,7 @@ class ProjectRestoreConfirmView(BaseView):
         self,
         project: Project,
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -1035,7 +1035,7 @@ class ProjectRestoreConfirmView(BaseView):
         super().__init__(timeout=180)
         self.project = project
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -1091,7 +1091,7 @@ class ProjectRestoreConfirmView(BaseView):
                         await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
-                            team_service=self.team_service,
+                            squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
@@ -1100,7 +1100,7 @@ class ProjectRestoreConfirmView(BaseView):
 
             view = ProjectMenuView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 user_service=self.user_service,
                 initial_interaction=interaction,
@@ -1120,7 +1120,7 @@ class ProjectRestoreConfirmView(BaseView):
     async def _on_cancel_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -1158,7 +1158,7 @@ class ProjectArchiveSelectView(BaseView):
         self,
         projects: list[Project],
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         current_page: int = 0,
@@ -1168,7 +1168,7 @@ class ProjectArchiveSelectView(BaseView):
         super().__init__(timeout=180)
         self.all_projects = projects
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.current_page = current_page
@@ -1350,7 +1350,7 @@ class ProjectArchiveSelectView(BaseView):
         view = ProjectArchiveConfirmView(
             project=project,
             project_service=self.project_service,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
         )
@@ -1359,7 +1359,7 @@ class ProjectArchiveSelectView(BaseView):
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -1397,7 +1397,7 @@ class ProjectRestoreSelectView(BaseView):
         self,
         projects: list[Project],
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         current_page: int = 0,
@@ -1407,7 +1407,7 @@ class ProjectRestoreSelectView(BaseView):
         super().__init__(timeout=180)
         self.all_projects = projects
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.current_page = current_page
@@ -1579,7 +1579,7 @@ class ProjectRestoreSelectView(BaseView):
         view = ProjectRestoreConfirmView(
             project=project,
             project_service=self.project_service,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,
@@ -1589,7 +1589,7 @@ class ProjectRestoreSelectView(BaseView):
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -1689,7 +1689,7 @@ class ProjectRebuildSelectView(BaseView):
         projects: list[Project],
         project_service: ProjectService,
         project_workspace: IProjectDiscordWorkspace,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -1698,7 +1698,7 @@ class ProjectRebuildSelectView(BaseView):
         self.projects = projects
         self.project_service = project_service
         self.project_workspace = project_workspace
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -1715,7 +1715,7 @@ class ProjectRebuildSelectView(BaseView):
         ]
         self.select = discord.ui.Select(
             placeholder="Select a project container to rebuild...",
-            options=options,
+            options=options or [discord.SelectOption(label="No Projects", value="none")],
             row=0,
         )
         self.select.callback = self._on_select
@@ -1726,6 +1726,8 @@ class ProjectRebuildSelectView(BaseView):
         self.add_item(self.back_btn)
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
+        if not self.select.values or self.select.values[0] == "none":
+            return
         proj_id = UUID(self.select.values[0])
         proj = next((p for p in self.projects if p.id == proj_id), None)
         if not proj or not interaction.guild:
@@ -1770,7 +1772,7 @@ class ProjectRebuildSelectView(BaseView):
     async def _on_back(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,
@@ -1780,21 +1782,21 @@ class ProjectRebuildSelectView(BaseView):
 
 
 class ProjectAssignTimelineModal(BaseModal):
-    """Modal to specify timeline when assigning a team to a project."""
+    """Modal to specify timeline when assigning a squad to a project."""
 
     def __init__(
         self,
         project_service: ProjectService,
         project: Project,
-        team: Team,
-        team_service: TeamService,
+        squad: Squad,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
     ):
-        super().__init__(title=f"Assign Team to [{project.prefix}]"[:45])
+        super().__init__(title=f"Assign Squad to [{project.prefix}]"[:45])
         self.project_service = project_service
         self.project = project
-        self.team = team
-        self.team_service = team_service
+        self.squad = squad
+        self.squad_service = squad_service
         self.task_service = task_service
 
         self.timeline_input = discord.ui.TextInput(
@@ -1808,15 +1810,15 @@ class ProjectAssignTimelineModal(BaseModal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         timeline = self.timeline_input.value.strip() or None
         try:
-            await self.project_service.assign_team_to_project(
+            await self.project_service.assign_squad_to_project(
                 project_id=self.project.id,
-                team_id=self.team.id,
+                squad_id=self.squad.id,
                 timeline=timeline,
             )
             embed = discord.Embed(
-                title="Team Mapped to Project",
+                title="Squad Mapped to Project",
                 description=(
-                    f"Successfully mapped team **{self.team.name}** (<@&{self.team.discord_role_id}>) "
+                    f"Successfully mapped squad **{self.squad.name}** (<@&{self.squad.discord_role_id}>) "
                     f"to project **{self.project.name}** (`{self.project.prefix}`)."
                     + (f"\n\n• **Target Timeline:** `{timeline}`" if timeline else "")
                 ),
@@ -1824,7 +1826,7 @@ class ProjectAssignTimelineModal(BaseModal):
             )
             view = ProjectMenuView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 initial_interaction=interaction,
             )
@@ -1833,36 +1835,36 @@ class ProjectAssignTimelineModal(BaseModal):
             await send_interaction_error(
                 interaction,
                 e,
-                f"assigning team '{self.team.name}' to project '{self.project.name}'",
+                f"assigning squad '{self.squad.name}' to project '{self.project.name}'",
                 logger,
                 ephemeral=True,
             )
 
 
-class ProjectAssignTeamView(BaseView):
-    """Interactive view to map a team to a project with optional timeline."""
+class ProjectAssignSquadView(BaseView):
+    """Interactive view to map a squad to a project with optional timeline."""
 
     def __init__(
         self,
         projects: list[Project],
-        teams: list[Team],
+        squads: list[Squad],
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
-        team_page: int = 0,
+        squad_page: int = 0,
     ):
         super().__init__(timeout=180)
         self.projects = projects
-        self.teams = teams
+        self.squads = squads
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self._initial_interaction = initial_interaction
-        self.team_page = team_page
+        self.squad_page = squad_page
 
         self.selected_project_id: UUID = projects[0].id if projects else UUID(int=0)
-        self.selected_team_id: UUID = teams[0].id if teams else UUID(int=0)
+        self.selected_squad_id: UUID = squads[0].id if squads else UUID(int=0)
 
         self._rebuild_items()
 
@@ -1889,43 +1891,43 @@ class ProjectAssignTeamView(BaseView):
         self.proj_select.callback = self._on_project_changed
         self.add_item(self.proj_select)
 
-        # Row 1: Select Team / Squad (Paged if >25)
-        total_team_pages = max(1, math.ceil(len(self.teams) / 25))
-        if self.team_page >= total_team_pages:
-            self.team_page = max(0, total_team_pages - 1)
-        start_t = self.team_page * 25
-        page_teams = self.teams[start_t : start_t + 25]
+        # Row 1: Select Squad (Paged if >25)
+        total_squad_pages = max(1, math.ceil(len(self.squads) / 25))
+        if self.squad_page >= total_squad_pages:
+            self.squad_page = max(0, total_squad_pages - 1)
+        start_t = self.squad_page * 25
+        page_squads = self.squads[start_t : start_t + 25]
 
-        if not any(t.id == self.selected_team_id for t in page_teams) and page_teams:
-            self.selected_team_id = page_teams[0].id
+        if not any(s.id == self.selected_squad_id for s in page_squads) and page_squads:
+            self.selected_squad_id = page_squads[0].id
 
-        team_options = [
+        squad_options = [
             discord.SelectOption(
-                label=t.name[:100],
-                value=str(t.id),
-                description=f"Discord Role: @{t.discord_role_id}"[:50],
-                default=(t.id == self.selected_team_id),
+                label=s.name[:100],
+                value=str(s.id),
+                description=f"Discord Role: @{s.discord_role_id}"[:50],
+                default=(s.id == self.selected_squad_id),
             )
-            for i, t in enumerate(page_teams)
+            for i, s in enumerate(page_squads)
         ]
         placeholder = (
-            f"Select Squad / Team (Page {self.team_page + 1}/{total_team_pages})..."
-            if total_team_pages > 1
-            else "Select Team..."
+            f"Select Squad (Page {self.squad_page + 1}/{total_squad_pages})..."
+            if total_squad_pages > 1
+            else "Select Squad..."
         )
-        self.team_select = discord.ui.Select(
+        self.squad_select = discord.ui.Select(
             placeholder=placeholder,
-            options=team_options or [discord.SelectOption(label="No Squads", value="none")],
+            options=squad_options or [discord.SelectOption(label="No Squads", value="none")],
             min_values=1,
             max_values=1,
             row=1,
         )
-        self.team_select.callback = self._on_team_changed
-        self.add_item(self.team_select)
+        self.squad_select.callback = self._on_squad_changed
+        self.add_item(self.squad_select)
 
         # Row 2: Action Buttons
         self.assign_btn = discord.ui.Button(
-            label="Map Team (Quick)",
+            label="Map Squad (Quick)",
             style=discord.ButtonStyle.primary,
             row=2,
         )
@@ -1948,25 +1950,25 @@ class ProjectAssignTeamView(BaseView):
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
 
-        # Row 3: Squad Pagination buttons if total_team_pages > 1
-        if total_team_pages > 1:
-            self.prev_team_btn = discord.ui.Button(
+        # Row 3: Squad Pagination buttons if total_squad_pages > 1
+        if total_squad_pages > 1:
+            self.prev_squad_btn = discord.ui.Button(
                 label="◀ Prev Squads",
                 style=discord.ButtonStyle.secondary,
-                disabled=(self.team_page <= 0),
+                disabled=(self.squad_page <= 0),
                 row=3,
             )
-            self.prev_team_btn.callback = self._on_prev_team_clicked
-            self.add_item(self.prev_team_btn)
+            self.prev_squad_btn.callback = self._on_prev_squad_clicked
+            self.add_item(self.prev_squad_btn)
 
-            self.next_team_btn = discord.ui.Button(
+            self.next_squad_btn = discord.ui.Button(
                 label="Next Squads ▶",
                 style=discord.ButtonStyle.secondary,
-                disabled=(self.team_page >= total_team_pages - 1),
+                disabled=(self.squad_page >= total_squad_pages - 1),
                 row=3,
             )
-            self.next_team_btn.callback = self._on_next_team_clicked
-            self.add_item(self.next_team_btn)
+            self.next_squad_btn.callback = self._on_next_squad_clicked
+            self.add_item(self.next_squad_btn)
 
     async def on_timeout(self) -> None:
         try:
@@ -1982,19 +1984,19 @@ class ProjectAssignTeamView(BaseView):
     def _get_selected_project(self) -> Project | None:
         return next((p for p in self.projects if p.id == self.selected_project_id), None)
 
-    def _get_selected_team(self) -> Team | None:
-        return next((t for t in self.teams if t.id == self.selected_team_id), None)
+    def _get_selected_squad(self) -> Squad | None:
+        return next((s for s in self.squads if s.id == self.selected_squad_id), None)
 
-    async def _on_prev_team_clicked(self, interaction: discord.Interaction) -> None:
-        if self.team_page > 0:
-            self.team_page -= 1
+    async def _on_prev_squad_clicked(self, interaction: discord.Interaction) -> None:
+        if self.squad_page > 0:
+            self.squad_page -= 1
             self._rebuild_items()
             await interaction.response.edit_message(view=self)
 
-    async def _on_next_team_clicked(self, interaction: discord.Interaction) -> None:
-        total_team_pages = max(1, math.ceil(len(self.teams) / 25))
-        if self.team_page < total_team_pages - 1:
-            self.team_page += 1
+    async def _on_next_squad_clicked(self, interaction: discord.Interaction) -> None:
+        total_squad_pages = max(1, math.ceil(len(self.squads) / 25))
+        if self.squad_page < total_squad_pages - 1:
+            self.squad_page += 1
             self._rebuild_items()
             await interaction.response.edit_message(view=self)
 
@@ -2005,37 +2007,37 @@ class ProjectAssignTeamView(BaseView):
                 opt.default = opt.value == str(self.selected_project_id)
         await interaction.response.edit_message(view=self)
 
-    async def _on_team_changed(self, interaction: discord.Interaction) -> None:
-        if self.team_select.values and self.team_select.values[0] != "none":
-            self.selected_team_id = UUID(self.team_select.values[0])
-            for opt in self.team_select.options:
-                opt.default = opt.value == str(self.selected_team_id)
+    async def _on_squad_changed(self, interaction: discord.Interaction) -> None:
+        if self.squad_select.values and self.squad_select.values[0] != "none":
+            self.selected_squad_id = UUID(self.squad_select.values[0])
+            for opt in self.squad_select.options:
+                opt.default = opt.value == str(self.selected_squad_id)
         await interaction.response.edit_message(view=self)
 
     async def _on_assign_quick_clicked(self, interaction: discord.Interaction) -> None:
         proj = self._get_selected_project()
-        team = self._get_selected_team()
-        if not proj or not team:
+        squad = self._get_selected_squad()
+        if not proj or not squad:
             await interaction.response.send_message("❌ Selection error.", ephemeral=True)
             return
 
         try:
-            await self.project_service.assign_team_to_project(
+            await self.project_service.assign_squad_to_project(
                 project_id=proj.id,
-                team_id=team.id,
+                squad_id=squad.id,
                 timeline=None,
             )
             embed = discord.Embed(
-                title="Team Mapped to Project",
+                title="Squad Mapped to Project",
                 description=(
-                    f"Successfully mapped team **{team.name}** (<@&{team.discord_role_id}>) "
+                    f"Successfully mapped squad **{squad.name}** (<@&{squad.discord_role_id}>) "
                     f"to project **{proj.name}** (`{proj.prefix}`)."
                 ),
                 color=discord.Color.green(),
             )
             view = ProjectMenuView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 initial_interaction=interaction,
             )
@@ -2043,21 +2045,21 @@ class ProjectAssignTeamView(BaseView):
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         except Exception as e:
             await send_interaction_error(
-                interaction, e, f"assigning team '{team.name}' to project '{proj.name}'", logger, ephemeral=True
+                interaction, e, f"assigning squad '{squad.name}' to project '{proj.name}'", logger, ephemeral=True
             )
 
     async def _on_timeline_clicked(self, interaction: discord.Interaction) -> None:
         proj = self._get_selected_project()
-        team = self._get_selected_team()
-        if not proj or not team:
+        squad = self._get_selected_squad()
+        if not proj or not squad:
             await interaction.response.send_message("❌ Selection error.", ephemeral=True)
             return
 
         modal = ProjectAssignTimelineModal(
             project_service=self.project_service,
             project=proj,
-            team=team,
-            team_service=self.team_service,
+            squad=squad,
+            squad_service=self.squad_service,
             task_service=self.task_service,
         )
         await interaction.response.send_modal(modal)
@@ -2065,15 +2067,12 @@ class ProjectAssignTeamView(BaseView):
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
-
-
-ProjectAssignSquadView = ProjectAssignTeamView
 
 
 class ProjectRoleSelectView(BaseView):
@@ -2083,14 +2082,14 @@ class ProjectRoleSelectView(BaseView):
         self,
         projects: list[Project],
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
     ):
         super().__init__(timeout=180)
         self.projects = projects
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self._initial_interaction = initial_interaction
 
@@ -2216,17 +2215,17 @@ class ProjectRoleSelectView(BaseView):
                 if (interaction.guild and isinstance(getattr(interaction.guild, "id", None), int))
                 else proj.guild_id
             )
-            if self.team_service:
-                existing_teams = await self.project_service.list_teams_for_project(proj.id)
-                for t in existing_teams:
-                    await self.project_service.remove_team_from_project(proj.id, t.id)
+            if self.squad_service:
+                existing_squads = await self.project_service.list_squads_for_project(proj.id)
+                for s in existing_squads:
+                    await self.project_service.remove_squad_from_project(proj.id, s.id)
 
                 for r in roles_to_add:
                     r_name = str(getattr(r, "name", None) or f"Squad-{r.id}")
                     if "Mock" in r_name or "<MagicMock" in r_name:
                         r_name = f"Squad-{r.id}"
-                    team = await self.team_service.get_or_create_team_for_role(guild_id, r.id, r_name)
-                    await self.project_service.assign_team_to_project(proj.id, team.id)
+                    squad = await self.squad_service.get_or_create_squad_for_role(guild_id, r.id, r_name)
+                    await self.project_service.assign_squad_to_project(proj.id, squad.id)
             else:
                 await self.project_service.set_project_role(proj.id, roles_to_add[0].id)
 
@@ -2240,7 +2239,7 @@ class ProjectRoleSelectView(BaseView):
                 color=discord.Color.green(),
             )
             view = ProjectMenuView(
-                self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+                self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         except Exception as e:
@@ -2276,10 +2275,10 @@ class ProjectRoleSelectView(BaseView):
                 else proj.guild_id
             )
             for r in roles_to_remove:
-                if self.team_service:
-                    team = await self.team_service.get_by_role_id(guild_id, r.id)
-                    if team:
-                        await self.project_service.remove_team_from_project(proj.id, team.id)
+                if self.squad_service:
+                    squad = await self.squad_service.get_by_role_id(guild_id, r.id)
+                    if squad:
+                        await self.project_service.remove_squad_from_project(proj.id, squad.id)
 
             role_mentions = ", ".join(f"<@&{r.id}>" for r in roles_to_remove)
             embed = discord.Embed(
@@ -2290,7 +2289,7 @@ class ProjectRoleSelectView(BaseView):
                 color=discord.Color.orange(),
             )
             view = ProjectMenuView(
-                self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+                self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         except Exception as e:
@@ -2305,10 +2304,10 @@ class ProjectRoleSelectView(BaseView):
             return
 
         try:
-            if self.team_service:
-                teams = await self.project_service.list_teams_for_project(proj.id)
-                for t in teams:
-                    await self.project_service.remove_team_from_project(proj.id, t.id)
+            if self.squad_service:
+                squads = await self.project_service.list_squads_for_project(proj.id)
+                for s in squads:
+                    await self.project_service.remove_squad_from_project(proj.id, s.id)
             await self.project_service.set_project_role(proj.id, None)
 
             embed = discord.Embed(
@@ -2319,7 +2318,7 @@ class ProjectRoleSelectView(BaseView):
                 color=discord.Color.blue(),
             )
             view = ProjectMenuView(
-                self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+                self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
             )
             embed = build_project_menu_embed(view.is_server_manager)
             await interaction.response.edit_message(content=None, embed=embed, view=view)
@@ -2330,8 +2329,10 @@ class ProjectRoleSelectView(BaseView):
 
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
-            self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+            self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
         )
+        embed = build_project_menu_embed(view.is_server_manager)
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
@@ -2343,14 +2344,14 @@ class ProjectLeadSelectView(BaseView):
         self,
         projects: list[Project],
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
     ):
         super().__init__(timeout=180)
         self.projects = projects
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self._initial_interaction = initial_interaction
 
@@ -2465,7 +2466,7 @@ class ProjectLeadSelectView(BaseView):
                 color=discord.Color.green(),
             )
             view = ProjectMenuView(
-                self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+                self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
             )
             embed = build_project_menu_embed(view.is_server_manager)
             await interaction.response.edit_message(content=None, embed=embed, view=view)
@@ -2488,7 +2489,7 @@ class ProjectLeadSelectView(BaseView):
                 color=discord.Color.dark_grey(),
             )
             view = ProjectMenuView(
-                self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+                self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
             )
             embed = build_project_menu_embed(view.is_server_manager)
             await interaction.response.edit_message(content=None, embed=embed, view=view)
@@ -2499,7 +2500,7 @@ class ProjectLeadSelectView(BaseView):
 
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
-            self.project_service, self.team_service, self.task_service, initial_interaction=interaction
+            self.project_service, self.squad_service, self.task_service, initial_interaction=interaction
         )
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
@@ -2511,7 +2512,7 @@ class ProjectMenuView(BaseView):
     def __init__(
         self,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
         user: discord.Member | discord.User | None = None,
@@ -2521,7 +2522,7 @@ class ProjectMenuView(BaseView):
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
@@ -2653,7 +2654,7 @@ class ProjectMenuView(BaseView):
 
         from src.services.auth_service import AuthService
 
-        auth_service = AuthService(self.project_service, self.team_service)
+        auth_service = AuthService(self.project_service, self.squad_service)
         accessible_projects = []
         for p in projects:
             if await auth_service.can_view_project(interaction.user, p.id):
@@ -2716,7 +2717,7 @@ class ProjectMenuView(BaseView):
             )
             view = PmDashboardView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 self.user_service,
                 initial_interaction=interaction,
@@ -2734,7 +2735,7 @@ class ProjectMenuView(BaseView):
             from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
 
             if self.task_service:
-                view = PmHubView(self.project_service, self.team_service, self.task_service, self.user_service)
+                view = PmHubView(self.project_service, self.squad_service, self.task_service, self.user_service)
                 embed = build_hub_welcome_embed()
                 await interaction.response.edit_message(content=None, embed=embed, view=view)
 
@@ -2747,7 +2748,7 @@ class ProjectMenuView(BaseView):
             return
         view = ProjectChannelSelectView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
             user_service=self.user_service,
@@ -2779,7 +2780,7 @@ class ProjectMenuView(BaseView):
         view = ProjectActiveListView(
             projects,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -2798,7 +2799,7 @@ class ProjectMenuView(BaseView):
         view = ProjectRoleSelectView(
             projects,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -2822,7 +2823,7 @@ class ProjectMenuView(BaseView):
         view = ProjectLeadSelectView(
             projects,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -2846,7 +2847,7 @@ class ProjectMenuView(BaseView):
         view = ProjectArchiveSelectView(
             projects,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,
@@ -2869,7 +2870,7 @@ class ProjectMenuView(BaseView):
         view = ProjectRestoreSelectView(
             archived,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,
@@ -2895,7 +2896,7 @@ class ProjectMenuView(BaseView):
             workspace = DiscordProjectWorkspaceAdapter(
                 bot=client,
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
             )
@@ -2904,7 +2905,7 @@ class ProjectMenuView(BaseView):
             all_proj,
             project_service=self.project_service,
             project_workspace=workspace,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,

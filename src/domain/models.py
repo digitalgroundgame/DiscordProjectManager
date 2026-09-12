@@ -120,29 +120,11 @@ class Squad(DomainModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-Team = Squad
-
-
 class SquadMember(DomainModel):
     squad_id: UUID
     user_discord_id: int
     role_type: SquadRoleType = SquadRoleType.MEMBER
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    @model_validator(mode="before")
-    @classmethod
-    def _handle_legacy_team_id(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "team_id" in data and "squad_id" not in data:
-                data["squad_id"] = data["team_id"]
-        return data
-
-    @property
-    def team_id(self) -> UUID:
-        return self.squad_id
-
-
-TeamMember = SquadMember
 
 
 class ProjectSquad(DomainModel):
@@ -150,21 +132,6 @@ class ProjectSquad(DomainModel):
     squad_id: UUID
     start_date: datetime | None = None
     timeline: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _handle_legacy_team_id(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "team_id" in data and "squad_id" not in data:
-                data["squad_id"] = data["team_id"]
-        return data
-
-    @property
-    def team_id(self) -> UUID:
-        return self.squad_id
-
-
-ProjectTeam = ProjectSquad
 
 
 class OutboxEvent(DomainModel):

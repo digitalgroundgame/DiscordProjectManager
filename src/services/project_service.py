@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from src.domain.exceptions import ProjectAlreadyExistsError, ProjectNotFoundError
-from src.domain.models import Project, ProjectSquad, Squad, Team
+from src.domain.models import Project, ProjectSquad, Squad
 from src.ports.repositories import IProjectRepo
 
 
@@ -125,28 +125,8 @@ class ProjectService:
         )
         await self.project_repo.assign_squad(ps)
 
-    async def assign_team_to_project(
-        self,
-        project_id: UUID,
-        team_id: UUID,
-        start_date: datetime | None = None,
-        timeline: str | None = None,
-    ) -> None:
-        await self.assign_squad_to_project(
-            project_id=project_id,
-            squad_id=team_id,
-            start_date=start_date,
-            timeline=timeline,
-        )
-
     async def remove_squad_from_project(self, project_id: UUID, squad_id: UUID) -> None:
         await self.project_repo.remove_squad(project_id, squad_id)
 
-    async def remove_team_from_project(self, project_id: UUID, team_id: UUID) -> None:
-        await self.remove_squad_from_project(project_id, team_id)
-
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         return await self.project_repo.list_squads_for_project(project_id)
-
-    async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
-        return await self.list_squads_for_project(project_id)

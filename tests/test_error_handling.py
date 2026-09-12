@@ -15,15 +15,15 @@ from src.domain.exceptions import (
     EntityNotFoundError,
     ProjectAlreadyExistsError,
     ProjectNotFoundError,
+    SquadAlreadyExistsError,
+    SquadNotFoundError,
     StaleVersionError,
     TaskNotFoundError,
-    TeamAlreadyExistsError,
-    TeamNotFoundError,
     ValidationError,
 )
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService
 
 
 def test_exception_hierarchy():
@@ -35,13 +35,13 @@ def test_exception_hierarchy():
     assert issubclass(EntityNotFoundError, DomainError)
     assert issubclass(TaskNotFoundError, EntityNotFoundError)
     assert issubclass(ProjectNotFoundError, EntityNotFoundError)
-    assert issubclass(TeamNotFoundError, EntityNotFoundError)
+    assert issubclass(SquadNotFoundError, EntityNotFoundError)
 
     assert issubclass(EntityAlreadyExistsError, DomainError)
     assert issubclass(ProjectAlreadyExistsError, EntityAlreadyExistsError)
     assert issubclass(ProjectAlreadyExistsError, ValueError)
-    assert issubclass(TeamAlreadyExistsError, EntityAlreadyExistsError)
-    assert issubclass(TeamAlreadyExistsError, ValueError)
+    assert issubclass(SquadAlreadyExistsError, EntityAlreadyExistsError)
+    assert issubclass(SquadAlreadyExistsError, ValueError)
 
     assert issubclass(StaleVersionError, DomainError)
 
@@ -130,7 +130,7 @@ async def test_service_raises_typed_exceptions(services):
     """Verify services raise strongly typed domain exceptions."""
     proj_srv: ProjectService = services["project"]
     task_srv: TaskService = services["task"]
-    team_srv: TeamService = services["team"]
+    squad_srv: SquadService = services["squad"]
     guild_id = 8888888888
 
     # 1. Project Already Exists (name)
@@ -142,10 +142,10 @@ async def test_service_raises_typed_exceptions(services):
     with pytest.raises(ProjectAlreadyExistsError, match="is already in use"):
         await proj_srv.create_project(guild_id=guild_id, name="Security Beta", prefix="SEC")
 
-    # 3. Team Already Exists
-    await team_srv.create_team(guild_id=guild_id, name="Red Team", discord_role_id=1111)
-    with pytest.raises(TeamAlreadyExistsError, match="name 'Red Team' already exists"):
-        await team_srv.create_team(guild_id=guild_id, name="Red Team", discord_role_id=2222)
+    # 3. Squad Already Exists
+    await squad_srv.create_squad(guild_id=guild_id, name="Red Squad", discord_role_id=1111)
+    with pytest.raises(SquadAlreadyExistsError, match="name 'Red Squad' already exists"):
+        await squad_srv.create_squad(guild_id=guild_id, name="Red Squad", discord_role_id=2222)
 
     # 4. Project Not Found on task creation
     fake_project_id = uuid4()
@@ -195,7 +195,7 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
     pm_cog = PmCog(
         bot,
         project_service=services["project"],
-        team_service=services["team"],
+        squad_service=services["squad"],
         task_service=services["task"],
     )
 
@@ -225,12 +225,12 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
     last_call_arg = interaction.followup.send.call_args[0][0]
     assert "already exists" in last_call_arg
 
-    # 2. Team Cog: Duplicate team name translates to clean error message
+    # 2. Squad Subcommand: Duplicate squad name translates to clean error message
     interaction.followup.send.reset_mock()
-    await services["team"].create_team(guild_id=guild_id, name="Blue Team", discord_role_id=5555)
+    await services["squad"].create_squad(guild_id=guild_id, name="Blue Squad", discord_role_id=5555)
     mock_role = MagicMock(spec=discord.Role)
     mock_role.id = 6666
-    await pm_cog.team_create.callback(pm_cog, interaction, role=mock_role, team_name="Blue Team")
+    await pm_cog.squad_create.callback(pm_cog, interaction, role=mock_role, squad_name="Blue Squad")
     interaction.followup.send.assert_awaited()
     last_call_arg = interaction.followup.send.call_args[0][0]
     assert "already exists" in last_call_arg

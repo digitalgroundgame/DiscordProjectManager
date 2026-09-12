@@ -297,34 +297,34 @@ async def test_task_creation_atomic_rollback(services, repos):
 
 
 @pytest.mark.asyncio
-async def test_team_service_leads_lifecycle(services):
-    team_srv = services["team"]
+async def test_squad_service_leads_lifecycle(services):
+    squad_srv = services["squad"]
     guild_id = 999888111
 
-    team = await team_srv.create_team(guild_id=guild_id, name="Infra Squad", discord_role_id=123456)
-    assert team.id is not None
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Infra Squad", discord_role_id=123456)
+    assert squad.id is not None
 
     # Initial state: no leads
-    leads = await team_srv.list_team_leads(team.id)
+    leads = await squad_srv.list_squad_leads(squad.id)
     assert len(leads) == 0
-    assert await team_srv.is_team_lead(team.id, 9001) is False
+    assert await squad_srv.is_squad_lead(squad.id, 9001) is False
 
     # Add lead
-    await team_srv.add_team_lead(team.id, 9001)
-    await team_srv.add_team_lead(team.id, 9002)
+    await squad_srv.add_squad_lead(squad.id, 9001)
+    await squad_srv.add_squad_lead(squad.id, 9002)
 
-    leads = await team_srv.list_team_leads(team.id)
+    leads = await squad_srv.list_squad_leads(squad.id)
     assert set(leads) == {9001, 9002}
-    assert await team_srv.is_team_lead(team.id, 9001) is True
-    assert await team_srv.is_team_lead(team.id, 9002) is True
-    assert await team_srv.is_team_lead(team.id, 9003) is False
+    assert await squad_srv.is_squad_lead(squad.id, 9001) is True
+    assert await squad_srv.is_squad_lead(squad.id, 9002) is True
+    assert await squad_srv.is_squad_lead(squad.id, 9003) is False
 
     # Remove lead
-    await team_srv.remove_team_lead(team.id, 9001)
-    leads = await team_srv.list_team_leads(team.id)
+    await squad_srv.remove_squad_lead(squad.id, 9001)
+    leads = await squad_srv.list_squad_leads(squad.id)
     assert leads == [9002]
-    assert await team_srv.is_team_lead(team.id, 9001) is False
-    assert await team_srv.is_team_lead(team.id, 9002) is True
+    assert await squad_srv.is_squad_lead(squad.id, 9001) is False
+    assert await squad_srv.is_squad_lead(squad.id, 9002) is True
 
 
 @pytest.mark.asyncio

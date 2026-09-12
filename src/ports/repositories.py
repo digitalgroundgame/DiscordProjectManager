@@ -8,12 +8,10 @@ from src.domain.models import (
     OutboxEvent,
     Project,
     ProjectSquad,
-    ProjectTeam,
     Squad,
     SquadMember,
     Task,
     TaskHistory,
-    Team,
     UserPreference,
 )
 
@@ -193,18 +191,6 @@ class IProjectRepo(ABC):
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         """Lists all squads mapped to a project."""
 
-    async def assign_team(self, project_team: ProjectTeam) -> None:
-        """Backward-compatible alias for assign_squad."""
-        await self.assign_squad(project_team)
-
-    async def remove_team(self, project_id: UUID, team_id: UUID) -> None:
-        """Backward-compatible alias for remove_squad."""
-        await self.remove_squad(project_id, team_id)
-
-    async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
-        """Backward-compatible alias for list_squads_for_project."""
-        return await self.list_squads_for_project(project_id)
-
 
 class ISquadRepo(ABC):
     @abstractmethod
@@ -250,25 +236,6 @@ class ISquadRepo(ABC):
     @abstractmethod
     async def list_members(self, squad_id: UUID) -> list[SquadMember]:
         """Lists all members assigned to a squad."""
-
-    # Backward-compatible aliases
-    async def add_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        await self.add_squad_lead(team_id, user_discord_id)
-
-    async def remove_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        await self.remove_squad_lead(team_id, user_discord_id)
-
-    async def list_team_leads(self, team_id: UUID) -> list[int]:
-        return await self.list_squad_leads(team_id)
-
-    async def is_team_lead(self, team_id: UUID, user_discord_id: int) -> bool:
-        return await self.is_squad_lead(team_id, user_discord_id)
-
-    async def list_teams(self, guild_id: int) -> list[Team]:
-        return await self.list_squads(guild_id)
-
-
-ITeamRepo = ISquadRepo
 
 
 class IOutboxRepo(ABC):

@@ -12,8 +12,8 @@ from src.domain.enums import TaskStatus
 from src.domain.models import Project, Task
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService
 
 TaskCreateModal = TaskDetailsModal
 
@@ -60,7 +60,7 @@ class TaskSelectProjectView(BaseView):
         projects: list[Project],
         task_service: TaskService,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         current_channel_id: int | None = None,
         parent_channel_id: int | None = None,
         auth_service: AuthService | None = None,
@@ -72,7 +72,7 @@ class TaskSelectProjectView(BaseView):
         self.all_projects = projects
         self.task_service = task_service
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.current_channel_id = current_channel_id
         self.parent_channel_id = parent_channel_id
         self.auth_service = auth_service
@@ -294,7 +294,7 @@ class TaskSelectProjectView(BaseView):
         view = TaskMenuView(
             self.task_service,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             projects=projects,
             current_channel_id=channel_id,
             parent_channel_id=parent_id,
@@ -357,7 +357,7 @@ class TaskMenuView(BaseView):
         self,
         task_service: TaskService,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         projects: list[Project] | None = None,
         current_channel_id: int | None = None,
         parent_channel_id: int | None = None,
@@ -371,14 +371,14 @@ class TaskMenuView(BaseView):
         super().__init__(timeout=180)
         self.task_service = task_service
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.projects = projects or []
         self.current_channel_id = current_channel_id
         self.parent_channel_id = parent_channel_id
         self.search_query = search_query
         self.selected_assignee_id: int | None = initial_assignee_id
         self.status_filter_value: str = "active"
-        self.auth_service = auth_service or (AuthService(project_service, team_service) if team_service else None)
+        self.auth_service = auth_service or (AuthService(project_service, squad_service) if squad_service else None)
         self._initial_interaction = initial_interaction
 
         if can_create_standalone is not None:
@@ -460,7 +460,7 @@ class TaskMenuView(BaseView):
         self.reset_btn.callback = self._on_reset_filters_clicked
         self.add_item(self.reset_btn)
 
-        if self.team_service:
+        if self.squad_service:
             self.hub_btn = discord.ui.Button(
                 label="PM Menu",
                 style=discord.ButtonStyle.secondary,
@@ -583,8 +583,8 @@ class TaskMenuView(BaseView):
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
         from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
 
-        if self.team_service:
-            view = PmHubView(self.project_service, self.team_service, self.task_service)
+        if self.squad_service:
+            view = PmHubView(self.project_service, self.squad_service, self.task_service)
             embed = build_hub_welcome_embed()
             await interaction.response.edit_message(content=None, embed=embed, view=view)
 
@@ -661,7 +661,7 @@ class TaskMenuView(BaseView):
             allowed_projects,
             self.task_service,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             current_channel_id=self.current_channel_id,
             parent_channel_id=self.parent_channel_id,
             auth_service=self.auth_service,
@@ -681,7 +681,7 @@ class TaskMenuView(BaseView):
     async def _on_standalone_clicked(self, interaction: discord.Interaction) -> None:
         if self.auth_service and not await self.auth_service.can_create_task_in_project(interaction.user, None):
             await interaction.response.send_message(
-                "❌ Only Server Managers and Team Leads can create standalone tasks. "
+                "❌ Only Server Managers and Squad Leads can create standalone tasks. "
                 "Please create a task inside an active project container.",
                 ephemeral=True,
             )
@@ -811,7 +811,7 @@ def build_task_menu_embed() -> discord.Embed:
             "• **`Project Scope`**: Focus board on a specific project or global server scope\n"
             "• **`Search Scope`**: Search across all server projects to instantly switch scope\n"
             "• **`Status Filter`**: Filter by progress status (In Progress, Not Started, Completed)\n"
-            "• **`Assignee Filter`**: Filter to tasks assigned to a specific team member\n"
+            "• **`Assignee Filter`**: Filter to tasks assigned to a specific squad member\n"
             "• **`Reset Filters`**: Reset to channel default or global board view"
         ),
         color=discord.Color.blurple(),

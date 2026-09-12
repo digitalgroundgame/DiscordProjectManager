@@ -48,11 +48,11 @@ from src.domain.enums import PriorityLevel, TaskStatus
 @pytest.mark.asyncio
 async def test_project_menu_and_modal(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 9999999999
 
     # 1. Test ProjectMenuView and embed
-    view = ProjectMenuView(proj_srv, team_srv, task_service=services["task"])
+    view = ProjectMenuView(proj_srv, squad_srv, task_service=services["task"])
     # 9 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
     # Archive, Restore, Rebuild Workspace, Tech Tree, Hub
     assert len(view.children) == 9
@@ -68,7 +68,7 @@ async def test_project_menu_and_modal(services):
     assert isinstance(called_view, ProjectChannelSelectView)
 
     # 2. Test ProjectChannelSelectView callbacks
-    chan_select_view = ProjectChannelSelectView(proj_srv, team_srv, services["task"])
+    chan_select_view = ProjectChannelSelectView(proj_srv, squad_srv, services["task"])
     mock_forum_channel = MagicMock(spec=discord.ForumChannel)
     mock_forum_channel.id = 555666777
 
@@ -180,7 +180,7 @@ async def test_project_menu_and_modal(services):
     modal2 = ProjectCreateModal(
         project_service=proj_srv,
         channel=mock_forum,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=services["task"],
     )
     modal2.name_input._value = "Mobile Redesign"
@@ -250,7 +250,7 @@ async def test_project_menu_and_modal(services):
     # 4. Test ProjectRoleSelectView and ProjectLeadSelectView
     from src.adapters.discord_bot.views.project_menu import ProjectLeadSelectView, ProjectRoleSelectView
 
-    role_view = ProjectRoleSelectView([created_proj], proj_srv, team_srv, services["task"])
+    role_view = ProjectRoleSelectView([created_proj], proj_srv, squad_srv, services["task"])
     assert len(role_view.proj_select.options) == 1
     mock_role = MagicMock(spec=discord.Role)
     mock_role.id = 987654
@@ -269,7 +269,7 @@ async def test_project_menu_and_modal(services):
     assert updated_proj.discord_role_id == 987654
 
     # Test ProjectLeadSelectView
-    lead_view = ProjectLeadSelectView([updated_proj], proj_srv, team_srv, services["task"])
+    lead_view = ProjectLeadSelectView([updated_proj], proj_srv, squad_srv, services["task"])
     mock_member = MagicMock(spec=discord.Member)
     mock_member.id = 444555
     lead_view.user_select._values = [mock_member]
@@ -289,11 +289,11 @@ async def test_project_menu_and_modal(services):
 
 @pytest.mark.asyncio
 async def test_squad_menu_and_modal(services):
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 8888888888
 
     # 1. Test SquadMenuView and embed
-    view = SquadMenuView(team_srv, project_service=services["project"], task_service=services["task"])
+    view = SquadMenuView(squad_srv, project_service=services["project"], task_service=services["task"])
     embed = build_squad_menu_embed()
     assert "Squad Management Hub" in embed.title
     assert len(view.children) == 4  # Create Squad, Assign Member, Squad Roster, PM Main Menu
@@ -310,7 +310,7 @@ async def test_squad_menu_and_modal(services):
     main_menu_interaction.response.edit_message.assert_awaited_once()
 
     # 2. Test SquadCreateRoleSelectView
-    role_view = SquadCreateRoleSelectView(team_srv)
+    role_view = SquadCreateRoleSelectView(squad_srv)
     assert len(role_view.children) == 2  # Role Select + Back Button
 
     mock_role = MagicMock(spec=discord.Role)
@@ -325,7 +325,7 @@ async def test_squad_menu_and_modal(services):
     select_interaction.response.send_modal.assert_awaited_once()
 
     # 3. Test SquadCreateModalWithName submission
-    modal = SquadCreateModalWithName(squad_service=team_srv, selected_role=mock_role)
+    modal = SquadCreateModalWithName(squad_service=squad_srv, selected_role=mock_role)
     assert modal.name_input.default == "Site Reliability"
     modal.name_input._value = "Site Reliability Engineering"
 
@@ -338,12 +338,12 @@ async def test_squad_menu_and_modal(services):
     await modal.on_submit(interaction)
     interaction.response.send_message.assert_awaited_once()
 
-    created_team = await team_srv.get_by_name(guild_id, "Site Reliability Engineering")
-    assert created_team is not None
-    assert created_team.discord_role_id == 555666777
+    created_squad = await squad_srv.get_by_name(guild_id, "Site Reliability Engineering")
+    assert created_squad is not None
+    assert created_squad.discord_role_id == 555666777
 
     # 4. Test SquadMemberAssignView (Case A: User missing squad role)
-    assign_view = SquadMemberAssignView(teams=[created_team], team_service=team_srv)
+    assign_view = SquadMemberAssignView(squads=[created_squad], squad_service=squad_srv)
     assert len(assign_view.children) == 5  # Squad, User, Role, Confirm, Cancel
 
     mock_member_no_role = MagicMock(spec=discord.Member)
@@ -385,15 +385,15 @@ async def test_squad_menu_and_modal(services):
     assert "Designated" in success_embed.description and "Squad Lead" in success_embed.description
 
     # 5. Test SquadRosterDetailView
-    roster_view = SquadRosterDetailView(teams=[created_team], team_service=team_srv)
+    roster_view = SquadRosterDetailView(squads=[created_squad], squad_service=squad_srv)
     assert len(roster_view.children) == 2  # Squad Select + Back Button
-    roster_view.select._values = [str(created_team.id)]
+    roster_view.select._values = [str(created_squad.id)]
 
     roster_interaction = MagicMock(spec=discord.Interaction)
     roster_interaction.response = MagicMock()
     roster_interaction.response.edit_message = AsyncMock()
 
-    await roster_view._on_select_team(roster_interaction)
+    await roster_view._on_select(roster_interaction)
     roster_interaction.response.edit_message.assert_awaited_once()
     roster_embed = roster_interaction.response.edit_message.call_args[1]["embed"]
     assert "Site Reliability Engineering" in roster_embed.title
@@ -408,7 +408,7 @@ async def test_task_menu_and_modal(services):
     project = await proj_srv.create_project(guild_id=guild_id, name="Security Ops", prefix="SEC")
 
     # 1. Test TaskMenuView and embeds
-    view = TaskMenuView(task_srv, proj_srv, team_service=services["team"], projects=[project])
+    view = TaskMenuView(task_srv, proj_srv, squad_service=services["squad"], projects=[project])
     embed = build_task_menu_embed()
     assert "Task Operations Control Center" in embed.title
     assert len(view.children) == 9
@@ -535,7 +535,7 @@ async def test_task_menu_and_modal(services):
 @pytest.mark.asyncio
 async def test_pm_hub_navigation(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
 
@@ -543,7 +543,7 @@ async def test_pm_hub_navigation(services):
     # Create project so New Task has an allowed project container
     await proj_srv.create_project(guild_id=guild_id, name="Infrastructure", prefix="INF")
 
-    hub_view = PmHubView(proj_srv, team_srv, task_srv, user_service=user_srv)
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv, user_service=user_srv)
     welcome_embed = build_hub_welcome_embed()
     assert "Control Hub" in welcome_embed.title
     assert len(hub_view.children) == 5  # New Task, Task Board, Projects, Tech Tree, Overdue
@@ -581,7 +581,7 @@ async def test_pm_hub_navigation(services):
 async def test_pm_hub_multi_project_flows(services):
     """Verify PmHubView in multi-project forums shows project selection for tasks and board."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 9988776655
@@ -600,7 +600,7 @@ async def test_pm_hub_multi_project_flows(services):
         discord_channel_id=channel_id,
     )
 
-    hub_view = PmHubView(proj_srv, team_srv, task_srv, user_service=user_srv)
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv, user_service=user_srv)
 
     mock_channel = MagicMock(spec=discord.ForumChannel)
     mock_channel.id = channel_id
@@ -707,7 +707,7 @@ async def test_user_settings_menu_and_toggle(services):
         user_service=user_srv,
         current_pref=NotificationPreference.DM,
         project_service=services["project"],
-        team_service=services["team"],
+        squad_service=services["squad"],
         task_service=services["task"],
     )
     assert len(view.children) == 6  # 4 prefs + 1 test + 1 back
@@ -771,7 +771,7 @@ async def test_task_menu_and_list_excludes_completed_by_default(services):
 @pytest.mark.asyncio
 async def test_project_archive_and_restore_confirmation_flows(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9995554443
 
@@ -792,7 +792,7 @@ async def test_project_archive_and_restore_confirmation_flows(services):
     await task_srv.update_discord_message_ids(task_id=task.id, discord_message_id=111222, discord_thread_id=987654321)
 
     # 2. Test ProjectMenuView -> Archive Project button opens ProjectArchiveSelectView
-    menu_view = ProjectMenuView(proj_srv, team_srv, task_srv)
+    menu_view = ProjectMenuView(proj_srv, squad_srv, task_srv)
     archive_btn_interaction = MagicMock(spec=discord.Interaction)
     archive_btn_interaction.guild = MagicMock()
     archive_btn_interaction.guild.id = guild_id
@@ -920,7 +920,7 @@ async def test_project_archive_and_restore_confirmation_flows(services):
 @pytest.mark.asyncio
 async def test_project_search_and_pagination_flows(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9991112233
 
@@ -939,7 +939,7 @@ async def test_project_search_and_pagination_flows(services):
     active_view = ProjectActiveListView(
         projects=created_projects,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         page_size=8,
     )
@@ -997,7 +997,7 @@ async def test_project_search_and_pagination_flows(services):
     archive_select_view = ProjectArchiveSelectView(
         projects=created_projects,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
     )
     # Page 0 has 25 items (max select options)
@@ -1033,7 +1033,7 @@ async def test_project_search_and_pagination_flows(services):
     restore_select_view = ProjectRestoreSelectView(
         projects=archived_projects,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
     )
     assert len(restore_select_view.select.options) == 25
@@ -1061,7 +1061,7 @@ async def test_project_search_and_pagination_flows(services):
 @pytest.mark.asyncio
 async def test_task_menu_channel_scoping_and_global_search(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 999333444
 
@@ -1092,7 +1092,7 @@ async def test_task_menu_channel_scoping_and_global_search(services):
     view_channel = TaskMenuView(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         projects=all_projects,
         current_channel_id=12345,
     )
@@ -1110,7 +1110,7 @@ async def test_task_menu_channel_scoping_and_global_search(services):
     view_unbound = TaskMenuView(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         projects=all_projects,
         current_channel_id=99999,
     )
@@ -1157,7 +1157,7 @@ async def test_task_menu_channel_scoping_and_global_search(services):
         projects=all_projects,
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         current_channel_id=12345,
     )
     # Channel project is sorted first
@@ -1181,7 +1181,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     and verify that PmHubView tabs register with menu_manager.
     """
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 999111222
@@ -1193,7 +1193,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter.user.id = 1234
     inter.delete_original_response = AsyncMock()
 
-    proj_view = ProjectMenuView(proj_srv, team_srv, task_srv, initial_interaction=inter)
+    proj_view = ProjectMenuView(proj_srv, squad_srv, task_srv, initial_interaction=inter)
     assert proj_view.timeout == 180
     await proj_view.on_timeout()
     inter.delete_original_response.assert_awaited_once()
@@ -1205,7 +1205,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter2.user.id = 1234
     inter2.delete_original_response = AsyncMock()
 
-    squad_view = SquadMenuView(team_srv, proj_srv, task_srv, initial_interaction=inter2)
+    squad_view = SquadMenuView(squad_srv, proj_srv, task_srv, initial_interaction=inter2)
     assert squad_view.timeout == 180
     await squad_view.on_timeout()
     inter2.delete_original_response.assert_awaited_once()
@@ -1217,7 +1217,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter3.user.id = 1234
     inter3.delete_original_response = AsyncMock()
 
-    task_view = TaskMenuView(task_srv, proj_srv, team_srv, initial_interaction=inter3)
+    task_view = TaskMenuView(task_srv, proj_srv, squad_srv, initial_interaction=inter3)
     assert task_view.timeout == 180
     await task_view.on_timeout()
     inter3.delete_original_response.assert_awaited_once()
@@ -1236,7 +1236,7 @@ async def test_menu_timeouts_and_hub_registration(services):
         user_service=user_srv,
         current_pref=NotificationPreference.DM,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         initial_interaction=inter4,
     )
@@ -1255,7 +1255,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     board_picker = HubBoardProjectSelectView(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         projects=[],
         channel_projects=[],
     )
@@ -1266,7 +1266,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     # 6. PmHubView tab interactions register menu sessions
     hub_view = PmHubView(
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
     )
@@ -1376,7 +1376,7 @@ async def test_pm_dashboard_view_and_embed(services):
     from src.domain.enums import NotificationPreference
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 9999888866
@@ -1409,7 +1409,7 @@ async def test_pm_dashboard_view_and_embed(services):
     # 2. Test PmDashboardView initialization
     dash_view = PmDashboardView(
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
         user=mock_admin_user,
@@ -1565,10 +1565,10 @@ async def test_project_channel_select_incompatible_channel_resets_dropdown(servi
     and deliver an auto-dismissing ephemeral toast.
     """
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
-    view = ProjectChannelSelectView(proj_srv, team_srv, task_srv)
+    view = ProjectChannelSelectView(proj_srv, squad_srv, task_srv)
 
     mock_text_channel = MagicMock(spec=discord.TextChannel)
     mock_text_channel.id = 987654321
@@ -1613,10 +1613,10 @@ async def test_project_create_modal_empty_name_from_channel_select_resets_dropdo
     and deliver an auto-dismissing ephemeral toast.
     """
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
-    view = ProjectChannelSelectView(proj_srv, team_srv, task_srv)
+    view = ProjectChannelSelectView(proj_srv, squad_srv, task_srv)
     mock_forum_channel = MagicMock(spec=discord.ForumChannel)
     mock_forum_channel.id = 555666777
     view.channel_select._values = [mock_forum_channel]
@@ -1656,7 +1656,7 @@ async def test_project_create_modal_empty_name_from_draft_view_refreshes_view(se
     and deliver an auto-dismissing ephemeral toast.
     """
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     mock_forum_channel = MagicMock(spec=discord.ForumChannel)
@@ -1668,7 +1668,7 @@ async def test_project_create_modal_empty_name_from_draft_view_refreshes_view(se
         channel=mock_forum_channel,
         name="Existing Project",
         prefix="EX",
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
     )
 
@@ -1705,7 +1705,7 @@ async def test_task_details_modal_empty_title_from_task_select_project_view_rese
     and deliver an auto-dismissing ephemeral toast.
     """
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 999888777
 
@@ -1714,7 +1714,7 @@ async def test_task_details_modal_empty_title_from_task_select_project_view_rese
         projects=[proj_a],
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
     )
     view.select._values = [str(proj_a.id)]
 

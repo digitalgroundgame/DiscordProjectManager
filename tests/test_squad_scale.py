@@ -12,29 +12,29 @@ from src.adapters.discord_bot.views.squad_menu import (
     SquadRosterDetailView,
     build_squad_menu_embed,
 )
-from src.domain.enums import TeamRoleType
+from src.domain.enums import SquadRoleType
 
 
 @pytest.mark.asyncio
 async def test_scale_30_squad_members_roster_pagination(services):
     """Test that a squad with 30 members properly paginates across 2 pages and enforces character limits."""
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 999111222
 
     # 1. Create a squad
-    squad = await team_srv.create_team(guild_id=guild_id, name="Core Infra Squad", discord_role_id=888001)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Core Infra Squad", discord_role_id=888001)
 
     # 2. Add 2 Squad Leads and 28 Regular Squad Members (30 total)
-    await team_srv.add_team_lead(squad.id, user_discord_id=1001)
-    await team_srv.add_team_lead(squad.id, user_discord_id=1002)
+    await squad_srv.add_squad_lead(squad.id, user_discord_id=1001)
+    await squad_srv.add_squad_lead(squad.id, user_discord_id=1002)
     for i in range(1, 29):
-        await team_srv.assign_member(squad.id, user_discord_id=2000 + i, role_type=TeamRoleType.MEMBER)
+        await squad_srv.assign_member(squad.id, user_discord_id=2000 + i, role_type=SquadRoleType.MEMBER)
 
-    members = await team_srv.list_members(squad.id)
+    members = await squad_srv.list_members(squad.id)
     assert len(members) == 30
 
     # 3. Mount SquadRosterDetailView
-    view = SquadRosterDetailView(teams=[squad], team_service=team_srv)
+    view = SquadRosterDetailView(squads=[squad], squad_service=squad_srv)
     # Before squad selection: only Select + Back
     assert len(view.children) == 2
 
@@ -88,16 +88,16 @@ async def test_scale_30_squad_members_roster_pagination(services):
 @pytest.mark.asyncio
 async def test_scale_50_squad_members_prevents_1024_embed_overflow(services):
     """Test that a squad with 50 members (which would exceed 1024 chars unpaginated) safely chunks."""
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 999333444
 
-    squad = await team_srv.create_team(guild_id=guild_id, name="Platform Engineering", discord_role_id=888002)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Platform Engineering", discord_role_id=888002)
 
     # Add 50 regular members
     for i in range(1, 51):
-        await team_srv.assign_member(squad.id, user_discord_id=3000 + i, role_type=TeamRoleType.MEMBER)
+        await squad_srv.assign_member(squad.id, user_discord_id=3000 + i, role_type=SquadRoleType.MEMBER)
 
-    view = SquadRosterDetailView(teams=[squad], team_service=team_srv)
+    view = SquadRosterDetailView(squads=[squad], squad_service=squad_srv)
     view.select._values = [str(squad.id)]
 
     interaction = MagicMock(spec=discord.Interaction)
@@ -128,18 +128,18 @@ async def test_scale_50_squad_members_prevents_1024_embed_overflow(services):
 @pytest.mark.asyncio
 async def test_scale_100_squad_members_and_search_modal(services):
     """Test extreme scale (100 members across 5 pages) and in-roster member searching."""
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 999555666
 
-    squad = await team_srv.create_team(guild_id=guild_id, name="Massive Contributor Squad", discord_role_id=888003)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Massive Contributor Squad", discord_role_id=888003)
 
     # Seed 100 members
     target_search_id = 9500000095
     for i in range(1, 101):
         uid = target_search_id if i == 95 else (4000 + i)
-        await team_srv.assign_member(squad.id, user_discord_id=uid, role_type=TeamRoleType.MEMBER)
+        await squad_srv.assign_member(squad.id, user_discord_id=uid, role_type=SquadRoleType.MEMBER)
 
-    view = SquadRosterDetailView(teams=[squad], team_service=team_srv)
+    view = SquadRosterDetailView(squads=[squad], squad_service=squad_srv)
     view.select._values = [str(squad.id)]
 
     interaction = MagicMock(spec=discord.Interaction)
@@ -174,20 +174,20 @@ async def test_scale_100_squad_members_and_search_modal(services):
 @pytest.mark.asyncio
 async def test_scale_30_squads_dropdown_and_overview_pagination(services):
     """Test scaling server squads to 30 (>25 limit) across SquadOverviewListView and SquadMemberAssignView."""
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     proj_srv = services["project"]
     guild_id = 999777888
 
     # Create 30 squads
     squads = []
     for i in range(1, 31):
-        s = await team_srv.create_team(guild_id=guild_id, name=f"Squad {i:02d}", discord_role_id=900000 + i)
+        s = await squad_srv.create_squad(guild_id=guild_id, name=f"Squad {i:02d}", discord_role_id=900000 + i)
         squads.append(s)
 
     assert len(squads) == 30
 
     # 1. Test SquadOverviewListView pagination (10 per page = 3 pages)
-    overview_view = SquadOverviewListView(teams=squads, team_service=team_srv)
+    overview_view = SquadOverviewListView(squads=squads, squad_service=squad_srv)
     embed = await overview_view.build_embed()
 
     assert "Server Squads (30) (Page 1/3)" in embed.title
@@ -206,10 +206,10 @@ async def test_scale_30_squads_dropdown_and_overview_pagination(services):
     assert len(page2_embed.fields) == 10
 
     # 2. Test SquadMemberAssignView (25-item select dropdown limit)
-    assign_view = SquadMemberAssignView(teams=squads, team_service=team_srv)
+    assign_view = SquadMemberAssignView(squads=squads, squad_service=squad_srv)
     # Page 0 has exactly 25 select options
-    assert len(assign_view.team_select.options) == 25
-    assert "Page 1/2" in assign_view.team_select.placeholder
+    assert len(assign_view.squad_select.options) == 25
+    assert "Page 1/2" in assign_view.squad_select.placeholder
     assert hasattr(assign_view, "prev_btn")
     assert hasattr(assign_view, "next_btn")
     assert assign_view.prev_btn.disabled is True
@@ -217,33 +217,33 @@ async def test_scale_30_squads_dropdown_and_overview_pagination(services):
 
     # Navigate to page 2 (5 squads)
     await assign_view._on_next_clicked(interaction)
-    assert len(assign_view.team_select.options) == 5
-    assert "Page 2/2" in assign_view.team_select.placeholder
+    assert len(assign_view.squad_select.options) == 5
+    assert "Page 2/2" in assign_view.squad_select.placeholder
     assert assign_view.next_btn.disabled is True
 
     # Test squad search in assignment view
     await assign_view._apply_squad_search(interaction, query="Squad 29")
-    assert len(assign_view.team_select.options) == 1
-    assert assign_view.team_select.options[0].label == "Squad 29"
+    assert len(assign_view.squad_select.options) == 1
+    assert assign_view.squad_select.options[0].label == "Squad 29"
 
     # 3. Test ProjectAssignSquadView pagination with 30 squads
     project = await proj_srv.create_project(guild_id=guild_id, name="Scale Project", prefix="SCL")
     proj_assign_view = ProjectAssignSquadView(
         projects=[project],
-        teams=squads,
+        squads=squads,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
     )
     # Page 0 has 25 squad options
-    assert len(proj_assign_view.team_select.options) == 25
-    assert hasattr(proj_assign_view, "prev_team_btn")
-    assert hasattr(proj_assign_view, "next_team_btn")
-    assert proj_assign_view.prev_team_btn.disabled is True
+    assert len(proj_assign_view.squad_select.options) == 25
+    assert hasattr(proj_assign_view, "prev_squad_btn")
+    assert hasattr(proj_assign_view, "next_squad_btn")
+    assert proj_assign_view.prev_squad_btn.disabled is True
 
     # Advance to page 2
-    await proj_assign_view._on_next_team_clicked(interaction)
-    assert len(proj_assign_view.team_select.options) == 5
-    assert proj_assign_view.next_team_btn.disabled is True
+    await proj_assign_view._on_next_squad_clicked(interaction)
+    assert len(proj_assign_view.squad_select.options) == 5
+    assert proj_assign_view.next_squad_btn.disabled is True
 
 
 @pytest.mark.asyncio

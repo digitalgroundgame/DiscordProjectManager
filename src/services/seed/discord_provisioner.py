@@ -22,8 +22,8 @@ from src.services.seed.manifest_loader import SeedManifest, SquadSeedSpec
 
 if TYPE_CHECKING:
     from src.services.seed.seed_service import SeedDbResult
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("seed.discord_provisioner")
@@ -105,7 +105,7 @@ async def provision_discord_workspaces(
     manifest: SeedManifest,
     db_result: SeedDbResult,
     task_service: TaskService,
-    team_service: TeamService | None = None,
+    squad_service: SquadService | None = None,
     user_service: UserService | None = None,
     category_name: str = DEFAULT_MANAGED_CATEGORY,
 ) -> None:
@@ -170,7 +170,7 @@ async def provision_discord_workspaces(
             await ensure_pinned_hub_post(
                 channel=existing_chan,
                 project_service=task_service.project_service,
-                team_service=team_service,
+                squad_service=squad_service,
                 task_service=task_service,
                 user_service=user_service,
             )

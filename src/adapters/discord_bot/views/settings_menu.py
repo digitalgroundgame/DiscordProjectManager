@@ -11,8 +11,8 @@ from src.domain.enums import NotificationPreference
 
 if TYPE_CHECKING:
     from src.services.project_service import ProjectService
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.views.settings_menu")
@@ -55,7 +55,7 @@ class UserSettingsView(BaseView):
         user_service: UserService,
         current_pref: NotificationPreference,
         project_service: ProjectService | None = None,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
         return_to: str = "dashboard",
@@ -64,7 +64,7 @@ class UserSettingsView(BaseView):
         self.user_service = user_service
         self.current_pref = current_pref
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.return_to = return_to
         self._initial_interaction = initial_interaction
@@ -138,7 +138,7 @@ class UserSettingsView(BaseView):
         test_btn.callback = self._on_test_clicked
         self.add_item(test_btn)
 
-        if self.project_service and self.team_service and self.task_service:
+        if self.project_service and self.squad_service and self.task_service:
             back_btn = discord.ui.Button(
                 label="PM Main Menu",
                 style=discord.ButtonStyle.secondary,
@@ -243,7 +243,7 @@ class UserSettingsView(BaseView):
             )
             view = PmDashboardView(
                 self.project_service,
-                self.team_service,
+                self.squad_service,
                 self.task_service,
                 self.user_service,
                 initial_interaction=interaction,
@@ -260,10 +260,10 @@ class UserSettingsView(BaseView):
         else:
             from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
 
-            if self.project_service and self.team_service and self.task_service:
+            if self.project_service and self.squad_service and self.task_service:
                 view = PmHubView(
                     self.project_service,
-                    self.team_service,
+                    self.squad_service,
                     self.task_service,
                     self.user_service,
                 )

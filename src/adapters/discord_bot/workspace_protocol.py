@@ -8,7 +8,7 @@ from uuid import UUID
 
 import discord
 
-from src.domain.models import Project, Task, TaskHistory, Team
+from src.domain.models import Project, Squad, Task, TaskHistory
 
 TaskControlPanel = Literal["quick_controls", "dependencies", "history"]
 
@@ -120,7 +120,7 @@ class ProjectWorkspaceRef:
     """Immutable result reference describing the fully provisioned Project and Discord presence."""
 
     project: Project
-    team: Team | None = None
+    squad: Squad | None = None
     channel_id: int | None = None
     control_hub_thread_id: int | None = None
     control_hub_message_id: int | None = None
@@ -137,7 +137,7 @@ class IProjectDiscordWorkspace(Protocol):
       - Channel Type Invariant: Projects bound to Discord must target a Forum Channel
         (or validated Text Channel fallback). Non-matching channel types (e.g. threads or voice)
         are rejected before mutating persistent state.
-      - Squad 1:1 Mapping Invariant: When a Squad role is provided, a Team domain entity is
+      - Squad 1:1 Mapping Invariant: When a Squad role is provided, a Squad domain entity is
         atomically created/retrieved and mapped 1:1 to the Project in local persistence.
       - Single Control Hub Invariant: Exactly one pinned Control Hub exists per Forum Channel.
         Projects bound to that channel share the unified Control Hub post.

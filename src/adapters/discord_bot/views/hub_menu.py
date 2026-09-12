@@ -17,8 +17,8 @@ from src.adapters.discord_bot.views.task_menu import (
 from src.domain.models import Project, Squad
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService
 
 if TYPE_CHECKING:
     from src.services.user_service import UserService
@@ -169,7 +169,7 @@ class HubBoardProjectSelectView(BaseView):
         self,
         task_service: TaskService,
         project_service: ProjectService,
-        team_service: TeamService | None,
+        squad_service: SquadService | None,
         projects: list[Project],
         channel_projects: list[Project],
         current_channel_id: int | None = None,
@@ -179,7 +179,7 @@ class HubBoardProjectSelectView(BaseView):
         super().__init__(timeout=120)
         self.task_service = task_service
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.projects = projects
         self.channel_projects = channel_projects
         self.current_channel_id = current_channel_id
@@ -266,7 +266,7 @@ class HubBoardProjectSelectView(BaseView):
         view = TaskMenuView(
             self.task_service,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             projects=self.projects,
             current_channel_id=self.current_channel_id,
             parent_channel_id=self.parent_channel_id,
@@ -295,17 +295,17 @@ class PmHubView(BaseView):
     def __init__(
         self,
         project_service: ProjectService,
-        team_service: TeamService,
+        squad_service: SquadService,
         task_service: TaskService,
         user_service: UserService | None = None,
         auth_service: AuthService | None = None,
     ):
         super().__init__(timeout=None)
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self.auth_service = auth_service or AuthService(project_service, team_service)
+        self.auth_service = auth_service or AuthService(project_service, squad_service)
 
     async def _refresh_hub_message(
         self,
@@ -345,7 +345,7 @@ class PmHubView(BaseView):
             )
             updated_view = PmHubView(
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 auth_service=self.auth_service,
@@ -384,7 +384,7 @@ class PmHubView(BaseView):
             if isinstance(parent, discord.ForumChannel):
                 target_channel = parent
 
-        auth_srv = AuthService(self.project_service, self.team_service) if self.team_service else None
+        auth_srv = AuthService(self.project_service, self.squad_service) if self.squad_service else None
         can_create_standalone = await auth_srv.can_create_task_in_project(interaction.user, None) if auth_srv else True
 
         allowed_projects = []
@@ -466,7 +466,7 @@ class PmHubView(BaseView):
                     projects=allowed_projects,
                     task_service=self.task_service,
                     project_service=self.project_service,
-                    team_service=self.team_service,
+                    squad_service=self.squad_service,
                     current_channel_id=channel_id,
                     parent_channel_id=parent_id,
                     auth_service=auth_srv,
@@ -507,7 +507,7 @@ class PmHubView(BaseView):
             picker_view = HubBoardProjectSelectView(
                 task_service=self.task_service,
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 projects=projects,
                 channel_projects=channel_projects,
                 current_channel_id=channel_id,
@@ -540,7 +540,7 @@ class PmHubView(BaseView):
         view = TaskMenuView(
             self.task_service,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             projects=projects,
             current_channel_id=channel_id,
             parent_channel_id=parent_id,
@@ -570,7 +570,7 @@ class PmHubView(BaseView):
         await menu_manager.register_menu(interaction)
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
         )
@@ -698,7 +698,7 @@ class PmHubView(BaseView):
         view = TaskMenuView(
             self.task_service,
             self.project_service,
-            self.team_service,
+            self.squad_service,
             projects=projects,
             current_channel_id=channel_id,
             parent_channel_id=parent_id,

@@ -6,7 +6,7 @@ import pytest
 from src.adapters.discord_bot.bot import DggPmBot
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.views.task_modals import TaskEditModal, TaskNoteModal
-from src.domain.enums import PriorityLevel, TeamRoleType
+from src.domain.enums import PriorityLevel, SquadRoleType
 from src.domain.exceptions import PermissionDeniedError
 from src.services.auth_service import AuthService
 
@@ -43,9 +43,9 @@ def _make_mock_member(
 @pytest.mark.asyncio
 async def test_auth_service_server_manager_bypass(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990001
     project = await proj_srv.create_project(guild_id=guild_id, name="Project Alpha", prefix="ALP")
@@ -66,9 +66,9 @@ async def test_auth_service_server_manager_bypass(services):
 @pytest.mark.asyncio
 async def test_auth_service_task_assignee_and_creator(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990002
     project = await proj_srv.create_project(
@@ -92,17 +92,17 @@ async def test_auth_service_task_assignee_and_creator(services):
 
 
 @pytest.mark.asyncio
-async def test_auth_service_project_team_role_scoping(services):
+async def test_auth_service_project_squad_role_scoping(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990003
-    team_role_id = 888801
-    team = await team_srv.create_team(guild_id=guild_id, name="Core Devs", discord_role_id=team_role_id)
+    squad_role_id = 888801
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Core Devs", discord_role_id=squad_role_id)
     project = await proj_srv.create_project(guild_id=guild_id, name="Platform V2", prefix="PLT")
-    await proj_srv.assign_team_to_project(project_id=project.id, team_id=team.id)
+    await proj_srv.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
 
     task = await task_srv.create_task(
         guild_id=guild_id,
@@ -111,12 +111,12 @@ async def test_auth_service_project_team_role_scoping(services):
         project_id=project.id,
     )
 
-    team_member = _make_mock_member(2001, role_ids=[team_role_id])
+    squad_member = _make_mock_member(2001, role_ids=[squad_role_id])
     outsider = _make_mock_member(2002, role_ids=[999999])
 
-    # Team member with role is authorized to create and mutate
-    assert await auth_srv.can_create_task_in_project(team_member, project.id) is True
-    assert await auth_srv.can_mutate_task(team_member, task) is True
+    # Squad member with role is authorized to create and mutate
+    assert await auth_srv.can_create_task_in_project(squad_member, project.id) is True
+    assert await auth_srv.can_mutate_task(squad_member, task) is True
 
     # Outsider without role is rejected
     assert await auth_srv.can_create_task_in_project(outsider, project.id) is False
@@ -126,9 +126,9 @@ async def test_auth_service_project_team_role_scoping(services):
 @pytest.mark.asyncio
 async def test_auth_service_strict_default_for_unassigned_project(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990004
     project = await proj_srv.create_project(guild_id=guild_id, name="Secret Lab", prefix="SEC", discord_role_id=555111)
@@ -156,58 +156,58 @@ async def test_auth_service_strict_default_for_unassigned_project(services):
 
 
 @pytest.mark.asyncio
-async def test_team_lead_roster_management(services):
+async def test_squad_lead_roster_management(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990005
-    team = await team_srv.create_team(guild_id=guild_id, name="Security Team", discord_role_id=555111)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Security Squad", discord_role_id=555111)
 
     lead_id = 4001
     regular_id = 4002
     outsider_id = 4003
 
-    await team_srv.assign_member(team_id=team.id, user_discord_id=lead_id, role_type=TeamRoleType.LEAD)
-    await team_srv.assign_member(team_id=team.id, user_discord_id=regular_id, role_type=TeamRoleType.MEMBER)
+    await squad_srv.assign_member(squad_id=squad.id, user_discord_id=lead_id, role_type=SquadRoleType.LEAD)
+    await squad_srv.assign_member(squad_id=squad.id, user_discord_id=regular_id, role_type=SquadRoleType.MEMBER)
 
     lead_member = _make_mock_member(lead_id, role_ids=[555111])
     regular_member = _make_mock_member(regular_id, role_ids=[555111])
     outsider_member = _make_mock_member(outsider_id, role_ids=[])
     admin_member = _make_mock_member(9999, manage_guild=True)
 
-    # Team lead can manage roster
-    assert await auth_srv.can_manage_team_roster(lead_member, team.id) is True
+    # Squad lead can manage roster
+    assert await auth_srv.can_manage_squad_roster(lead_member, squad.id) is True
     # Server manager can manage roster
-    assert await auth_srv.can_manage_team_roster(admin_member, team.id) is True
-    # Regular team member cannot manage roster
-    assert await auth_srv.can_manage_team_roster(regular_member, team.id) is False
+    assert await auth_srv.can_manage_squad_roster(admin_member, squad.id) is True
+    # Regular squad member cannot manage roster
+    assert await auth_srv.can_manage_squad_roster(regular_member, squad.id) is False
     # Outsider cannot manage roster
-    assert await auth_srv.can_manage_team_roster(outsider_member, team.id) is False
+    assert await auth_srv.can_manage_squad_roster(outsider_member, squad.id) is False
 
 
 @pytest.mark.asyncio
-async def test_team_lead_cog_enforcement(services):
+async def test_squad_lead_cog_enforcement(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990006
 
     bot = MagicMock()
     pm_cog = PmCog(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         auth_service=auth_srv,
     )
 
-    team = await team_srv.create_team(guild_id=guild_id, name="DevOps", discord_role_id=777888)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="DevOps", discord_role_id=777888)
     lead_id = 5001
-    await team_srv.add_team_lead(team.id, user_discord_id=lead_id)
+    await squad_srv.add_squad_lead(squad.id, user_discord_id=lead_id)
 
-    # 1. Lead designates a new team lead with the discord role
+    # 1. Lead designates a new squad lead with the discord role
     target_user = _make_mock_member(5002, role_ids=[777888])
     interaction_lead = MagicMock(spec=discord.Interaction)
     interaction_lead.guild = MagicMock()
@@ -218,11 +218,11 @@ async def test_team_lead_cog_enforcement(services):
     interaction_lead.followup = MagicMock()
     interaction_lead.followup.send = AsyncMock()
 
-    await pm_cog.team_lead.callback(
+    await pm_cog.squad_lead.callback(
         pm_cog,
         interaction=interaction_lead,
         action="add",
-        team_name="DevOps",
+        squad_name="DevOps",
         user=target_user,
     )
 
@@ -240,11 +240,11 @@ async def test_team_lead_cog_enforcement(services):
     interaction_ineligible.followup = MagicMock()
     interaction_ineligible.followup.send = AsyncMock()
 
-    await pm_cog.team_lead.callback(
+    await pm_cog.squad_lead.callback(
         pm_cog,
         interaction=interaction_ineligible,
         action="add",
-        team_name="DevOps",
+        squad_name="DevOps",
         user=ineligible_user,
     )
     interaction_ineligible.followup.send.assert_awaited_once()
@@ -260,11 +260,11 @@ async def test_team_lead_cog_enforcement(services):
     interaction_denied.followup = MagicMock()
     interaction_denied.followup.send = AsyncMock()
 
-    await pm_cog.team_lead.callback(
+    await pm_cog.squad_lead.callback(
         pm_cog,
         interaction=interaction_denied,
         action="add",
-        team_name="DevOps",
+        squad_name="DevOps",
         user=target_user,
     )
     interaction_denied.followup.send.assert_awaited_once()
@@ -274,23 +274,23 @@ async def test_team_lead_cog_enforcement(services):
 @pytest.mark.asyncio
 async def test_task_assignment_role_eligibility_enforcement(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990008
 
     bot = MagicMock()
     pm_cog = PmCog(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         auth_service=auth_srv,
     )
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Frontend App", prefix="FE", discord_role_id=999111)
-    team = await team_srv.create_team(guild_id=guild_id, name="Frontend Squad", discord_role_id=999111)
-    await proj_srv.assign_team_to_project(project_id=project.id, team_id=team.id)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Frontend Squad", discord_role_id=999111)
+    await proj_srv.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
 
     task = await task_srv.create_task(
         guild_id=guild_id,
@@ -346,7 +346,7 @@ async def test_task_assignment_role_eligibility_enforcement(services):
     assert "does not hold an eligible squad Discord role for project 'Frontend App'" in fail_msg
 
     # 3. Dynamic button assignee selection with ineligible member fails
-    dgg_bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    dgg_bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     dynamic_fail = MagicMock(spec=discord.Interaction)
     dynamic_fail.guild_id = guild_id
@@ -367,16 +367,16 @@ async def test_task_assignment_role_eligibility_enforcement(services):
 @pytest.mark.asyncio
 async def test_task_cog_watchers_self_service_vs_third_party(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990007
 
     bot = MagicMock()
     pm_cog = PmCog(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         auth_service=auth_srv,
     )
@@ -436,9 +436,9 @@ async def test_task_cog_watchers_self_service_vs_third_party(services):
 @pytest.mark.asyncio
 async def test_modal_authorization_rejection(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990008
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Secure Vault", prefix="VAU")
@@ -478,14 +478,14 @@ async def test_modal_authorization_rejection(services):
 @pytest.mark.asyncio
 async def test_dynamic_button_authorization_rejection(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9990009
 
     bot = DggPmBot(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
     )
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Project Gate", prefix="GAT")
@@ -511,49 +511,49 @@ async def test_dynamic_button_authorization_rejection(services):
 
 
 @pytest.mark.asyncio
-async def test_orphaned_team_lead_permission_denial(services):
-    """If a user is in DB as a lead but loses their Discord role, they lose team lead management powers."""
+async def test_orphaned_squad_lead_permission_denial(services):
+    """If a user is in DB as a lead but loses their Discord role, they lose squad lead management powers."""
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990011
 
-    team = await team_srv.create_team(guild_id=guild_id, name="Security Squad", discord_role_id=888999)
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Security Squad", discord_role_id=888999)
     user_id = 9001
-    await team_srv.add_team_lead(team.id, user_id)
+    await squad_srv.add_squad_lead(squad.id, user_id)
 
-    # 1. User with the role has team lead permissions
+    # 1. User with the role has squad lead permissions
     member_with_role = _make_mock_member(user_id, role_ids=[888999])
-    assert await auth_srv.can_manage_team_leads(member_with_role, team.id) is True
+    assert await auth_srv.can_manage_squad_leads(member_with_role, squad.id) is True
 
-    # 2. User whose role was removed loses team lead permissions
+    # 2. User whose role was removed loses squad lead permissions
     member_without_role = _make_mock_member(user_id, role_ids=[111222])  # missing 888999
-    assert await auth_srv.can_manage_team_leads(member_without_role, team.id) is False
+    assert await auth_srv.can_manage_squad_leads(member_without_role, squad.id) is False
 
     with pytest.raises(PermissionDeniedError, match="You do not have permission"):
-        await auth_srv.require_team_lead_management(member_without_role, team.id)
+        await auth_srv.require_squad_lead_management(member_without_role, squad.id)
 
 
 @pytest.mark.asyncio
-async def test_on_member_update_auto_prunes_team_lead(services):
-    """Removing a team's Discord role from a member automatically prunes their DB lead record."""
+async def test_on_member_update_auto_prunes_squad_lead(services):
+    """Removing a squad's Discord role from a member automatically prunes their DB lead record."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9990012
 
-    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
-    team_role_id = 333444
-    team = await team_srv.create_team(guild_id=guild_id, name="Platform Squad", discord_role_id=team_role_id)
+    squad_role_id = 333444
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Platform Squad", discord_role_id=squad_role_id)
     user_id = 9002
-    await team_srv.add_team_lead(team.id, user_id)
-    assert await team_srv.is_team_lead(team.id, user_id) is True
+    await squad_srv.add_squad_lead(squad.id, user_id)
+    assert await squad_srv.is_squad_lead(squad.id, user_id) is True
 
     mock_guild = MagicMock()
     mock_guild.id = guild_id
 
-    before_member = _make_mock_member(user_id, role_ids=[team_role_id])
+    before_member = _make_mock_member(user_id, role_ids=[squad_role_id])
     before_member.guild = mock_guild
     after_member = _make_mock_member(user_id, role_ids=[])
     after_member.guild = mock_guild
@@ -561,28 +561,28 @@ async def test_on_member_update_auto_prunes_team_lead(services):
     await bot.on_member_update(before_member, after_member)
 
     # Verify DB lead record was automatically removed
-    assert await team_srv.is_team_lead(team.id, user_id) is False
+    assert await squad_srv.is_squad_lead(squad.id, user_id) is False
 
 
 @pytest.mark.asyncio
-async def test_on_member_remove_auto_prunes_team_lead(services):
-    """When a member leaves the server, all their DB team lead records in that guild are cleaned up."""
+async def test_on_member_remove_auto_prunes_squad_lead(services):
+    """When a member leaves the server, all their DB squad lead records in that guild are cleaned up."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9990013
 
-    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
-    team1 = await team_srv.create_team(guild_id=guild_id, name="Frontend Squad", discord_role_id=111)
-    team2 = await team_srv.create_team(guild_id=guild_id, name="Backend Squad", discord_role_id=222)
+    squad1 = await squad_srv.create_squad(guild_id=guild_id, name="Frontend Squad", discord_role_id=111)
+    squad2 = await squad_srv.create_squad(guild_id=guild_id, name="Backend Squad", discord_role_id=222)
     user_id = 9003
 
-    await team_srv.add_team_lead(team1.id, user_id)
-    await team_srv.add_team_lead(team2.id, user_id)
+    await squad_srv.add_squad_lead(squad1.id, user_id)
+    await squad_srv.add_squad_lead(squad2.id, user_id)
 
-    assert await team_srv.is_team_lead(team1.id, user_id) is True
-    assert await team_srv.is_team_lead(team2.id, user_id) is True
+    assert await squad_srv.is_squad_lead(squad1.id, user_id) is True
+    assert await squad_srv.is_squad_lead(squad2.id, user_id) is True
 
     mock_guild = MagicMock()
     mock_guild.id = guild_id
@@ -591,18 +591,18 @@ async def test_on_member_remove_auto_prunes_team_lead(services):
 
     await bot.on_member_remove(leaving_member)
 
-    # Verify DB records across both teams were automatically cleaned up
-    assert await team_srv.is_team_lead(team1.id, user_id) is False
-    assert await team_srv.is_team_lead(team2.id, user_id) is False
+    # Verify DB records across both squads were automatically cleaned up
+    assert await squad_srv.is_squad_lead(squad1.id, user_id) is False
+    assert await squad_srv.is_squad_lead(squad2.id, user_id) is False
 
 
 @pytest.mark.asyncio
 async def test_project_lead_authorization(services):
     """Verify Project Leads have elevated permissions to create, assign, and mutate tasks in their projects."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9990014
 
     lead_id = 6001
@@ -667,12 +667,12 @@ async def test_permission_aware_project_menu_ui(services):
     from src.adapters.discord_bot.views.project_menu import ProjectMenuView, build_project_menu_embed
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     # 1. Server Manager view
     manager_member = _make_mock_member(1001, manage_guild=True)
-    manager_view = ProjectMenuView(proj_srv, team_srv, task_srv, user=manager_member)
+    manager_view = ProjectMenuView(proj_srv, squad_srv, task_srv, user=manager_member)
     assert manager_view.is_server_manager is True
     assert len(manager_view.children) == 9
     assert manager_view.new_project_btn is not None
@@ -693,7 +693,7 @@ async def test_permission_aware_project_menu_ui(services):
 
     # 2. Non-server Manager view
     regular_member = _make_mock_member(2002, manage_guild=False, administrator=False)
-    regular_view = ProjectMenuView(proj_srv, team_srv, task_srv, user=regular_member)
+    regular_view = ProjectMenuView(proj_srv, squad_srv, task_srv, user=regular_member)
     assert regular_view.is_server_manager is False
     assert len(regular_view.children) == 3  # Active Projects, Tech Tree, and PM Main Menu
     assert regular_view.new_project_btn is None
@@ -717,13 +717,13 @@ async def test_permission_aware_squad_menu_ui(services):
     """Test that SquadMenuView dynamic buttons adapt based on manager/lead permissions."""
     from src.adapters.discord_bot.views.squad_menu import SquadMenuView, build_squad_menu_embed
 
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     proj_srv = services["project"]
     task_srv = services["task"]
 
     # 1. Server Manager (can create squads, can assign members)
     manager_view = SquadMenuView(
-        team_srv,
+        squad_srv,
         proj_srv,
         task_srv,
         can_create_squads=True,
@@ -742,7 +742,7 @@ async def test_permission_aware_squad_menu_ui(services):
 
     # 2. Squad Lead (cannot create squads, can assign members)
     lead_view = SquadMenuView(
-        team_srv,
+        squad_srv,
         proj_srv,
         task_srv,
         can_create_squads=False,
@@ -761,7 +761,7 @@ async def test_permission_aware_squad_menu_ui(services):
 
     # 3. Regular Member (cannot create squads, cannot assign members)
     member_view = SquadMenuView(
-        team_srv,
+        squad_srv,
         proj_srv,
         task_srv,
         can_create_squads=False,
@@ -786,9 +786,9 @@ async def test_permission_aware_task_creation_project_filtering(services):
     from src.adapters.discord_bot.views.task_menu import TaskMenuView, TaskSelectProjectView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990099
     role_squad = 888999
@@ -810,7 +810,7 @@ async def test_permission_aware_task_creation_project_filtering(services):
     outsider_user = _make_mock_member(3002, role_ids=[])
 
     # Outsider in PmHubView new_task_btn
-    hub_view = PmHubView(proj_srv, team_srv, task_srv)
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv)
 
     outsider_interaction = MagicMock(spec=discord.Interaction)
     outsider_interaction.guild = MagicMock()
@@ -850,7 +850,7 @@ async def test_permission_aware_task_creation_project_filtering(services):
     task_menu_view = TaskMenuView(
         task_srv,
         proj_srv,
-        team_srv,
+        squad_srv,
         auth_service=auth_srv,
     )
     task_menu_interaction = MagicMock(spec=discord.Interaction)
@@ -872,25 +872,25 @@ async def test_permission_aware_task_creation_project_filtering(services):
 
 @pytest.mark.asyncio
 async def test_auth_service_standalone_task_permissions_option_b(services):
-    """Verify that under Option B, standalone tasks are restricted to Server Managers & Team Leads."""
+    """Verify that under Option B, standalone tasks are restricted to Server Managers & Squad Leads."""
     from src.adapters.discord_bot.views.task_menu import TaskMenuView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 8880001
-    # Create a team with a team lead
-    team = await team_srv.create_team(guild_id=guild_id, name="Security Team", discord_role_id=888801)
-    team_lead_user_id = 4001
-    await team_srv.add_team_lead(team.id, team_lead_user_id)
+    # Create a squad with a squad lead
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Security Squad", discord_role_id=888801)
+    squad_lead_user_id = 4001
+    await squad_srv.add_squad_lead(squad.id, squad_lead_user_id)
 
     mock_guild = MagicMock(spec=discord.Guild)
     mock_guild.id = guild_id
 
-    team_lead_member = _make_mock_member(team_lead_user_id)
-    team_lead_member.guild = mock_guild
+    squad_lead_member = _make_mock_member(squad_lead_user_id)
+    squad_lead_member.guild = mock_guild
 
     admin_member = _make_mock_member(4002, is_admin=True)
     admin_member.guild = mock_guild
@@ -901,8 +901,8 @@ async def test_auth_service_standalone_task_permissions_option_b(services):
     # 1. Admin / Server Manager is authorized for standalone tasks
     assert await auth_srv.can_create_task_in_project(admin_member, None) is True
 
-    # 2. Team Lead is authorized for standalone tasks
-    assert await auth_srv.can_create_task_in_project(team_lead_member, None) is True
+    # 2. Squad Lead is authorized for standalone tasks
+    assert await auth_srv.can_create_task_in_project(squad_lead_member, None) is True
 
     # 3. Regular member is rejected for standalone tasks
     assert await auth_srv.can_create_task_in_project(regular_member, None) is False
@@ -915,7 +915,7 @@ async def test_auth_service_standalone_task_permissions_option_b(services):
     regular_view = TaskMenuView(
         task_srv,
         proj_srv,
-        team_srv,
+        squad_srv,
         auth_service=auth_srv,
         can_create_standalone=False,
     )
@@ -925,7 +925,7 @@ async def test_auth_service_standalone_task_permissions_option_b(services):
     lead_view = TaskMenuView(
         task_srv,
         proj_srv,
-        team_srv,
+        squad_srv,
         auth_service=auth_srv,
         can_create_standalone=True,
     )
@@ -941,16 +941,16 @@ async def test_auth_service_standalone_task_permissions_option_b(services):
 
     await lead_view.standalone_btn.callback(bad_interaction)
     bad_interaction.response.send_message.assert_awaited_once()
-    assert "Only Server Managers and Team Leads" in bad_interaction.response.send_message.call_args[0][0]
+    assert "Only Server Managers and Squad Leads" in bad_interaction.response.send_message.call_args[0][0]
 
 
 @pytest.mark.asyncio
 async def test_tech_tree_visual_graph_permission_gating(services):
     """Verify that Visual Graph / Tech Tree viewing is gated by project role, lead, or server manager."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
     guild_id = 9999111122
 
     # Create project with squad role 5050 and project lead 7070
@@ -997,7 +997,7 @@ async def test_tech_tree_visual_graph_permission_gating(services):
         bot=bot,
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         auth_service=auth_srv,
     )
 
@@ -1038,8 +1038,8 @@ async def test_tech_tree_visual_graph_permission_gating(services):
 async def test_can_assign_task_to_user_uncached_member_fallback_fetch(services):
     """Verifies that can_assign_task_to_user fetches uncached members via guild.fetch_member."""
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990020
     project = await proj_srv.create_project(
@@ -1068,8 +1068,8 @@ async def test_can_assign_task_to_user_uncached_member_fallback_fetch(services):
 async def test_can_assign_task_to_user_fetch_member_error_handling(services):
     """Verifies that can_assign_task_to_user gracefully handles Discord API errors on fetch_member."""
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990021
     project = await proj_srv.create_project(
@@ -1096,8 +1096,8 @@ async def test_can_assign_task_to_user_fetch_member_error_handling(services):
 async def test_require_task_assignee_eligibility_error_message_details(services):
     """Verifies that require_task_assignee_eligibility formats a descriptive error naming the project and roles."""
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990022
     project = await proj_srv.create_project(
@@ -1141,8 +1141,8 @@ async def test_require_task_assignee_eligibility_error_message_details(services)
 async def test_can_assign_task_to_user_project_lead_exempt(services):
     """Verifies that Project Leads are always eligible for assignment without squad roles or member fetching."""
     proj_srv = services["project"]
-    team_srv = services["team"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990023
     lead_id = 1111
@@ -1174,9 +1174,9 @@ async def test_task_action_controls_ineligible_assignee_error_feedback(services)
     from src.adapters.discord_bot.views.task_buttons import TaskActionControlsView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990024
     project = await proj_srv.create_project(
@@ -1240,9 +1240,9 @@ async def test_task_action_controls_save_and_cancel_workflow(services):
     from src.adapters.discord_bot.views.task_buttons import TaskActionControlsView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
-    auth_srv = AuthService(proj_srv, team_srv)
+    auth_srv = AuthService(proj_srv, squad_srv)
 
     guild_id = 9990025
     project = await proj_srv.create_project(

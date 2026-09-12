@@ -43,7 +43,6 @@ class _NullUnitOfWork(IUnitOfWork):
         self.projects = project_repo
         self.outbox = outbox_repo
         self.squads = None  # type: ignore[assignment]
-        self.teams = None  # type: ignore[assignment]
         self.user_prefs = None  # type: ignore[assignment]
 
     async def __aenter__(self) -> _NullUnitOfWork:

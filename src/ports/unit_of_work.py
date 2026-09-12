@@ -9,7 +9,6 @@ if TYPE_CHECKING:
         IProjectRepo,
         ISquadRepo,
         ITaskRepo,
-        ITeamRepo,
         IUserPreferenceRepo,
     )
 
@@ -20,7 +19,6 @@ class IUnitOfWork(ABC):
     tasks: ITaskRepo
     projects: IProjectRepo
     squads: ISquadRepo
-    teams: ITeamRepo
     outbox: IOutboxRepo
     user_prefs: IUserPreferenceRepo
 

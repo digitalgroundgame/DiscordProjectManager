@@ -95,9 +95,9 @@ def test_resolve_forum_tags_matching():
 async def test_project_create_with_forum_channel(services):
     """Verify /project-create accepts a ForumChannel and formats the embed correctly."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     bot = MagicMock()
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -150,7 +150,7 @@ async def test_task_create_in_forum_channel(services):
     """Verify /task-create creates a Forum Post (thread + starter message) with tags in a ForumChannel."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 1122334455
 
     project = await proj_srv.create_project(
@@ -161,7 +161,7 @@ async def test_task_create_in_forum_channel(services):
     )
 
     bot = MagicMock()
-    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     mock_forum = MagicMock(spec=discord.ForumChannel)
     mock_forum.id = 987654321
@@ -276,7 +276,7 @@ async def test_bot_sync_forum_post_starter_message_and_tags(services):
     """Verify DggPmBot.sync_root_task_message and sync_task_thread work inside ForumChannels."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 123123123
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Cache Project", prefix="CP")
@@ -290,7 +290,7 @@ async def test_bot_sync_forum_post_starter_message_and_tags(services):
     await task_srv.update_discord_message_ids(task.id, 888111, 888111)
     task = await task_srv.get_by_id(task.id)
 
-    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     mock_forum = MagicMock(spec=discord.ForumChannel)
     tag_high = _create_mock_tag(1, "High")
@@ -472,9 +472,9 @@ async def test_ensure_project_tag_forbidden():
 async def test_project_setup_forum_command(services):
     """Verify /project-setup-forum executes setup_forum_tags and replies with embed."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     bot = MagicMock()
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     mock_forum = MagicMock(spec=discord.ForumChannel)
     mock_forum.id = 333222111
@@ -502,7 +502,7 @@ async def test_project_setup_forum_command(services):
 async def test_ensure_pinned_hub_post_in_forum(services):
     """Verify ensure_pinned_hub_post creates tags, creates thread post, and pins it in forum."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     mock_forum = MagicMock(spec=discord.ForumChannel)
@@ -520,7 +520,7 @@ async def test_ensure_pinned_hub_post_in_forum(services):
     ok, msg = await ensure_pinned_hub_post(
         channel=mock_forum,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         project_name="Core Engine",
     )
@@ -537,7 +537,7 @@ async def test_ensure_pinned_hub_post_in_forum(services):
 async def test_ensure_pinned_hub_post_in_text_channel(services):
     """Verify ensure_pinned_hub_post posts embed and pins message in text channels."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
     mock_channel = MagicMock(spec=discord.TextChannel)
@@ -551,7 +551,7 @@ async def test_ensure_pinned_hub_post_in_text_channel(services):
     ok, msg = await ensure_pinned_hub_post(
         channel=mock_channel,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         project_name="Mobile",
     )
@@ -566,7 +566,7 @@ async def test_ensure_pinned_hub_post_in_text_channel(services):
 async def test_pm_cog_post_hub_and_subgroups(services):
     """Verify unified /pm slash command group operations including /pm post-hub and /pm project create."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 999888999
@@ -575,7 +575,7 @@ async def test_pm_cog_post_hub_and_subgroups(services):
     pm_cog = PmCog(
         bot=bot,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
     )
@@ -632,7 +632,7 @@ async def test_pm_hub_view_ephemeral_interactions(services):
     from src.adapters.discord_bot.views.hub_menu import PmHubView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     guild_id = 999111222
@@ -642,7 +642,7 @@ async def test_pm_hub_view_ephemeral_interactions(services):
 
     hub_view = PmHubView(
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         user_service=user_srv,
     )
@@ -743,7 +743,7 @@ async def test_task_create_modal_inside_forum_thread_creates_new_forum_post(serv
 async def test_ensure_pinned_hub_post_multi_project_update(services):
     """Verify ensure_pinned_hub_post updates existing thread post when second project is bound."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 88776655
 
@@ -779,7 +779,7 @@ async def test_ensure_pinned_hub_post_multi_project_update(services):
     ok1, msg1 = await ensure_pinned_hub_post(
         channel=mock_forum,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         project_name=p1.name,
     )
@@ -801,7 +801,7 @@ async def test_ensure_pinned_hub_post_multi_project_update(services):
     ok2, _msg2 = await ensure_pinned_hub_post(
         channel=mock_forum,
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
         project_name=p2.name,
     )

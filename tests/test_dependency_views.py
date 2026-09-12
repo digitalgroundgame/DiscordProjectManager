@@ -123,7 +123,7 @@ async def test_tree_viewer_and_select_views(services):
 async def test_dependency_and_tree_cogs_slash_commands(services):
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 998877671
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Security Audit", prefix="SEC")
@@ -135,7 +135,7 @@ async def test_dependency_and_tree_cogs_slash_commands(services):
     )
 
     bot = MagicMock()
-    pm_cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv, task_service=task_srv)
+    pm_cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv, task_service=task_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()

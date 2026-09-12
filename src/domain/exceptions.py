@@ -31,9 +31,6 @@ class SquadNotFoundError(EntityNotFoundError):
     """Raised when a specified squad does not exist."""
 
 
-TeamNotFoundError = SquadNotFoundError
-
-
 class EntityAlreadyExistsError(DomainError):
     """Base exception raised when creating an entity that violates uniqueness."""
 
@@ -44,9 +41,6 @@ class ProjectAlreadyExistsError(EntityAlreadyExistsError, ValueError):
 
 class SquadAlreadyExistsError(EntityAlreadyExistsError, ValueError):
     """Raised when creating a squad with a duplicate name."""
-
-
-TeamAlreadyExistsError = SquadAlreadyExistsError
 
 
 class StaleVersionError(DomainError):

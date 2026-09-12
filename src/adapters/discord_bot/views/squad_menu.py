@@ -9,12 +9,12 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
-from src.domain.enums import TeamRoleType
-from src.domain.models import Team as Squad
+from src.domain.enums import SquadRoleType
+from src.domain.models import Squad
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService as SquadService
 
 if TYPE_CHECKING:
     from src.services.user_service import UserService
@@ -83,7 +83,7 @@ class SquadCreateModalWithName(BaseModal):
 
         name = self.name_input.value.strip() or self.selected_role.name
         try:
-            squad = await self.squad_service.create_team(
+            squad = await self.squad_service.create_squad(
                 guild_id=interaction.guild.id,
                 name=name,
                 discord_role_id=self.selected_role.id,
@@ -169,8 +169,8 @@ class SquadMemberAssignView(BaseView):
 
     def __init__(
         self,
-        teams: list[Squad],
-        team_service: SquadService,
+        squads: list[Squad],
+        squad_service: SquadService,
         project_service: ProjectService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -178,16 +178,16 @@ class SquadMemberAssignView(BaseView):
         query: str = "",
     ):
         super().__init__(timeout=180)
-        self.all_squads = list(teams)
+        self.all_squads = list(squads)
         self.squads = {s.id: s for s in self.all_squads}
-        self.squad_service = team_service
+        self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self._initial_interaction = initial_interaction
         self.current_page = current_page
         self.query = query
 
-        self.selected_squad_id: UUID = teams[0].id if teams else UUID(int=0)
+        self.selected_squad_id: UUID = squads[0].id if squads else UUID(int=0)
         self.selected_user: discord.Member | discord.User | None = None
         self.selected_role_type_str: str = "member"
 
@@ -236,7 +236,6 @@ class SquadMemberAssignView(BaseView):
             row=0,
         )
         self.squad_select.callback = self._on_squad_changed
-        self.team_select = self.squad_select
         self.add_item(self.squad_select)
 
         # Row 1: Select User / Member
@@ -353,8 +352,6 @@ class SquadMemberAssignView(BaseView):
                 opt.default = opt.value == str(self.selected_squad_id)
         await interaction.response.defer()
 
-    _on_team_changed = _on_squad_changed
-
     async def _on_user_selected(self, interaction: discord.Interaction) -> None:
         self.selected_user = self.user_select.values[0]
         await interaction.response.defer()
@@ -446,7 +443,7 @@ class SquadMemberAssignView(BaseView):
 
         # Check authorization
         if not AuthService.is_server_manager(interaction.user):
-            is_lead = await self.squad_service.is_team_lead(self.selected_squad_id, interaction.user.id)
+            is_lead = await self.squad_service.is_squad_lead(self.selected_squad_id, interaction.user.id)
             if not is_lead:
                 await interaction.response.send_message(
                     "❌ You do not have permission to manage this squad's roster. "
@@ -479,16 +476,16 @@ class SquadMemberAssignView(BaseView):
 
         try:
             if action_type == "remove_lead":
-                await self.squad_service.remove_team_lead(self.selected_squad_id, self.selected_user.id)
+                await self.squad_service.remove_squad_lead(self.selected_squad_id, self.selected_user.id)
                 success_msg = f"Removed Squad Lead status from <@{self.selected_user.id}> for **{squad.name}**."
             elif action_type == "lead":
-                await self.squad_service.add_team_lead(self.selected_squad_id, self.selected_user.id)
+                await self.squad_service.add_squad_lead(self.selected_squad_id, self.selected_user.id)
                 success_msg = f"Designated <@{self.selected_user.id}> as **Squad Lead** for **{squad.name}**."
             else:
                 await self.squad_service.assign_member(
-                    team_id=self.selected_squad_id,
+                    squad_id=self.selected_squad_id,
                     user_discord_id=self.selected_user.id,
-                    role_type=TeamRoleType.MEMBER,
+                    role_type=SquadRoleType.MEMBER,
                 )
                 success_msg = f"Verified <@{self.selected_user.id}> as **Squad Member** for **{squad.name}**."
 
@@ -515,29 +512,28 @@ class SquadRosterDetailView(BaseView):
 
     def __init__(
         self,
-        teams: list[Squad],
-        team_service: SquadService,
+        squads: list[Squad],
+        squad_service: SquadService,
         project_service: ProjectService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
         squad_page: int = 0,
         squad_query: str = "",
-        selected_team_id: UUID | None = None,
+        selected_squad_id: UUID | None = None,
         member_page: int = 0,
         member_query: str = "",
     ):
         super().__init__(timeout=180)
-        self.all_squads = list(teams)
-        self.squad_service = team_service
+        self.all_squads = list(squads)
+        self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self.squads = {s.id: s for s in self.all_squads}
-        self.teams = self.squads
         self._initial_interaction = initial_interaction
 
         self.squad_page = squad_page
         self.squad_query = squad_query
-        self.selected_squad_id = selected_team_id
+        self.selected_squad_id = selected_squad_id
         self.member_page = member_page
         self.member_query = member_query
 
@@ -551,8 +547,8 @@ class SquadRosterDetailView(BaseView):
         return [s for s in self.all_squads if q in s.name.lower()]
 
     def _build_roster_embed(self, squad: Squad, members: list[Any]) -> discord.Embed:
-        leads = [m for m in members if m.role_type == TeamRoleType.LEAD]
-        regular = [m for m in members if m.role_type == TeamRoleType.MEMBER]
+        leads = [m for m in members if m.role_type == SquadRoleType.LEAD]
+        regular = [m for m in members if m.role_type == SquadRoleType.MEMBER]
 
         if self.member_query:
             q = self.member_query.lower()
@@ -672,7 +668,7 @@ class SquadRosterDetailView(BaseView):
                 self.add_item(self.next_squad_btn)
 
         # Row 2: Member pagination and search controls
-        regular_members = [m for m in self._cached_members if m.role_type == TeamRoleType.MEMBER]
+        regular_members = [m for m in self._cached_members if m.role_type == SquadRoleType.MEMBER]
         if self.member_query:
             q = self.member_query.lower()
             regular_members = [m for m in regular_members if q in str(m.user_discord_id).lower()]
@@ -762,8 +758,6 @@ class SquadRosterDetailView(BaseView):
         self._rebuild_items()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    _on_select_team = _on_select
-
     async def _on_prev_members_clicked(self, interaction: discord.Interaction) -> None:
         if self.member_page > 0:
             self.member_page -= 1
@@ -777,7 +771,7 @@ class SquadRosterDetailView(BaseView):
         squad = self.squads.get(self.selected_squad_id) if self.selected_squad_id else None
         if not squad:
             return
-        regular_members = [m for m in self._cached_members if m.role_type == TeamRoleType.MEMBER]
+        regular_members = [m for m in self._cached_members if m.role_type == SquadRoleType.MEMBER]
         if self.member_query:
             q = self.member_query.lower()
             regular_members = [m for m in regular_members if q in str(m.user_discord_id).lower()]
@@ -868,16 +862,16 @@ class SquadOverviewListView(BaseView):
 
     def __init__(
         self,
-        teams: list[Squad],
-        team_service: SquadService,
+        squads: list[Squad],
+        squad_service: SquadService,
         project_service: ProjectService | None = None,
         task_service: TaskService | None = None,
         current_page: int = 0,
         initial_interaction: discord.Interaction | None = None,
     ):
         super().__init__(timeout=180)
-        self.all_squads = list(teams)
-        self.squad_service = team_service
+        self.all_squads = list(squads)
+        self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self.current_page = current_page
@@ -941,8 +935,8 @@ class SquadOverviewListView(BaseView):
         )
         for s in page_squads:
             members = await self.squad_service.list_members(s.id)
-            leads_count = sum(1 for m in members if m.role_type == TeamRoleType.LEAD)
-            members_count = sum(1 for m in members if m.role_type == TeamRoleType.MEMBER)
+            leads_count = sum(1 for m in members if m.role_type == SquadRoleType.LEAD)
+            members_count = sum(1 for m in members if m.role_type == SquadRoleType.MEMBER)
             embed.add_field(
                 name=s.name[:256],
                 value=f"• Role: <@&{s.discord_role_id}>\n• Leads: {leads_count} | Members: {members_count}"[:1024],
@@ -967,8 +961,8 @@ class SquadOverviewListView(BaseView):
 
     async def _on_inspect_clicked(self, interaction: discord.Interaction) -> None:
         view = SquadRosterDetailView(
-            teams=self.all_squads,
-            team_service=self.squad_service,
+            squads=self.all_squads,
+            squad_service=self.squad_service,
             project_service=self.project_service,
             task_service=self.task_service,
             initial_interaction=interaction,
@@ -996,7 +990,7 @@ class SquadMenuView(BaseView):
 
     def __init__(
         self,
-        team_service: SquadService,
+        squad_service: SquadService,
         project_service: ProjectService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -1005,11 +999,9 @@ class SquadMenuView(BaseView):
         can_assign_members: bool | None = None,
         user_service: UserService | None = None,
         return_to: str = "dashboard",
-        **kwargs: Any,
     ):
         super().__init__(timeout=180)
-        self.squad_service = team_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self.user_service = user_service
@@ -1017,9 +1009,8 @@ class SquadMenuView(BaseView):
         self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)
-        can_create = can_create_squads if can_create_squads is not None else kwargs.get("can_create_teams")
-        if can_create is not None:
-            self.can_create_squads = can_create
+        if can_create_squads is not None:
+            self.can_create_squads = can_create_squads
         elif effective_user is not None:
             self.can_create_squads = AuthService.is_server_manager(effective_user)
         else:
@@ -1032,8 +1023,6 @@ class SquadMenuView(BaseView):
         else:
             self.can_assign_members = True
 
-        self.can_create_teams = self.can_create_squads
-
         # Row 0: Primary Management Controls
         if self.can_create_squads:
             self.create_squad_btn = discord.ui.Button(
@@ -1042,11 +1031,9 @@ class SquadMenuView(BaseView):
                 row=0,
             )
             self.create_squad_btn.callback = self._on_create_squad_clicked
-            self.create_team_btn = self.create_squad_btn
             self.add_item(self.create_squad_btn)
         else:
             self.create_squad_btn = None
-            self.create_team_btn = None
 
         if self.can_assign_members:
             self.assign_member_btn = discord.ui.Button(
@@ -1068,7 +1055,6 @@ class SquadMenuView(BaseView):
             row=0,
         )
         self.list_squads_btn.callback = self._on_list_squads_clicked
-        self.list_teams_btn = self.list_squads_btn
         self.roster_btn = self.list_squads_btn
         self.add_item(self.list_squads_btn)
 
@@ -1156,7 +1142,7 @@ class SquadMenuView(BaseView):
     async def _on_assign_member_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
-        squads = await self.squad_service.list_teams(interaction.guild.id)
+        squads = await self.squad_service.list_squads(interaction.guild.id)
         if not squads:
             await interaction.response.send_message(
                 "No squads found. Click **Create Squad** to set one up first!",
@@ -1183,7 +1169,7 @@ class SquadMenuView(BaseView):
     async def _on_list_squads_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
-        squads = await self.squad_service.list_teams(interaction.guild.id)
+        squads = await self.squad_service.list_squads(interaction.guild.id)
         if not squads:
             await interaction.response.send_message("No squads configured in this server.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
@@ -1205,10 +1191,7 @@ class SquadMenuView(BaseView):
 def build_squad_menu_embed(
     can_create_squads: bool = True,
     can_assign_members: bool = True,
-    **kwargs: Any,
 ) -> discord.Embed:
-    if "can_create_teams" in kwargs and can_create_squads is True:
-        can_create_squads = kwargs["can_create_teams"]
     embed = discord.Embed(
         title="Squad Management Hub",
         color=discord.Color.dark_theme(),

@@ -14,16 +14,16 @@ from sqlalchemy.ext.asyncio import (
 from src.adapters.db.postgres_repo import (
     PostgresOutboxRepo,
     PostgresProjectRepo,
+    PostgresSquadRepo,
     PostgresTaskRepo,
-    PostgresTeamRepo,
     PostgresUserPreferenceRepo,
 )
 from src.adapters.db.tables import Base
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-from src.services.team_service import TeamService
 from src.services.user_service import UserService
 
 # In-memory SQLite async engine for lightning-fast testing
@@ -69,13 +69,13 @@ async def db_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
 async def repos(db_session: AsyncSession):
     task_repo = PostgresTaskRepo(db_session)
     project_repo = PostgresProjectRepo(db_session)
-    team_repo = PostgresTeamRepo(db_session)
+    squad_repo = PostgresSquadRepo(db_session)
     outbox_repo = PostgresOutboxRepo(db_session)
     user_repo = PostgresUserPreferenceRepo(db_session)
     return {
         "task": task_repo,
         "project": project_repo,
-        "team": team_repo,
+        "squad": squad_repo,
         "outbox": outbox_repo,
         "user": user_repo,
     }
@@ -90,13 +90,13 @@ async def services(repos, async_engine: AsyncEngine):
     )
     uow = SqlAlchemyUnitOfWork(session_factory)
     project_service = ProjectService(repos["project"])
-    team_service = TeamService(repos["team"])
+    squad_service = SquadService(repos["squad"])
     outbox_service = OutboxService(repos["outbox"])
     task_service = TaskService(repos["task"], project_service, outbox_service, uow=uow)
     user_service = UserService(repos["user"])
     return {
         "project": project_service,
-        "team": team_service,
+        "squad": squad_service,
         "outbox": outbox_service,
         "task": task_service,
         "user": user_service,

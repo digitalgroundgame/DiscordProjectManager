@@ -28,7 +28,7 @@ from src.adapters.discord_bot.workspace_protocol import (
 from src.domain.enums import NotificationPreference, PriorityLevel, TaskStatus
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
-from src.services.squad_service import SquadService, TeamService
+from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
 
 if TYPE_CHECKING:
@@ -51,24 +51,21 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     task_group = app_commands.Group(name="task", description="Task operations, assignments, and status")
     project_group = app_commands.Group(name="project", description="Project container and channel operations")
     squad_group = app_commands.Group(name="squad", description="Functional squad and squad lead management")
-    team_group = squad_group
 
     def __init__(
         self,
         bot: commands.Bot,
         project_service: ProjectService | None = None,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         auth_service: AuthService | None = None,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
-        squad_service: SquadService | None = None,
     ):
         self.bot = bot
         self.project_service = project_service
-        self.squad_service = squad_service or team_service
-        self.team_service = self.squad_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.auth_service = auth_service or (
             AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
@@ -94,7 +91,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             self.project_workspace = DiscordProjectWorkspaceAdapter(
                 bot,
                 project_service,
-                team_service,
+                squad_service,
                 task_service,
                 user_service,
                 self.auth_service,
@@ -141,15 +138,17 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         except Exception:
             return []
 
-    async def team_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    async def squad_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if not interaction.guild:
             return []
         try:
-            teams = await self.team_service.list_teams(interaction.guild.id)
+            squads = await self.squad_service.list_squads(interaction.guild.id)
             return [
-                app_commands.Choice(name=t.name, value=t.name)
-                for t in teams
-                if not current or current.lower() in t.name.lower()
+                app_commands.Choice(name=s.name, value=s.name)
+                for s in squads
+                if not current or current.lower() in s.name.lower()
             ][:25]
         except Exception:
             return []
@@ -177,7 +176,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             view = PmDashboardView(
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 initial_interaction=interaction,
@@ -195,7 +194,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             await menu_manager.register_menu(interaction)
         except Exception as e:
-            await send_interaction_error(interaction, e, "opening PM control center", logger, ephemeral=True)
+            await send_interaction_error(interaction, e, "opening PM menu", logger, ephemeral=True)
 
     @app_commands.command(name="help", description="View help guide for DGG-PM slash commands and workflows.")
     async def help_command(self, interaction: discord.Interaction) -> None:
@@ -214,8 +213,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 "• `/pm task history [task]`: View task audit trail\n"
                 "• `/pm project create [name] [prefix] [channel]`: Create project & bind forum\n"
                 "• `/pm project list`: View all active projects\n"
-                "• `/pm team lead [action] [team] [user]`: Designate/remove team lead\n"
-                "• `/pm team list`: View server squad rosters and leads\n"
+                "• `/pm squad lead [action] [squad] [user]`: Designate/remove squad lead\n"
+                "• `/pm squad list`: View server squad rosters and leads\n"
                 "• `/pm post-hub [channel]`: Post and pin interactive PM Hub in forum/channel\n"
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -255,7 +254,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     user_service=self.user_service,
                     current_pref=current_pref,
                     project_service=self.project_service,
-                    team_service=self.team_service,
+                    squad_service=self.squad_service,
                     task_service=self.task_service,
                 )
                 embed = build_settings_embed(interaction.user, current_pref)
@@ -339,7 +338,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             _ok, msg = await ensure_pinned_hub_post(
                 channel=target_channel,
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
             )
@@ -357,7 +356,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @app_commands.describe(
         project_name="Target project name",
         title="Brief task summary",
-        assignee="Discord member to assign (must hold team role)",
+        assignee="Discord member to assign (must hold squad role)",
         due="Natural due date (e.g. 'tomorrow 5pm')",
         priority="Task priority level",
         cc="Watcher members to notify (@mentions or IDs)",
@@ -562,7 +561,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 interaction, e, f"retrieving history for task '{task}'", logger, ephemeral=True
             )
 
-    @task_group.command(name="assign", description="Assign or reassign a task to a team member.")
+    @task_group.command(name="assign", description="Assign or reassign a task to a squad member.")
     @app_commands.describe(
         task="Short ID of the task (e.g. APP-1)",
         assignee="Discord member to assign (or omit to unassign)",
@@ -884,7 +883,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
     # ==========================================
     # Project Subgroup: /pm project <cmd>
-    @project_group.command(name="create", description="Create a project container, bind channel, and map team role.")
+    @project_group.command(name="create", description="Create a project container, bind channel, and map squad role.")
     @app_commands.describe(
         name="Project Name (e.g. Mobile App)",
         prefix="Short uppercase task prefix (e.g. MOB)",
@@ -1071,7 +1070,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                         await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
-                            team_service=self.team_service,
+                            squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
@@ -1119,7 +1118,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                         await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
-                            team_service=self.team_service,
+                            squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
@@ -1133,7 +1132,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         except Exception as e:
             await send_interaction_error(interaction, e, f"restoring project '{project_name}'", logger, ephemeral=True)
 
-    @project_group.command(name="role", description="Map or unmap a Discord team role on a project container.")
+    @project_group.command(name="role", description="Map or unmap a Discord squad role on a project container.")
     @app_commands.describe(
         project_name="Target project name",
         role="Discord role representing the functional squad",
@@ -1163,13 +1162,13 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
                 return
 
-            team = await self.team_service.get_or_create_team_for_role(interaction.guild.id, role.id, role.name)
+            squad = await self.squad_service.get_or_create_squad_for_role(interaction.guild.id, role.id, role.name)
 
             if action == "add":
-                await self.project_service.assign_team_to_project(project_id=project.id, team_id=team.id)
+                await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
                 msg = f"🔗 Mapped role **{role.name}** (<@&{role.id}>) to project **{project.name}**."
             else:
-                await self.project_service.remove_team_from_project(project_id=project.id, team_id=team.id)
+                await self.project_service.remove_squad_from_project(project_id=project.id, squad_id=squad.id)
                 msg = f"✂️ Unmapped role **{role.name}** from project **{project.name}**."
 
             await interaction.followup.send(msg)
@@ -1181,16 +1180,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 interaction, e, f"managing project role for '{project_name}'", logger, ephemeral=True
             )
 
-    @project_group.command(name="lead", description="Designate or remove a Team Lead for a project's squads.")
+    @project_group.command(name="lead", description="Designate or remove a Squad Lead for a project's squads.")
     @app_commands.describe(
         project_name="Target project name",
-        user="Discord member to designate or remove as Team Lead",
+        user="Discord member to designate or remove as Squad Lead",
         action="Action to perform (Add or Remove Lead)",
     )
     @app_commands.choices(
         action=[
-            app_commands.Choice(name="Add Team Lead", value="add"),
-            app_commands.Choice(name="Remove Team Lead", value="remove"),
+            app_commands.Choice(name="Add Squad Lead", value="add"),
+            app_commands.Choice(name="Remove Squad Lead", value="remove"),
         ]
     )
     @app_commands.autocomplete(project_name=project_autocomplete)
@@ -1210,47 +1209,45 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
                 return
 
-            teams = await self.project_service.list_teams_for_project(project.id)
-            if not teams:
-                await interaction.followup.send(
-                    f"❌ Project '{project.name}' has no assigned team roles.", ephemeral=True
-                )
+            squads = await self.project_service.list_squads_for_project(project.id)
+            if not squads:
+                await interaction.followup.send(f"❌ Project '{project.name}' has no assigned squads.", ephemeral=True)
                 return
 
             # Check auth: server manager or active lead
             is_manager = self.auth_service.is_server_manager(interaction.user)
             if not is_manager:
                 is_any_lead = False
-                for t in teams:
-                    if await self.auth_service.can_manage_team_leads(interaction.user, t.id):
+                for s in squads:
+                    if await self.auth_service.can_manage_squad_leads(interaction.user, s.id):
                         is_any_lead = True
                         break
                 if not is_any_lead:
                     await interaction.followup.send(
-                        "❌ You do not have permission to manage team leads for this project.",
+                        "❌ You do not have permission to manage squad leads for this project.",
                         ephemeral=True,
                     )
                     return
 
             user_roles = {r.id for r in getattr(user, "roles", []) if hasattr(r, "id")}
-            matching_teams = [t for t in teams if t.discord_role_id in user_roles] if action == "add" else teams
+            matching_squads = [s for s in squads if s.discord_role_id in user_roles] if action == "add" else squads
 
             if action == "add":
-                if not matching_teams:
-                    role_mentions = ", ".join(f"<@&{t.discord_role_id}>" for t in teams)
+                if not matching_squads:
+                    role_mentions = ", ".join(f"<@&{s.discord_role_id}>" for s in squads)
                     await interaction.followup.send(
                         f"❌ <@{user.id}> does not hold any of project **{project.name}**'s assigned roles "
                         f"({role_mentions}).\nPlease assign them the Discord role first.",
                         ephemeral=True,
                     )
                     return
-                for t in matching_teams:
-                    await self.team_service.add_team_lead(t.id, user.id)
-                msg = f"⭐ Designated <@{user.id}> as **Team Lead** for project **{project.name}**."
+                for s in matching_squads:
+                    await self.squad_service.add_squad_lead(s.id, user.id)
+                msg = f"⭐ Designated <@{user.id}> as **Squad Lead** for project **{project.name}**."
             else:
-                for t in teams:
-                    await self.team_service.remove_team_lead(t.id, user.id)
-                msg = f"✅ Removed Team Lead status from <@{user.id}> for project **{project.name}**."
+                for s in squads:
+                    await self.squad_service.remove_squad_lead(s.id, user.id)
+                msg = f"✅ Removed Squad Lead status from <@{user.id}> for project **{project.name}**."
 
             await interaction.followup.send(msg)
             from src.adapters.discord_bot.menu_manager import menu_manager
@@ -1264,7 +1261,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @project_group.command(name="squad", description="Map or unmap a functional squad to a project container.")
     @app_commands.describe(
         project_name="Target project name",
-        team_name="Name of the functional squad",
+        squad_name="Name of the functional squad",
         action="Map (assign) or Unmap (remove) squad",
     )
     @app_commands.choices(
@@ -1273,13 +1270,13 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             app_commands.Choice(name="Unmap Squad from Project", value="unmap"),
         ]
     )
-    @app_commands.autocomplete(project_name=project_autocomplete, team_name=team_autocomplete)
+    @app_commands.autocomplete(project_name=project_autocomplete, squad_name=squad_autocomplete)
     @app_commands.checks.has_permissions(manage_guild=True)
     async def project_squad(
         self,
         interaction: discord.Interaction,
         project_name: str,
-        team_name: str,
+        squad_name: str,
         action: str = "map",
     ) -> None:
         if not interaction.guild:
@@ -1291,9 +1288,9 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
                 return
 
-            squad = await self.squad_service.get_by_name(interaction.guild.id, team_name)
+            squad = await self.squad_service.get_by_name(interaction.guild.id, squad_name)
             if not squad:
-                await interaction.followup.send(f"❌ Squad '{team_name}' not found.", ephemeral=True)
+                await interaction.followup.send(f"❌ Squad '{squad_name}' not found.", ephemeral=True)
                 return
 
             if action == "map":
@@ -1311,9 +1308,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await send_interaction_error(
                 interaction, e, f"mapping squad to project '{project_name}'", logger, ephemeral=True
             )
-
-    # Backward-compatible alias
-    project_team = project_squad
 
     @project_group.command(
         name="setup-forum",
@@ -1435,20 +1429,20 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @squad_group.command(name="create", description="Create a functional squad mapped to a Discord role.")
     @app_commands.describe(
         role="Discord server role representing the squad",
-        team_name="Optional custom squad name",
+        squad_name="Optional custom squad name",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def squad_create(
         self,
         interaction: discord.Interaction,
         role: discord.Role,
-        team_name: str | None = None,
+        squad_name: str | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            name = team_name.strip() if team_name else role.name
+            name = squad_name.strip() if squad_name else role.name
             squad = await self.squad_service.create_squad(
                 guild_id=interaction.guild.id,
                 name=name,
@@ -1468,12 +1462,10 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 interaction, e, f"creating squad for role '{role.name}'", logger, ephemeral=True
             )
 
-    team_create = squad_create
-
     @squad_group.command(name="lead", description="Designate or remove a Squad Lead for a functional squad.")
     @app_commands.describe(
         action="Action to perform (Add or Remove Squad Lead)",
-        team_name="Name of the functional squad",
+        squad_name="Name of the functional squad",
         user="Discord member to designate or remove as Squad Lead",
     )
     @app_commands.choices(
@@ -1482,21 +1474,21 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             app_commands.Choice(name="Remove Squad Lead", value="remove"),
         ]
     )
-    @app_commands.autocomplete(team_name=team_autocomplete)
+    @app_commands.autocomplete(squad_name=squad_autocomplete)
     async def squad_lead(
         self,
         interaction: discord.Interaction,
         action: str,
-        team_name: str,
+        squad_name: str,
         user: discord.Member,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            squad = await self.squad_service.get_by_name(interaction.guild.id, team_name)
+            squad = await self.squad_service.get_by_name(interaction.guild.id, squad_name)
             if not squad:
-                await interaction.followup.send(f"❌ Squad '{team_name}' not found.", ephemeral=True)
+                await interaction.followup.send(f"❌ Squad '{squad_name}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_squad_lead_management(interaction.user, squad.id)
@@ -1506,7 +1498,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     has_role = any(r.id == squad.discord_role_id for r in user.roles)
                     if not has_role:
                         await interaction.followup.send(
-                            f"❌ <@{user.id}> is not part of squad (team) **{squad.name}** "
+                            f"❌ <@{user.id}> is not part of squad **{squad.name}** "
                             f"(missing role <@&{squad.discord_role_id}>).\n"
                             f"Please assign them the Discord role first.",
                             ephemeral=True,
@@ -1527,10 +1519,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
             await send_interaction_error(
-                interaction, e, f"managing squad lead for '{team_name}'", logger, ephemeral=True
+                interaction, e, f"managing squad lead for '{squad_name}'", logger, ephemeral=True
             )
-
-    team_lead = squad_lead
 
     @squad_group.command(name="list", description="List all functional squads and live Discord role rosters.")
     async def squad_list(self, interaction: discord.Interaction) -> None:
@@ -1587,8 +1577,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
             await send_interaction_error(interaction, e, "listing squads", logger, ephemeral=True)
-
-    team_list = squad_list
 
     @app_commands.command(name="tree", description="Render tech-tree dependency graph for a project.")
     @app_commands.describe(

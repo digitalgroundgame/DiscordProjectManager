@@ -35,12 +35,10 @@ from src.domain.models import (
     OutboxEvent,
     Project,
     ProjectSquad,
-    ProjectTeam,
     Squad,
     SquadMember,
     Task,
     TaskHistory,
-    Team,
     UserPreference,
 )
 from src.ports.repositories import (
@@ -104,11 +102,11 @@ def _to_domain_task(row: TaskTable) -> Task:
 
 def _to_domain_project(row: ProjectTable) -> Project:
     role_ids: list[int] = []
-    teams = getattr(row, "teams", []) or []
-    for pt in teams:
-        team = getattr(pt, "team", None)
-        if team and getattr(team, "discord_role_id", None) is not None:
-            rid = team.discord_role_id
+    squads = getattr(row, "squads", []) or []
+    for ps in squads:
+        squad = getattr(ps, "squad", None)
+        if squad and getattr(squad, "discord_role_id", None) is not None:
+            rid = squad.discord_role_id
             if rid not in role_ids:
                 role_ids.append(rid)
 
@@ -139,9 +137,6 @@ def _to_domain_squad(row: SquadTable) -> Squad:
     )
 
 
-_to_domain_team = _to_domain_squad
-
-
 def _to_domain_squad_member(row: SquadMemberTable) -> SquadMember:
     return SquadMember(
         squad_id=row.squad_id,
@@ -149,9 +144,6 @@ def _to_domain_squad_member(row: SquadMemberTable) -> SquadMember:
         role_type=SquadRoleType(row.role_type),
         created_at=row.created_at,
     )
-
-
-_to_domain_team_member = _to_domain_squad_member
 
 
 def _to_domain_outbox(row: OutboxEventTable) -> OutboxEvent:
@@ -812,9 +804,6 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             await session.merge(row)
             await session.commit()
 
-    async def assign_team(self, project_team: ProjectTeam) -> None:
-        await self.assign_squad(project_team)
-
     async def remove_squad(self, project_id: UUID, squad_id: UUID) -> None:
         async with self._get_session() as session:
             stmt = delete(ProjectSquadTable).where(
@@ -823,9 +812,6 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             )
             await session.execute(stmt)
             await session.commit()
-
-    async def remove_team(self, project_id: UUID, team_id: UUID) -> None:
-        await self.remove_squad(project_id, team_id)
 
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         async with self._get_session() as session:
@@ -837,9 +823,6 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             res = await session.execute(stmt)
             rows = res.scalars().all()
             return [_to_domain_squad(r) for r in rows]
-
-    async def list_teams_for_project(self, project_id: UUID) -> list[Team]:
-        return await self.list_squads_for_project(project_id)
 
 
 class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
@@ -945,9 +928,6 @@ class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
             res = await session.execute(stmt)
             rows = res.scalars().all()
             return [_to_domain_squad_member(r) for r in rows]
-
-
-PostgresTeamRepo = PostgresSquadRepo
 
 
 class PostgresOutboxRepo(BasePostgresRepo, IOutboxRepo):

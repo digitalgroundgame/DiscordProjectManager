@@ -36,10 +36,10 @@ def test_project_create_command_parameters():
 @pytest.mark.asyncio
 async def test_project_create_execution(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     bot = MagicMock()
 
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -78,16 +78,16 @@ async def test_project_create_execution(services):
     assert project is not None
     assert project.prefix == "PLC"
     assert project.discord_channel_id == 123456789
-    teams = await proj_srv.list_teams_for_project(project.id)
-    assert any(t.discord_role_id == 777111 for t in teams)
+    squads = await proj_srv.list_squads_for_project(project.id)
+    assert any(t.discord_role_id == 777111 for t in squads)
 
 
 @pytest.mark.asyncio
 async def test_project_create_rejects_non_forum(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     bot = MagicMock()
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -115,11 +115,11 @@ async def test_project_create_rejects_non_forum(services):
 @pytest.mark.asyncio
 async def test_project_set_role_and_lead_commands(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 9999999999
     bot = MagicMock()
 
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Mobile App", prefix="MOB")
 
@@ -140,8 +140,8 @@ async def test_project_set_role_and_lead_commands(services):
     )
     interaction.followup.send.assert_awaited_once()
 
-    teams = await proj_srv.list_teams_for_project(project.id)
-    assert any(t.discord_role_id == 333444 for t in teams)
+    squads = await proj_srv.list_squads_for_project(project.id)
+    assert any(t.discord_role_id == 333444 for t in squads)
 
     # 2. Designate Lead
     interaction.followup.send.reset_mock()
@@ -155,8 +155,8 @@ async def test_project_set_role_and_lead_commands(services):
     )
     interaction.followup.send.assert_awaited_once()
 
-    team = teams[0]
-    is_lead = await team_srv.is_team_lead(team.id, 555666)
+    squad = squads[0]
+    is_lead = await squad_srv.is_squad_lead(squad.id, 555666)
     assert is_lead is True
 
     # 3. Remove Lead
@@ -166,18 +166,18 @@ async def test_project_set_role_and_lead_commands(services):
     )
     interaction.followup.send.assert_awaited_once()
 
-    is_lead_after = await team_srv.is_team_lead(team.id, 555666)
+    is_lead_after = await squad_srv.is_squad_lead(squad.id, 555666)
     assert is_lead_after is False
 
 
 @pytest.mark.asyncio
-async def test_project_and_team_autocomplete(services):
+async def test_project_and_squad_autocomplete(services):
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 8888888888
     bot = MagicMock()
 
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv)
 
     # Seed projects
     await proj_srv.create_project(guild_id=guild_id, name="Frontend UI", prefix="FUI")
@@ -185,8 +185,8 @@ async def test_project_and_team_autocomplete(services):
     p3 = await proj_srv.create_project(guild_id=guild_id, name="Legacy System", prefix="LEG")
     await proj_srv.archive_project(p3.id)
 
-    # Seed team
-    await team_srv.create_team(guild_id=guild_id, name="Core Infra", discord_role_id=111222333)
+    # Seed squad
+    await squad_srv.create_squad(guild_id=guild_id, name="Core Infra", discord_role_id=111222333)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -204,10 +204,10 @@ async def test_project_and_team_autocomplete(services):
     assert len(choices_filtered) == 1
     assert choices_filtered[0].value == "Frontend UI"
 
-    # 3. Team autocomplete
-    team_choices = await cog.team_autocomplete(interaction, current="infra")
-    assert len(team_choices) == 1
-    assert team_choices[0].value == "Core Infra"
+    # 3. Squad autocomplete
+    squad_choices = await cog.squad_autocomplete(interaction, current="infra")
+    assert len(squad_choices) == 1
+    assert squad_choices[0].value == "Core Infra"
 
 
 @pytest.mark.asyncio
@@ -300,7 +300,7 @@ async def test_task_action_view_and_modals(services):
     bot = DggPmBot(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=services["team"],
+        squad_service=services["squad"],
     )
 
     unassign_interaction = MagicMock(spec=discord.Interaction)
@@ -431,7 +431,7 @@ async def test_dynamic_task_button_rejects_cross_guild(services):
     bot = DggPmBot(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=services["team"],
+        squad_service=services["squad"],
     )
 
     # Interaction from a DIFFERENT guild attempting to act on the task
@@ -523,7 +523,7 @@ async def test_dynamic_task_button_same_guild_note_modal(services):
     bot = DggPmBot(
         task_service=task_srv,
         project_service=proj_srv,
-        team_service=services["team"],
+        squad_service=services["squad"],
     )
 
     interaction = MagicMock(spec=discord.Interaction)
@@ -548,7 +548,7 @@ async def test_settings_cog_my_settings(services):
         bot=bot,
         user_service=user_srv,
         project_service=services["project"],
-        team_service=services["team"],
+        squad_service=services["squad"],
         task_service=services["task"],
     )
 
@@ -630,16 +630,16 @@ def test_clear_db_script_safety_guards(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pm_project_create_with_required_role(services):
-    """Verify /pm project create requires role, creates team, and assigns squad to project."""
+    """Verify /pm project create requires role, creates squad, and assigns squad to project."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 1122334455
 
     pm_cog = PmCog(
         bot=MagicMock(),
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
     )
 
@@ -669,35 +669,35 @@ async def test_pm_project_create_with_required_role(services):
     assert embed is not None
     assert "Mobile Redesign" in embed.title
 
-    # Verify project exists and team is mapped
+    # Verify project exists and squad is mapped
     project = await proj_srv.get_by_name(guild_id, "Mobile Redesign")
     assert project is not None
     assert project.prefix == "MOB"
 
-    teams = await proj_srv.list_teams_for_project(project.id)
-    assert len(teams) == 1
-    assert teams[0].discord_role_id == 55667788
+    squads = await proj_srv.list_squads_for_project(project.id)
+    assert len(squads) == 1
+    assert squads[0].discord_role_id == 55667788
 
 
 @pytest.mark.asyncio
 async def test_pm_project_role_and_lead_commands(services):
     """Verify /pm project role (add/remove) and /pm project lead (add/remove)."""
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     guild_id = 9988776655
 
     pm_cog = PmCog(
         bot=MagicMock(),
         project_service=proj_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         task_service=task_srv,
     )
 
     # 1. Seed project with primary role
     p = await proj_srv.create_project(guild_id=guild_id, name="Cloud Backend", prefix="CLD")
-    t1 = await team_srv.create_team(guild_id=guild_id, name="Backend", discord_role_id=1001)
-    await proj_srv.assign_team_to_project(p.id, t1.id)
+    s1 = await squad_srv.create_squad(guild_id=guild_id, name="Backend", discord_role_id=1001)
+    await proj_srv.assign_squad_to_project(p.id, s1.id)
 
     # 2. Add second role via /pm project role add
     mock_role_qa = MagicMock(spec=discord.Role)
@@ -722,9 +722,9 @@ async def test_pm_project_role_and_lead_commands(services):
         action="add",
     )
 
-    teams = await proj_srv.list_teams_for_project(p.id)
-    assert len(teams) == 2
-    role_ids = {t.discord_role_id for t in teams}
+    squads = await proj_srv.list_squads_for_project(p.id)
+    assert len(squads) == 2
+    role_ids = {t.discord_role_id for t in squads}
     assert 1001 in role_ids
     assert 1002 in role_ids
 
@@ -741,8 +741,8 @@ async def test_pm_project_role_and_lead_commands(services):
         action="add",
     )
 
-    t2 = next(t for t in teams if t.discord_role_id == 1002)
-    leads = await team_srv.list_team_leads(t2.id)
+    s2 = next(t for t in squads if t.discord_role_id == 1002)
+    leads = await squad_srv.list_squad_leads(s2.id)
     assert 5050 in leads
 
     # 4. Remove role via /pm project role remove
@@ -753,9 +753,9 @@ async def test_pm_project_role_and_lead_commands(services):
         role=mock_role_qa,
         action="remove",
     )
-    teams_after = await proj_srv.list_teams_for_project(p.id)
-    assert len(teams_after) == 1
-    assert teams_after[0].discord_role_id == 1001
+    squads_after = await proj_srv.list_squads_for_project(p.id)
+    assert len(squads_after) == 1
+    assert squads_after[0].discord_role_id == 1001
 
 
 @pytest.mark.asyncio
@@ -763,7 +763,7 @@ async def test_pm_cog_menu_and_notifications(services):
     from src.adapters.discord_bot.views.admin_menu import PmDashboardView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
     user_srv = services["user"]
     bot = MagicMock()
@@ -773,7 +773,7 @@ async def test_pm_cog_menu_and_notifications(services):
         bot=bot,
         project_service=proj_srv,
         task_service=task_srv,
-        team_service=team_srv,
+        squad_service=squad_srv,
         user_service=user_srv,
     )
 
@@ -1064,10 +1064,9 @@ async def test_pm_menu_command_and_bot_wiring(services):
 
     bot = DggPmBot(
         project_service=services["project"],
-        team_service=services["team"],
+        squad_service=services["squad"],
         task_service=services["task"],
         user_service=services["user"],
-        squad_service=services.get("squad", services["team"]),
     )
 
     with patch.object(bot.tree, "sync", new_callable=AsyncMock):
@@ -1324,10 +1323,10 @@ async def test_pm_hub_view_overdue_button(services):
     from src.adapters.discord_bot.views.hub_menu import PmHubView
 
     proj_srv = services["project"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     task_srv = services["task"]
 
-    hub_view = PmHubView(proj_srv, team_srv, task_srv)
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv)
     overdue_btn = next((b for b in hub_view.children if getattr(b, "custom_id", None) == "pm_hub:overdue"), None)
     assert overdue_btn is not None
     assert overdue_btn.row == 0

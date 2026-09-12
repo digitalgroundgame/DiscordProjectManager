@@ -14,7 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, relationship, synonym
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -44,7 +44,6 @@ class ProjectTable(Base):
 
     tasks = relationship("TaskTable", back_populates="project", cascade="all, delete-orphan")
     squads = relationship("ProjectSquadTable", back_populates="project", cascade="all, delete-orphan", lazy="selectin")
-    teams = synonym("squads")
 
     __table_args__ = (
         UniqueConstraint("guild_id", "name", name="uq_project_guild_name"),
@@ -67,9 +66,6 @@ class SquadTable(Base):
     __table_args__ = (UniqueConstraint("guild_id", "name", name="uq_squad_guild_name"),)
 
 
-TeamTable = SquadTable
-
-
 class SquadMemberTable(Base):
     __tablename__ = "squad_members"
 
@@ -79,9 +75,6 @@ class SquadMemberTable(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
     squad = relationship("SquadTable", back_populates="members")
-
-
-TeamMemberTable = SquadMemberTable
 
 
 class ProjectSquadTable(Base):
@@ -94,10 +87,6 @@ class ProjectSquadTable(Base):
 
     project = relationship("ProjectTable", back_populates="squads")
     squad = relationship("SquadTable", back_populates="projects", lazy="selectin")
-    team = synonym("squad")
-
-
-ProjectTeamTable = ProjectSquadTable
 
 
 class TaskTable(Base):

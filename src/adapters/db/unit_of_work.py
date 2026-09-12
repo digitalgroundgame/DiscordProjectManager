@@ -17,7 +17,6 @@ from src.ports.repositories import (
     IProjectRepo,
     ISquadRepo,
     ITaskRepo,
-    ITeamRepo,
     IUserPreferenceRepo,
 )
 from src.ports.unit_of_work import IUnitOfWork
@@ -34,7 +33,6 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.tasks: ITaskRepo = None  # type: ignore[assignment]
         self.projects: IProjectRepo = None  # type: ignore[assignment]
         self.squads: ISquadRepo = None  # type: ignore[assignment]
-        self.teams: ITeamRepo = None  # type: ignore[assignment]
         self.outbox: IOutboxRepo = None  # type: ignore[assignment]
         self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
 
@@ -43,7 +41,6 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.tasks = PostgresTaskRepo(self._session)
         self.projects = PostgresProjectRepo(self._session)
         self.squads = PostgresSquadRepo(self._session)
-        self.teams = self.squads
         self.outbox = PostgresOutboxRepo(self._session)
         self.user_prefs = PostgresUserPreferenceRepo(self._session)
         return self

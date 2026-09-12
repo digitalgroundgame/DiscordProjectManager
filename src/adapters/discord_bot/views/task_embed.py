@@ -82,11 +82,11 @@ def build_task_embed(
         inline=True,
     )
 
-    # 2. Team & Contributor Section
+    # 2. Squad & Contributor Section
     proj_display = project_name or (str(task.project_id) if task.project_id else "Standalone")
     assignee_val = f"<@{task.assignee_discord_id}>" if task.assignee_discord_id else "*Unassigned*"
     embed.add_field(
-        name="Team & Assignee",
+        name="Squad & Assignee",
         value=(
             f"• **Project**: **{proj_display}**\n"
             f"• **Assignee**: {assignee_val}\n"

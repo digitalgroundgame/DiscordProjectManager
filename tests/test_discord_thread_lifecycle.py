@@ -13,7 +13,7 @@ async def test_task_create_sets_7day_auto_archive(services):
     """Verify task-create creates a thread with auto_archive_duration=10080 (7 days)."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 1234567890
 
     mock_channel = MagicMock(spec=discord.TextChannel)
@@ -31,7 +31,7 @@ async def test_task_create_sets_7day_auto_archive(services):
     )
 
     bot = MagicMock()
-    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -67,7 +67,7 @@ async def test_task_standalone_creates_thread(services):
     """Verify task creation creates a starter message and discussion thread in TextChannel."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 1234567890
 
     mock_channel = MagicMock(spec=discord.TextChannel)
@@ -85,7 +85,7 @@ async def test_task_standalone_creates_thread(services):
     )
 
     bot = MagicMock()
-    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    cog = PmCog(bot=bot, task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()
@@ -127,7 +127,7 @@ async def test_bot_sync_task_thread_archive_and_unarchive(services):
     """Verify DggPmBot.sync_task_thread archives when completed/archived and unarchives when reopened."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 987654321
 
     project = await proj_srv.create_project(guild_id=guild_id, name="DB Migration Project", prefix="DBM")
@@ -140,7 +140,7 @@ async def test_bot_sync_task_thread_archive_and_unarchive(services):
     await task_srv.update_discord_message_ids(task.id, 55555, 66666)
     task = await task_srv.get_by_id(task.id)
 
-    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     mock_thread = MagicMock(spec=discord.Thread)
     mock_thread.id = 66666
@@ -177,7 +177,7 @@ async def test_bot_sync_task_thread_title_sync(services):
     """Verify DggPmBot.sync_task_thread updates thread title when sync_title=True."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 987654321
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Title Sync Project", prefix="TSP")
@@ -195,7 +195,7 @@ async def test_bot_sync_task_thread_title_sync(services):
         title="Updated Awesome Title",
     )
 
-    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, team_service=team_srv)
+    bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
 
     mock_thread = MagicMock(spec=discord.Thread)
     mock_thread.id = 66666
@@ -213,7 +213,7 @@ async def test_project_archive_cascade_threads(services):
     """Verify archiving a project batch-archives its task threads, and unarchiving restores them."""
     proj_srv = services["project"]
     task_srv = services["task"]
-    team_srv = services["team"]
+    squad_srv = services["squad"]
     guild_id = 3333333333
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Cascade Project", prefix="CAS")
@@ -225,7 +225,7 @@ async def test_project_archive_cascade_threads(services):
     bot = MagicMock()
     bot.sync_task_thread = AsyncMock()
 
-    cog = PmCog(bot=bot, project_service=proj_srv, team_service=team_srv, task_service=task_srv)
+    cog = PmCog(bot=bot, project_service=proj_srv, squad_service=squad_srv, task_service=task_srv)
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()

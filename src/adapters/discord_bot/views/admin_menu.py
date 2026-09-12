@@ -24,8 +24,8 @@ from src.services.auth_service import AuthService
 if TYPE_CHECKING:
     from src.domain.models import Project
     from src.services.project_service import ProjectService
+    from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
-    from src.services.team_service import TeamService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.views.admin_menu")
@@ -111,14 +111,14 @@ class PmDashboardOverviewView(BaseView):
     def __init__(
         self,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -144,7 +144,7 @@ class PmDashboardOverviewView(BaseView):
 
         view = PmDashboardView(
             project_service=self.project_service,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,
@@ -166,7 +166,7 @@ class PmDashboardView(BaseView):
     def __init__(
         self,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
+        squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
@@ -175,7 +175,7 @@ class PmDashboardView(BaseView):
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
-        self.team_service = team_service
+        self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self._initial_interaction = initial_interaction
@@ -258,7 +258,7 @@ class PmDashboardView(BaseView):
 
         view = ProjectChannelSelectView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
             user_service=self.user_service,
@@ -277,7 +277,7 @@ class PmDashboardView(BaseView):
     async def _on_projects_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
-            self.team_service,
+            self.squad_service,
             self.task_service,
             initial_interaction=interaction,
             user_service=self.user_service,
@@ -296,7 +296,7 @@ class PmDashboardView(BaseView):
             user_service=self.user_service,
             current_pref=current_pref,
             project_service=self.project_service,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             initial_interaction=interaction,
             return_to="dashboard",
@@ -310,11 +310,11 @@ class PmDashboardView(BaseView):
         await interaction.response.defer()
         try:
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
-            teams = await self.team_service.list_teams(interaction.guild.id) if self.team_service else []
+            squads = await self.squad_service.list_squads(interaction.guild.id) if self.squad_service else []
 
             embed = discord.Embed(
                 title=f"📊 Server Project Management Overview • {interaction.guild.name}",
-                description=f"**{len(projects)}** Active Projects • **{len(teams)}** Contributor Squads",
+                description=f"**{len(projects)}** Active Projects • **{len(squads)}** Contributor Squads",
                 color=discord.Color.blurple(),
             )
 
@@ -332,14 +332,14 @@ class PmDashboardView(BaseView):
             else:
                 embed.add_field(name="Active Projects", value="*No active projects found.*", inline=False)
 
-            if teams:
-                t_lines = [f"• **{t.name}** (<@&{t.discord_role_id}>)" for t in teams[:10]]
-                embed.add_field(name="Squads & Teams", value="\n".join(t_lines), inline=False)
+            if squads:
+                t_lines = [f"• **{s.name}** (<@&{s.discord_role_id}>)" for s in squads[:10]]
+                embed.add_field(name="Contributor Squads", value="\n".join(t_lines), inline=False)
 
             embed.set_footer(text="dgg-pm • Server Project Management Overview")
             view = PmDashboardOverviewView(
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 initial_interaction=interaction,
@@ -360,7 +360,7 @@ class PmDashboardView(BaseView):
                 "• `/task-depend` & `/task-undepend`: Manage task prerequisites and DAG dependencies.\n"
                 "• `/tree`: Render Civilization-style Tech Tree dependency diagrams.\n"
                 "• `/project-create`: Create a project and bind it to a Forum channel.\n"
-                "• `/team-create`: Map a Discord role to a contributor squad.\n\n"
+                "• `/pm squad create`: Map a Discord role to a contributor squad.\n\n"
                 "**Interactive Views**:\n"
                 "• In Forum channels, check the pinned **Control Hub** post to create tasks and view tech trees!\n"
                 "• All modal inputs and buttons run ephemerally to keep channels clean."
@@ -370,7 +370,7 @@ class PmDashboardView(BaseView):
         embed.set_footer(text="dgg-pm • Built for Discord")
         view = PmDashboardOverviewView(
             project_service=self.project_service,
-            team_service=self.team_service,
+            squad_service=self.squad_service,
             task_service=self.task_service,
             user_service=self.user_service,
             initial_interaction=interaction,

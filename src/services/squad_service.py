@@ -4,14 +4,13 @@ from uuid import UUID
 
 from src.domain.enums import SquadRoleType
 from src.domain.exceptions import SquadAlreadyExistsError
-from src.domain.models import Squad, SquadMember, Team
+from src.domain.models import Squad, SquadMember
 from src.ports.repositories import ISquadRepo
 
 
 class SquadService:
     def __init__(self, squad_repo: ISquadRepo):
         self.squad_repo = squad_repo
-        self.team_repo = squad_repo
 
     async def create_squad(
         self,
@@ -61,48 +60,26 @@ class SquadService:
         )
         return await self.squad_repo.create(new_squad)
 
-    async def add_squad_lead(
-        self, squad_id: UUID | None = None, user_discord_id: int = 0, team_id: UUID | None = None
-    ) -> None:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
-        await self.squad_repo.add_squad_lead(target_id, user_discord_id)
+    async def add_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
+        await self.squad_repo.add_squad_lead(squad_id, user_discord_id)
 
-    async def remove_squad_lead(
-        self, squad_id: UUID | None = None, user_discord_id: int = 0, team_id: UUID | None = None
-    ) -> None:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
-        await self.squad_repo.remove_squad_lead(target_id, user_discord_id)
+    async def remove_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
+        await self.squad_repo.remove_squad_lead(squad_id, user_discord_id)
 
-    async def list_squad_leads(self, squad_id: UUID | None = None, team_id: UUID | None = None) -> list[int]:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
-        return await self.squad_repo.list_squad_leads(target_id)
+    async def list_squad_leads(self, squad_id: UUID) -> list[int]:
+        return await self.squad_repo.list_squad_leads(squad_id)
 
-    async def is_squad_lead(
-        self, squad_id: UUID | None = None, user_discord_id: int = 0, team_id: UUID | None = None
-    ) -> bool:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
-        return await self.squad_repo.is_squad_lead(target_id, user_discord_id)
+    async def is_squad_lead(self, squad_id: UUID, user_discord_id: int) -> bool:
+        return await self.squad_repo.is_squad_lead(squad_id, user_discord_id)
 
     async def assign_member(
         self,
-        squad_id: UUID | None = None,
-        user_discord_id: int = 0,
+        squad_id: UUID,
+        user_discord_id: int,
         role_type: SquadRoleType = SquadRoleType.MEMBER,
-        team_id: UUID | None = None,
     ) -> None:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
         member = SquadMember(
-            squad_id=target_id,
+            squad_id=squad_id,
             user_discord_id=user_discord_id,
             role_type=role_type,
         )
@@ -111,33 +88,5 @@ class SquadService:
     async def list_squads(self, guild_id: int) -> list[Squad]:
         return await self.squad_repo.list_squads(guild_id)
 
-    async def list_members(self, squad_id: UUID | None = None, team_id: UUID | None = None) -> list[SquadMember]:
-        target_id = squad_id or team_id
-        if target_id is None:
-            raise ValueError("squad_id or team_id must be provided.")
-        return await self.squad_repo.list_members(target_id)
-
-    # Backward-compatible aliases
-    async def create_team(self, guild_id: int, name: str, discord_role_id: int) -> Team:
-        return await self.create_squad(guild_id, name, discord_role_id)
-
-    async def get_or_create_team_for_role(self, guild_id: int, role_id: int, role_name: str) -> Team:
-        return await self.get_or_create_squad_for_role(guild_id, role_id, role_name)
-
-    async def add_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        await self.add_squad_lead(squad_id=team_id, user_discord_id=user_discord_id)
-
-    async def remove_team_lead(self, team_id: UUID, user_discord_id: int) -> None:
-        await self.remove_squad_lead(squad_id=team_id, user_discord_id=user_discord_id)
-
-    async def list_team_leads(self, team_id: UUID) -> list[int]:
-        return await self.list_squad_leads(squad_id=team_id)
-
-    async def is_team_lead(self, team_id: UUID, user_discord_id: int) -> bool:
-        return await self.is_squad_lead(squad_id=team_id, user_discord_id=user_discord_id)
-
-    async def list_teams(self, guild_id: int) -> list[Team]:
-        return await self.list_squads(guild_id)
-
-
-TeamService = SquadService
+    async def list_members(self, squad_id: UUID) -> list[SquadMember]:
+        return await self.squad_repo.list_members(squad_id)

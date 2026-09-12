@@ -19,7 +19,7 @@ from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
-from src.services.squad_service import SquadService, TeamService
+from src.services.squad_service import SquadService
 from src.services.task_service import StaleVersionError, TaskService
 from src.services.user_service import UserService
 from src.utils.date_parser import get_due_date_from_preset
@@ -32,7 +32,6 @@ class DggPmBot(commands.Bot):
         self,
         task_service: TaskService,
         project_service: ProjectService,
-        team_service: TeamService | None = None,
         squad_service: SquadService | None = None,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
@@ -50,8 +49,7 @@ class DggPmBot(commands.Bot):
         )
         self.task_service = task_service
         self.project_service = project_service
-        self.squad_service = squad_service or team_service
-        self.team_service = self.squad_service
+        self.squad_service = squad_service
         self.user_service = user_service
         self.auth_service = AuthService(project_service, self.squad_service)
         self.workspace = workspace or DiscordTaskWorkspaceAdapter(
@@ -63,7 +61,7 @@ class DggPmBot(commands.Bot):
         self.project_workspace = project_workspace or DiscordProjectWorkspaceAdapter(
             bot=self,
             project_service=project_service,
-            team_service=self.squad_service,
+            squad_service=self.squad_service,
             task_service=task_service,
             user_service=user_service,
             auth_service=self.auth_service,
@@ -76,7 +74,6 @@ class DggPmBot(commands.Bot):
             PmCog(
                 bot=self,
                 project_service=self.project_service,
-                team_service=self.team_service,
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 auth_service=self.auth_service,
@@ -91,7 +88,7 @@ class DggPmBot(commands.Bot):
         self.add_view(
             PmHubView(
                 project_service=self.project_service,
-                team_service=self.team_service,
+                squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 auth_service=self.auth_service,
@@ -123,8 +120,8 @@ class DggPmBot(commands.Bot):
         )
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        """Auto-prune team lead records if the corresponding Discord role is removed from the member."""
-        if not self.team_service:
+        """Auto-prune squad lead records if the corresponding Discord role is removed from the member."""
+        if not self.squad_service:
             return
 
         before_roles = {r.id for r in getattr(before, "roles", []) if hasattr(r, "id")}
@@ -136,35 +133,35 @@ class DggPmBot(commands.Bot):
 
         for role_id in removed_roles:
             try:
-                team = await self.team_service.get_by_role_id(after.guild.id, role_id)
-                if team:
-                    if await self.team_service.is_team_lead(team.id, after.id):
-                        await self.team_service.remove_team_lead(team.id, after.id)
+                squad = await self.squad_service.get_by_role_id(after.guild.id, role_id)
+                if squad:
+                    if await self.squad_service.is_squad_lead(squad.id, after.id):
+                        await self.squad_service.remove_squad_lead(squad.id, after.id)
                         logger.info(
-                            "Auto-pruned team lead record for user %s from team '%s' due to Discord role removal",
+                            "Auto-pruned squad lead record for user %s from squad '%s' due to Discord role removal",
                             after.id,
-                            team.name,
+                            squad.name,
                         )
             except Exception as e:
-                logger.warning("Error auto-pruning team lead on member update for user %s: %s", after.id, e)
+                logger.warning("Error auto-pruning squad lead on member update for user %s: %s", after.id, e)
 
     async def on_member_remove(self, member: discord.Member) -> None:
-        """Auto-prune team lead records across all teams in the guild if a member leaves the server."""
-        if not self.team_service:
+        """Auto-prune squad lead records across all squads in the guild if a member leaves the server."""
+        if not self.squad_service:
             return
 
         try:
-            teams = await self.team_service.list_teams(member.guild.id)
-            for team in teams:
-                if await self.team_service.is_team_lead(team.id, member.id):
-                    await self.team_service.remove_team_lead(team.id, member.id)
+            squads = await self.squad_service.list_squads(member.guild.id)
+            for squad in squads:
+                if await self.squad_service.is_squad_lead(squad.id, member.id):
+                    await self.squad_service.remove_squad_lead(squad.id, member.id)
                     logger.info(
-                        "Auto-pruned team lead record for user %s from team '%s' because member left the server",
+                        "Auto-pruned squad lead record for user %s from squad '%s' because member left the server",
                         member.id,
-                        team.name,
+                        squad.name,
                     )
         except Exception as e:
-            logger.warning("Error auto-pruning team leads on member remove for user %s: %s", member.id, e)
+            logger.warning("Error auto-pruning squad leads on member remove for user %s: %s", member.id, e)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         """Global interaction dispatcher handling dynamic persistent task buttons across restarts."""
@@ -244,7 +241,7 @@ class DggPmBot(commands.Bot):
         if not await self.auth_service.can_mutate_task(interaction.user, task):
             msg = (
                 "❌ You do not have permission to modify this task. "
-                "You must be the assignee, creator, a member of the project team, or a server manager."
+                "You must be the assignee, creator, a member of the project squad, or a server manager."
             )
             if not interaction.response.is_done():
                 await interaction.response.send_message(msg, ephemeral=True)
@@ -413,7 +410,7 @@ class DggPmBot(commands.Bot):
                 await self.workspace.refresh_action_card(interaction, latest_task)
                 await self.workspace.sync_workspace(latest_task)
                 await interaction.followup.send(
-                    "⚠️ This task was already modified by another team member. The card has been refreshed.",
+                    "⚠️ This task was already modified by another squad member. The card has been refreshed.",
                     ephemeral=True,
                 )
             else:
