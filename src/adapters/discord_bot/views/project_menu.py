@@ -10,7 +10,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
-from src.adapters.discord_bot.views.base_view import BaseView
+from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
@@ -358,7 +358,7 @@ class ProjectCreateDraftView(BaseView):
             await send_interaction_error(interaction, e, f"creating project '{self.name}'", logger, ephemeral=True)
 
 
-class ProjectCreateModal(discord.ui.Modal):
+class ProjectCreateModal(BaseModal):
     def __init__(
         self,
         project_service: ProjectService,
@@ -645,7 +645,7 @@ class ProjectChannelSelectView(BaseView):
             await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectSearchModal(discord.ui.Modal):
+class ProjectSearchModal(BaseModal):
     """Modal to enter a search query for filtering projects."""
 
     def __init__(self, on_search_callback: Callable[[discord.Interaction, str], Any], current_query: str = ""):
@@ -1732,7 +1732,7 @@ class ProjectRebuildSelectView(BaseView):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class ProjectAssignTimelineModal(discord.ui.Modal):
+class ProjectAssignTimelineModal(BaseModal):
     """Modal to specify timeline when assigning a team to a project."""
 
     def __init__(

@@ -8,7 +8,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
-from src.adapters.discord_bot.views.base_view import BaseView
+from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.domain.enums import TeamRoleType
 from src.domain.models import Team as Squad
 from src.services.auth_service import AuthService
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dgg_pm.views.squad_menu")
 
 
-class SquadSearchModal(discord.ui.Modal):
+class SquadSearchModal(BaseModal):
     """Modal to search for squads by name or keyword."""
 
     def __init__(self, callback_fn, current_query: str = ""):
@@ -41,7 +41,7 @@ class SquadSearchModal(discord.ui.Modal):
         await self.callback_fn(interaction, self.query_input.value.strip())
 
 
-class SquadMemberSearchModal(discord.ui.Modal):
+class SquadMemberSearchModal(BaseModal):
     """Modal to search for a specific member by Discord User ID or mention within a squad roster."""
 
     def __init__(self, callback_fn, current_query: str = ""):
@@ -60,7 +60,7 @@ class SquadMemberSearchModal(discord.ui.Modal):
         await self.callback_fn(interaction, self.query_input.value.strip())
 
 
-class SquadCreateModalWithName(discord.ui.Modal):
+class SquadCreateModalWithName(BaseModal):
     """Modal with pre-selected role where name defaults to role name."""
 
     def __init__(self, squad_service: SquadService, selected_role: discord.Role):

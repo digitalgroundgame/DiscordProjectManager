@@ -6,7 +6,7 @@ from uuid import UUID
 
 import discord
 
-from src.adapters.discord_bot.views.base_view import BaseView
+from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.task_builder import TaskDetailsModal
 from src.domain.enums import TaskStatus
 from src.domain.models import Project, Task
@@ -29,7 +29,7 @@ def _extract_user_ids(text: str | None) -> list[int]:
     return [int(uid) for uid in set(ids)]
 
 
-class TaskProjectSearchModal(discord.ui.Modal):
+class TaskProjectSearchModal(BaseModal):
     """Modal to enter a search query for filtering or setting project scope."""
 
     def __init__(self, on_search_callback: Callable[[discord.Interaction, str], Any], current_query: str = ""):

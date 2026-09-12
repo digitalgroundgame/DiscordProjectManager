@@ -400,5 +400,5 @@ class TaskLinkButtonView(BaseView):
         )
 
 
-# Semantic alias matching issue specification
+# Semantic alias to maintain backwards-compatibility with Issue #13 specification
 TaskActionControlsView = TaskQuickControlsView

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
-from src.adapters.discord_bot.views.base_view import BaseView
+from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.forum_helpers import resolve_forum_tags
 from src.adapters.discord_bot.views.task_buttons import TaskActionView
 from src.adapters.discord_bot.views.task_embed import (
@@ -87,7 +87,7 @@ def build_task_draft_embed(
     return embed
 
 
-class TaskCustomDueModal(discord.ui.Modal):
+class TaskCustomDueModal(BaseModal):
     """Modal for entering a custom natural-language due date/time."""
 
     def __init__(self, draft_view: TaskCreateDraftView):
@@ -135,7 +135,7 @@ class TaskCustomDueModal(discord.ui.Modal):
         await interaction.response.edit_message(embed=embed, view=self.draft_view)
 
 
-class TaskDetailsModal(discord.ui.Modal):
+class TaskDetailsModal(BaseModal):
     """Modal to enter task title and description."""
 
     def __init__(
