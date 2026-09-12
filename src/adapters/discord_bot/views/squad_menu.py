@@ -8,6 +8,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TeamRoleType
 from src.domain.models import Team as Squad
 from src.services.auth_service import AuthService
@@ -101,7 +102,7 @@ class SquadCreateModalWithName(discord.ui.Modal):
             await send_interaction_error(interaction, e, f"creating squad '{name}'", logger, ephemeral=True)
 
 
-class SquadCreateRoleSelectView(discord.ui.View):
+class SquadCreateRoleSelectView(BaseView):
     """Native Discord RoleSelect picker for zero-typing squad creation."""
 
     def __init__(
@@ -161,7 +162,7 @@ class SquadCreateRoleSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class SquadMemberAssignView(discord.ui.View):
+class SquadMemberAssignView(BaseView):
     """View to select a squad, pick a user, choose a role type, and confirm assignment."""
 
     PAGE_SIZE = 25
@@ -506,7 +507,7 @@ class SquadMemberAssignView(discord.ui.View):
             )
 
 
-class SquadRosterDetailView(discord.ui.View):
+class SquadRosterDetailView(BaseView):
     """Interactive view allowing inspection of squad members for any squad."""
 
     SQUAD_PAGE_SIZE = 25
@@ -860,7 +861,7 @@ class SquadRosterDetailView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class SquadOverviewListView(discord.ui.View):
+class SquadOverviewListView(BaseView):
     """Paginated overview of all squads configured in the server."""
 
     PAGE_SIZE = 10
@@ -990,7 +991,7 @@ class SquadOverviewListView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class SquadMenuView(discord.ui.View):
+class SquadMenuView(BaseView):
     """Control Center View for Contributor Squad Operations."""
 
     def __init__(

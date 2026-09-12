@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project
 
 if TYPE_CHECKING:
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dgg_pm.views.tree_view")
 
 
-class TechTreeViewer(discord.ui.View):
+class TechTreeViewer(BaseView):
     """Interactive view for displaying and switching orientation of a project Tech Tree."""
 
     def __init__(
@@ -102,7 +103,7 @@ class TechTreeViewer(discord.ui.View):
         await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
 
 
-class TechTreeProjectSelectView(discord.ui.View):
+class TechTreeProjectSelectView(BaseView):
     """Dropdown selector to choose which project's tech tree to render."""
 
     def __init__(

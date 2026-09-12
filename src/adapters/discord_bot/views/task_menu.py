@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.task_builder import TaskDetailsModal
 from src.domain.enums import TaskStatus
 from src.domain.models import Project, Task
@@ -49,7 +50,7 @@ class TaskProjectSearchModal(discord.ui.Modal):
         await self.on_search_callback(interaction, query)
 
 
-class TaskSelectProjectView(discord.ui.View):
+class TaskSelectProjectView(BaseView):
     """Paginated and searchable view to select which project container to create a task in."""
 
     PAGE_SIZE = 25
@@ -340,7 +341,7 @@ def build_task_board_embed(
     return embed
 
 
-class TaskMenuView(discord.ui.View):
+class TaskMenuView(BaseView):
     """Control Center View for Task Operations and Real-time Multi-dimensional Filtering."""
 
     def __init__(

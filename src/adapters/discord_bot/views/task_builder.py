@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.forum_helpers import resolve_forum_tags
 from src.adapters.discord_bot.views.task_buttons import TaskActionView
 from src.adapters.discord_bot.views.task_embed import (
@@ -242,7 +243,7 @@ class TaskDetailsModal(discord.ui.Modal):
             await interaction.response.send_message(embed=embed, view=draft_view, ephemeral=True)
 
 
-class DraftPrerequisiteSelectView(discord.ui.View):
+class DraftPrerequisiteSelectView(BaseView):
     """Interactive in-place view to pick prerequisite tasks for a new task draft."""
 
     def __init__(self, draft_view: TaskCreateDraftView, sibling_tasks: list[Task]):
@@ -339,7 +340,7 @@ class DraftPrerequisiteSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=self.draft_view)
 
 
-class TaskCreateDraftView(discord.ui.View):
+class TaskCreateDraftView(BaseView):
     """Interactive multi-step Task Creation Builder (Non-modal interactive configuration).
 
     Allows users to pick assignees with native Discord member autocomplete (UserSelect),

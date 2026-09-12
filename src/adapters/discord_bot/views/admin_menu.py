@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.project_menu import (
     ProjectChannelSelectView,
     ProjectMenuView,
@@ -104,7 +105,7 @@ def build_pm_dashboard_embed(
     return embed
 
 
-class PmDashboardOverviewView(discord.ui.View):
+class PmDashboardOverviewView(BaseView):
     """View displaying server-wide overview with a Back to Dashboard button."""
 
     def __init__(
@@ -159,7 +160,7 @@ class PmDashboardOverviewView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class PmDashboardView(discord.ui.View):
+class PmDashboardView(BaseView):
     """Interactive administration and project management dashboard view for /pm menu."""
 
     def __init__(

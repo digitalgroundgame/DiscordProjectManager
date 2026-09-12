@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import NotificationPreference
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ def build_settings_embed(user: discord.User | discord.Member, current_pref: Noti
     return embed
 
 
-class UserSettingsView(discord.ui.View):
+class UserSettingsView(BaseView):
     """Interactive view allowing a member to toggle their personal notification preferences."""
 
     def __init__(

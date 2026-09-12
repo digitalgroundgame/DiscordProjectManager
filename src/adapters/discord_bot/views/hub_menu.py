@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.project_menu import ProjectMenuView, build_project_menu_embed
 from src.adapters.discord_bot.views.task_menu import (
     TaskCreateModal,
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dgg_pm.views.hub_menu")
 
 
-class HubTaskProjectSelectView(discord.ui.View):
+class HubTaskProjectSelectView(BaseView):
     """Ephemeral project selector displayed when clicking 'New Task' in a multi-project forum."""
 
     def __init__(
@@ -148,7 +149,7 @@ class HubTaskProjectSelectView(discord.ui.View):
         await self._open_modal(interaction, val)
 
 
-class HubBoardProjectSelectView(discord.ui.View):
+class HubBoardProjectSelectView(BaseView):
     """Ephemeral project scope selector displayed when clicking 'My Tasks' in a multi-project forum."""
 
     def __init__(
@@ -270,8 +271,9 @@ class HubBoardProjectSelectView(discord.ui.View):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class PmHubView(discord.ui.View):
+class PmHubView(BaseView):
     """Master Hub View allowing seamless opening of private interactive sessions for each user.
+
 
     All button interactions respond ephemerally or open modals, ensuring the public pinned
     control post in the forum/channel is never modified or disrupted by individual user clicks.

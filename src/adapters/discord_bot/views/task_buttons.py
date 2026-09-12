@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
@@ -49,7 +50,7 @@ def build_task_controls_embed(task: Task) -> discord.Embed:
     return embed
 
 
-class TaskQuickControlsView(discord.ui.View):
+class TaskQuickControlsView(BaseView):
     """Interactive ephemeral controls view for quick task adjustments on demand."""
 
     def __init__(
@@ -285,7 +286,7 @@ class TaskQuickControlsView(discord.ui.View):
             menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
 
 
-class TaskActionView(discord.ui.View):
+class TaskActionView(BaseView):
     """Persistent interactive view for task embed action buttons.
 
     All interactions are centrally handled by DggPmBot._handle_dynamic_task_button
@@ -385,7 +386,7 @@ class TaskActionView(discord.ui.View):
         self.add_item(self.controls_btn)
 
 
-class TaskLinkButtonView(discord.ui.View):
+class TaskLinkButtonView(BaseView):
     """View containing a 1-click link button to open the task in Discord."""
 
     def __init__(self, jump_url: str):
@@ -397,3 +398,7 @@ class TaskLinkButtonView(discord.ui.View):
                 url=jump_url,
             )
         )
+
+
+# Semantic alias matching issue specification
+TaskActionControlsView = TaskQuickControlsView
