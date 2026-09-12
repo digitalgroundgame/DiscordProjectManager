@@ -247,6 +247,14 @@ class TaskSelectProjectView(BaseView):
             )
             await interaction.response.edit_message(embed=embed, view=self)
 
+    def build_embed(self) -> discord.Embed:
+        filter_note = f" (Filter: `{self.query}`)" if self.query else ""
+        return discord.Embed(
+            title=f"📁 Select Project Container{filter_note}",
+            description="Choose which active project to create the task inside:",
+            color=discord.Color.blurple(),
+        )
+
     async def _on_select(self, interaction: discord.Interaction) -> None:
         project_id_str = self.select.values[0]
         project = next((p for p in self.all_projects if str(p.id) == project_id_str), None)
@@ -270,6 +278,7 @@ class TaskSelectProjectView(BaseView):
             target_channel=target_channel,
             auth_service=self.auth_service,
             parent_interaction=interaction,
+            parent_view=self,
         )
         await interaction.response.send_modal(modal)
 

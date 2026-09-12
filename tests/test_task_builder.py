@@ -257,6 +257,26 @@ async def test_edit_details_and_cancel_in_draft_view(services):
     assert isinstance(edit_modal, TaskDetailsModal)
     assert edit_modal.title_input.default == "Original Title"
 
+    # Submitting edit modal with empty title refreshes the draft view and shows toast
+    edit_modal.title_input._value = "   "
+    invalid_sub_interaction = MagicMock(spec=discord.Interaction)
+    invalid_sub_interaction.response = MagicMock()
+    invalid_sub_interaction.response.edit_message = AsyncMock()
+    invalid_sub_interaction.followup = MagicMock()
+    mock_toast = MagicMock()
+    invalid_sub_interaction.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await edit_modal.on_submit(invalid_sub_interaction)
+        invalid_sub_interaction.response.edit_message.assert_awaited_once()
+        assert invalid_sub_interaction.response.edit_message.call_args.kwargs.get("view") is draft_view
+        invalid_sub_interaction.followup.send.assert_awaited_once()
+        toast_text = invalid_sub_interaction.followup.send.call_args[0][0]
+        assert "Task title cannot be empty" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
+    assert draft_view.title == "Original Title"
+
     # Submitting edit modal updates the draft view
     edit_modal.title_input._value = "Updated Task Title"
     edit_modal.desc_input._value = "Updated Task Description"

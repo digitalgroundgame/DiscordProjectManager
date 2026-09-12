@@ -374,6 +374,7 @@ class ProjectCreateModal(BaseModal):
         initial_prefix: str = "",
         initial_desc: str = "",
         initial_cat: str = "",
+        parent_view: BaseView | None = None,
     ):
         self.project_service = project_service
         self.channel = channel
@@ -381,6 +382,7 @@ class ProjectCreateModal(BaseModal):
         self.task_service = task_service
         self.user_service = user_service
         self.draft_view = draft_view
+        self.parent_view = parent_view
 
         raw_name = getattr(channel, "name", None)
         if isinstance(raw_name, str) and raw_name.strip():
@@ -456,10 +458,44 @@ class ProjectCreateModal(BaseModal):
 
         name = self.name_input.value.strip()
         if not name:
-            await interaction.response.send_message("❌ Project name cannot be empty.", ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            if self.draft_view:
+                self.draft_view._rebuild_items()
+                embed = build_project_draft_embed(
+                    name=self.draft_view.name,
+                    channel=self.draft_view.channel,
+                    prefix=self.draft_view.prefix,
+                    description=self.draft_view.description,
+                    category=self.draft_view.category,
+                    role=self.draft_view.role,
+                    roles=self.draft_view.roles,
+                    lead=self.draft_view.lead,
+                )
+                await interaction.response.edit_message(embed=embed, view=self.draft_view)
+                toast = await interaction.followup.send(
+                    format_toast_message("❌ Project name cannot be empty.", delay=8.0),
+                    ephemeral=True,
+                    wait=True,
+                )
+                menu_manager.schedule_toast_dismissal(toast, delay=8.0)
+            elif self.parent_view:
+                if hasattr(self.parent_view, "_rebuild_items"):
+                    self.parent_view._rebuild_items()
+                embed = self.parent_view.build_embed() if hasattr(self.parent_view, "build_embed") else None
+                if embed:
+                    await interaction.response.edit_message(embed=embed, view=self.parent_view)
+                else:
+                    await interaction.response.edit_message(view=self.parent_view)
+                toast = await interaction.followup.send(
+                    format_toast_message("❌ Project name cannot be empty.", delay=8.0),
+                    ephemeral=True,
+                    wait=True,
+                )
+                menu_manager.schedule_toast_dismissal(toast, delay=8.0)
+            else:
+                await interaction.response.send_message("❌ Project name cannot be empty.", ephemeral=True)
+                menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
             return
 
         prefix = self.prefix_input.value.strip() or None
@@ -526,8 +562,10 @@ class ProjectChannelSelectView(BaseView):
         self.user_service = user_service
         self.return_to = return_to
         self._initial_interaction = initial_interaction
+        self._rebuild_items()
 
-        # Row 0: Channel Select dropdown (Forum channels only)
+    def _rebuild_items(self) -> None:
+        self.clear_items()
         self.channel_select = discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.forum],
             placeholder="Select target Forum channel...",
@@ -538,7 +576,6 @@ class ProjectChannelSelectView(BaseView):
         self.channel_select.callback = self._on_channel_selected
         self.add_item(self.channel_select)
 
-        # Row 1: Quick button to use current channel (if Forum)
         self.current_chan_btn = discord.ui.Button(
             label="Use Current Forum Channel",
             style=discord.ButtonStyle.primary,
@@ -547,7 +584,6 @@ class ProjectChannelSelectView(BaseView):
         self.current_chan_btn.callback = self._on_current_channel_clicked
         self.add_item(self.current_chan_btn)
 
-        # Row 1: Back button
         self.back_btn = discord.ui.Button(
             label="Back",
             style=discord.ButtonStyle.secondary,
@@ -573,10 +609,16 @@ class ProjectChannelSelectView(BaseView):
         selected = self.channel_select.values[0]
         chan = interaction.guild.get_channel(selected.id) if hasattr(selected, "id") else selected
         if not chan or not isinstance(chan, discord.ForumChannel):
-            await interaction.response.send_message("❌ Selected channel must be a Forum Channel.", ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            self._rebuild_items()
+            await interaction.response.edit_message(view=self)
+            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            toast = await interaction.followup.send(
+                format_toast_message("❌ Selected channel must be a Forum Channel.", delay=8.0),
+                ephemeral=True,
+                wait=True,
+            )
+            menu_manager.schedule_toast_dismissal(toast, delay=8.0)
             return
 
         modal = ProjectCreateModal(
@@ -584,6 +626,8 @@ class ProjectChannelSelectView(BaseView):
             channel=chan,
             team_service=self.team_service,
             task_service=self.task_service,
+            user_service=self.user_service,
+            parent_view=self,
         )
         await interaction.response.send_modal(modal)
 

@@ -175,6 +175,7 @@ class TaskDetailsModal(BaseModal):
         initial_title: str = "",
         initial_desc: str = "",
         parent_interaction: discord.Interaction | None = None,
+        parent_view: BaseView | None = None,
     ):
         if project:
             modal_title = f"New Task: [{project.prefix}] {project.name[:22]}"
@@ -193,6 +194,7 @@ class TaskDetailsModal(BaseModal):
         self.auth_service = auth_service
         self.draft_view = draft_view
         self.parent_interaction = parent_interaction
+        self.parent_view = parent_view
 
         self.title_input = discord.ui.TextInput(
             label="Task Title",
@@ -216,10 +218,44 @@ class TaskDetailsModal(BaseModal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
         if not title:
-            await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
+            if self.draft_view:
+                self.draft_view._rebuild_items()
+                embed = build_task_draft_embed(
+                    title=self.draft_view.title,
+                    description=self.draft_view.description,
+                    project=self.draft_view.project,
+                    assignee_id=self.draft_view.assignee_id,
+                    priority=self.draft_view.priority,
+                    due_at=self.draft_view.due_at,
+                    watchers=self.draft_view.watchers,
+                    target_channel=self.draft_view.target_channel or interaction.channel,
+                )
+                await interaction.response.edit_message(embed=embed, view=self.draft_view)
+                toast = await interaction.followup.send(
+                    format_toast_message("❌ Task title cannot be empty.", delay=10.0),
+                    ephemeral=True,
+                    wait=True,
+                )
+                menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+            elif self.parent_view:
+                if hasattr(self.parent_view, "_rebuild_items"):
+                    self.parent_view._rebuild_items()
+                embed = self.parent_view.build_embed() if hasattr(self.parent_view, "build_embed") else None
+                if embed:
+                    await interaction.response.edit_message(embed=embed, view=self.parent_view)
+                else:
+                    await interaction.response.edit_message(view=self.parent_view)
+                toast = await interaction.followup.send(
+                    format_toast_message("❌ Task title cannot be empty.", delay=10.0),
+                    ephemeral=True,
+                    wait=True,
+                )
+                menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+            else:
+                await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
+                menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
             return
 
         desc = self.desc_input.value.strip() or None

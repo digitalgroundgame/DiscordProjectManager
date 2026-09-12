@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
@@ -1555,3 +1555,248 @@ def test_build_hub_welcome_embed_squad_roles():
     # Open project
     assert "**[GLB] Global Chapter**" in desc
     assert "> **Squad Role**: *Open (No role required)*" in desc
+
+
+@pytest.mark.asyncio
+async def test_project_channel_select_incompatible_channel_resets_dropdown(services):
+    """Selecting an incompatible channel (e.g. non-forum channel) in ProjectChannelSelectView
+
+    must reset the channel select menu back to placeholder rather than leaving the invalid channel selected,
+    and deliver an auto-dismissing ephemeral toast.
+    """
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+
+    view = ProjectChannelSelectView(proj_srv, team_srv, task_srv)
+
+    mock_text_channel = MagicMock(spec=discord.TextChannel)
+    mock_text_channel.id = 987654321
+
+    # Simulate selecting a text channel in the ChannelSelect
+    view.channel_select._values = [mock_text_channel]
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = MagicMock()
+    inter.guild.get_channel = MagicMock(return_value=mock_text_channel)
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+    inter.followup = MagicMock()
+    mock_toast = MagicMock()
+    inter.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await view._on_channel_selected(inter)
+
+        # Must edit the message to reset the view
+        inter.response.edit_message.assert_awaited_once_with(view=view)
+
+        # Must send auto-dismissing toast via followup
+        inter.followup.send.assert_awaited_once()
+        toast_text = inter.followup.send.call_args[0][0]
+        assert "Selected channel must be a Forum Channel" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
+        assert inter.followup.send.call_args.kwargs.get("wait") is True
+        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+
+    # Channel select must be reset back to empty selection and placeholder
+    assert view.channel_select.placeholder == "Select target Forum channel..."
+    assert view.channel_select.values == []
+
+
+@pytest.mark.asyncio
+async def test_project_create_modal_empty_name_from_channel_select_resets_dropdown(services):
+    """Submitting an empty project name in ProjectCreateModal when opened from ProjectChannelSelectView
+
+    must reset the parent channel select menu to placeholder, edit the parent message,
+    and deliver an auto-dismissing ephemeral toast.
+    """
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+
+    view = ProjectChannelSelectView(proj_srv, team_srv, task_srv)
+    mock_forum_channel = MagicMock(spec=discord.ForumChannel)
+    mock_forum_channel.id = 555666777
+    view.channel_select._values = [mock_forum_channel]
+
+    modal = ProjectCreateModal(proj_srv, channel=mock_forum_channel, parent_view=view)
+    modal.name_input._value = "   "
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = MagicMock()
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+    inter.followup = MagicMock()
+    mock_toast = MagicMock()
+    inter.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(inter)
+
+        inter.response.edit_message.assert_awaited_once_with(view=view)
+        inter.followup.send.assert_awaited_once()
+        toast_text = inter.followup.send.call_args[0][0]
+        assert "Project name cannot be empty" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
+        assert inter.followup.send.call_args.kwargs.get("wait") is True
+        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+
+    assert view.channel_select.placeholder == "Select target Forum channel..."
+    assert view.channel_select.values == []
+
+
+@pytest.mark.asyncio
+async def test_project_create_modal_empty_name_from_draft_view_refreshes_view(services):
+    """Submitting an empty project name in ProjectCreateModal when opened from ProjectCreateDraftView
+
+    must refresh the draft view, edit the parent message with the draft embed,
+    and deliver an auto-dismissing ephemeral toast.
+    """
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+
+    mock_forum_channel = MagicMock(spec=discord.ForumChannel)
+    mock_forum_channel.id = 555666777
+    mock_forum_channel.name = "proj-forum"
+
+    draft_view = ProjectCreateDraftView(
+        project_service=proj_srv,
+        channel=mock_forum_channel,
+        name="Existing Project",
+        prefix="EX",
+        team_service=team_srv,
+        task_service=task_srv,
+    )
+
+    modal = ProjectCreateModal(proj_srv, channel=mock_forum_channel, draft_view=draft_view)
+    modal.name_input._value = ""
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = MagicMock()
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+    inter.followup = MagicMock()
+    mock_toast = MagicMock()
+    inter.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(inter)
+
+        inter.response.edit_message.assert_awaited_once()
+        assert inter.response.edit_message.call_args.kwargs.get("view") is draft_view
+        assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
+
+        inter.followup.send.assert_awaited_once()
+        toast_text = inter.followup.send.call_args[0][0]
+        assert "Project name cannot be empty" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+
+
+@pytest.mark.asyncio
+async def test_task_details_modal_empty_title_from_task_select_project_view_resets_dropdown(services):
+    """Submitting an empty title in TaskDetailsModal when opened from TaskSelectProjectView
+
+    must reset the project dropdown to placeholder, edit the parent message,
+    and deliver an auto-dismissing ephemeral toast.
+    """
+    proj_srv = services["project"]
+    team_srv = services["team"]
+    task_srv = services["task"]
+    guild_id = 999888777
+
+    proj_a = await proj_srv.create_project(guild_id, "Project Alpha", "ALP")
+    view = TaskSelectProjectView(
+        projects=[proj_a],
+        task_service=task_srv,
+        project_service=proj_srv,
+        team_service=team_srv,
+    )
+    view.select._values = [str(proj_a.id)]
+
+    modal = TaskCreateModal(
+        task_service=task_srv,
+        project=proj_a,
+        parent_view=view,
+    )
+    modal.title_input._value = "   "
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+    inter.followup = MagicMock()
+    mock_toast = MagicMock()
+    inter.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(inter)
+
+        inter.response.edit_message.assert_awaited_once()
+        assert inter.response.edit_message.call_args.kwargs.get("view") is view
+        assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
+
+        inter.followup.send.assert_awaited_once()
+        toast_text = inter.followup.send.call_args[0][0]
+        assert "Task title cannot be empty" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
+        assert inter.followup.send.call_args.kwargs.get("wait") is True
+        mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
+
+    assert "Select Project" in view.select.placeholder
+    assert view.select.values == []
+
+
+@pytest.mark.asyncio
+async def test_task_details_modal_empty_title_from_hub_task_project_select_view_resets_dropdown(services):
+    """Submitting an empty title in TaskDetailsModal when opened from HubTaskProjectSelectView
+
+    must reset the project select dropdown to placeholder, edit the parent message,
+    and deliver an auto-dismissing ephemeral toast.
+    """
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 999888777
+
+    proj_a = await proj_srv.create_project(guild_id, "Channel Project", "CP")
+    view = HubTaskProjectSelectView(
+        task_service=task_srv,
+        channel_projects=[proj_a],
+        target_channel=None,
+    )
+    view.select._values = [str(proj_a.id)]
+    view.selected_project_val = str(proj_a.id)
+
+    modal = TaskCreateModal(
+        task_service=task_srv,
+        project=proj_a,
+        parent_view=view,
+    )
+    modal.title_input._value = ""
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+    inter.followup = MagicMock()
+    mock_toast = MagicMock()
+    inter.followup.send = AsyncMock(return_value=mock_toast)
+
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(inter)
+
+        inter.response.edit_message.assert_awaited_once()
+        assert inter.response.edit_message.call_args.kwargs.get("view") is view
+        assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
+
+        inter.followup.send.assert_awaited_once()
+        toast_text = inter.followup.send.call_args[0][0]
+        assert "Task title cannot be empty" in toast_text
+        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
+
+    assert view.select.placeholder == "Select Project for New Task..."
+    assert view.select.values == []

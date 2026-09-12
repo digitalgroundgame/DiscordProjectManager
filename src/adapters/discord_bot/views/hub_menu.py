@@ -44,9 +44,17 @@ class HubTaskProjectSelectView(BaseView):
         self.auth_service = auth_service
         self.allow_standalone = allow_standalone
         self._initial_interaction: discord.Interaction | None = None
+        self._rebuild_items()
 
+    def _rebuild_items(self) -> None:
+        self.clear_items()
+        self.selected_project_val = (
+            str(self.channel_projects[0].id)
+            if self.channel_projects
+            else ("standalone" if self.allow_standalone else None)
+        )
         options = []
-        for p in channel_projects[:24]:
+        for p in self.channel_projects[:24]:
             options.append(
                 discord.SelectOption(
                     label=f"[{p.prefix}] {p.name}"[:100],
@@ -62,10 +70,6 @@ class HubTaskProjectSelectView(BaseView):
                     description="Create an ad-hoc unlinked chore/task",
                 )
             )
-
-        self.selected_project_val: str | None = (
-            str(channel_projects[0].id) if channel_projects else ("standalone" if allow_standalone else None)
-        )
 
         self.select = discord.ui.Select(
             placeholder="Select Project for New Task...",
@@ -91,6 +95,13 @@ class HubTaskProjectSelectView(BaseView):
         self.cancel_button.callback = self._on_cancel_clicked
         self.add_item(self.cancel_button)
 
+    def build_embed(self) -> discord.Embed:
+        return discord.Embed(
+            title="New Task: Select Project",
+            description="Choose which active project in this channel to create the task under:",
+            color=discord.Color.blurple(),
+        )
+
     async def _open_modal(self, interaction: discord.Interaction, val: str) -> None:
         parent_inter = self._initial_interaction or interaction
         if val == "standalone":
@@ -100,6 +111,7 @@ class HubTaskProjectSelectView(BaseView):
                 target_channel=self.target_channel,
                 auth_service=self.auth_service,
                 parent_interaction=parent_inter,
+                parent_view=self,
             )
         else:
             selected_proj = next((p for p in self.channel_projects if str(p.id) == val), None)
@@ -112,6 +124,7 @@ class HubTaskProjectSelectView(BaseView):
                 target_channel=self.target_channel,
                 auth_service=self.auth_service,
                 parent_interaction=parent_inter,
+                parent_view=self,
             )
         await interaction.response.send_modal(modal)
 
