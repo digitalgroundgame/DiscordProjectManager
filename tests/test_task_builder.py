@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
@@ -187,21 +187,53 @@ async def test_custom_due_date_modal(services):
     modal.due_input._value = "not a real date xyz"
     invalid_interaction = MagicMock(spec=discord.Interaction)
     invalid_interaction.response = MagicMock()
-    invalid_interaction.response.send_message = AsyncMock()
+    invalid_interaction.response.edit_message = AsyncMock()
+    invalid_interaction.followup = MagicMock()
+    mock_toast = MagicMock()
+    invalid_interaction.followup.send = AsyncMock(return_value=mock_toast)
 
-    await modal.on_submit(invalid_interaction)
-    invalid_interaction.response.send_message.assert_awaited_once()
-    assert "Could not parse" in invalid_interaction.response.send_message.call_args[0][0]
+    with patch("src.adapters.discord_bot.menu_manager.menu_manager.schedule_toast_dismissal") as mock_schedule:
+        await modal.on_submit(invalid_interaction)
+        invalid_interaction.response.edit_message.assert_awaited_once()
+        invalid_interaction.followup.send.assert_awaited_once()
+        assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
+        assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
+        assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
+        mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
+
+    # Verify due_select reset to placeholder and existing due_at untouched
+    assert draft_view.due_select.placeholder == "Pick due date preset..."
+    assert draft_view.due_at is None
+
+    # Verify that an existing valid due_at is also preserved if another invalid input is provided
+    existing_due = datetime.now(UTC) + timedelta(days=5)
+    draft_view.due_at = existing_due
+    draft_view._rebuild_items()
+
+    modal_retry = TaskCustomDueModal(draft_view)
+    modal_retry.due_input._value = "invalid date second try"
+    retry_interaction = MagicMock(spec=discord.Interaction)
+    retry_interaction.response = MagicMock()
+    retry_interaction.response.edit_message = AsyncMock()
+    retry_interaction.followup = MagicMock()
+    retry_interaction.followup.send = AsyncMock(return_value=mock_toast)
+
+    await modal_retry.on_submit(retry_interaction)
+    retry_interaction.response.edit_message.assert_awaited_once()
+    assert draft_view.due_select.placeholder == "Pick due date preset..."
+    assert draft_view.due_at == existing_due
 
     # 3. Valid date expression in modal
-    modal.due_input._value = "friday 5pm"
+    modal_valid = TaskCustomDueModal(draft_view)
+    modal_valid.due_input._value = "friday 5pm"
     valid_interaction = MagicMock(spec=discord.Interaction)
     valid_interaction.response = MagicMock()
     valid_interaction.response.edit_message = AsyncMock()
 
-    await modal.on_submit(valid_interaction)
+    await modal_valid.on_submit(valid_interaction)
     valid_interaction.response.edit_message.assert_awaited_once()
     assert draft_view.due_at is not None
+    assert draft_view.due_at != existing_due
 
 
 @pytest.mark.asyncio

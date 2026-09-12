@@ -84,3 +84,23 @@ async def test_schedule_toast_dismissal():
 
     await asyncio.sleep(0.02)
     inter.delete_original_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_schedule_toast_dismissal_webhook_message():
+    manager = MenuSessionManager()
+    toast = MagicMock()
+    toast.delete = AsyncMock()
+
+    manager.schedule_toast_dismissal(toast, delay=0.01)
+    toast.delete.assert_not_awaited()
+
+    await asyncio.sleep(0.02)
+    toast.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_schedule_toast_dismissal_none():
+    manager = MenuSessionManager()
+    manager.schedule_toast_dismissal(None, delay=0.01)
+    assert len(manager._background_tasks) == 0

@@ -111,13 +111,26 @@ class TaskCustomDueModal(BaseModal):
         val = self.due_input.value.strip()
         parsed = parse_natural_date(val)
         if not parsed:
-            await interaction.response.send_message(
+            self.draft_view._rebuild_items()
+            embed = build_task_draft_embed(
+                title=self.draft_view.title,
+                description=self.draft_view.description,
+                project=self.draft_view.project,
+                assignee_id=self.draft_view.assignee_id,
+                priority=self.draft_view.priority,
+                due_at=self.draft_view.due_at,
+                watchers=self.draft_view.watchers,
+                target_channel=self.draft_view.target_channel or interaction.channel,
+            )
+            await interaction.response.edit_message(embed=embed, view=self.draft_view)
+            toast = await interaction.followup.send(
                 f"❌ Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
                 ephemeral=True,
+                wait=True,
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
+            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
             return
 
         self.draft_view.due_at = parsed
