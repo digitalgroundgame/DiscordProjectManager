@@ -271,10 +271,10 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @app_commands.describe(notify_preference="Choose where you receive task assignments and updates")
     @app_commands.choices(
         notify_preference=[
-            app_commands.Choice(name="Direct Message (DM)", value="dm"),
-            app_commands.Choice(name="Thread Channel Ping", value="channel"),
-            app_commands.Choice(name="Both (DM + Channel)", value="both"),
-            app_commands.Choice(name="Silent / None", value="silent"),
+            app_commands.Choice(name="Direct Message (DM - Private & Permanent)", value="dm"),
+            app_commands.Choice(name="Thread Channel Ping (Public In-Thread)", value="channel"),
+            app_commands.Choice(name="Both (DM + Channel Ping)", value="both"),
+            app_commands.Choice(name="Silent / None (No Alerts)", value="silent"),
         ]
     )
     async def settings(self, interaction: discord.Interaction, notify_preference: str | None = None) -> None:
@@ -287,10 +287,10 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @app_commands.describe(notify_preference="Choose where you receive task assignments and updates")
     @app_commands.choices(
         notify_preference=[
-            app_commands.Choice(name="Direct Message (DM)", value="dm"),
-            app_commands.Choice(name="Thread Channel Ping", value="channel"),
-            app_commands.Choice(name="Both (DM + Channel)", value="both"),
-            app_commands.Choice(name="Silent / None", value="silent"),
+            app_commands.Choice(name="Direct Message (DM - Private & Permanent)", value="dm"),
+            app_commands.Choice(name="Thread Channel Ping (Public In-Thread)", value="channel"),
+            app_commands.Choice(name="Both (DM + Channel Ping)", value="both"),
+            app_commands.Choice(name="Silent / None (No Alerts)", value="silent"),
         ]
     )
     async def notifications(self, interaction: discord.Interaction, notify_preference: str | None = None) -> None:
@@ -303,10 +303,10 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @app_commands.describe(notify_preference="Choose where you receive task assignments and updates")
     @app_commands.choices(
         notify_preference=[
-            app_commands.Choice(name="Direct Message (DM)", value="dm"),
-            app_commands.Choice(name="Thread Channel Ping", value="channel"),
-            app_commands.Choice(name="Both (DM + Channel)", value="both"),
-            app_commands.Choice(name="Silent / None", value="silent"),
+            app_commands.Choice(name="Direct Message (DM - Private & Permanent)", value="dm"),
+            app_commands.Choice(name="Thread Channel Ping (Public In-Thread)", value="channel"),
+            app_commands.Choice(name="Both (DM + Channel Ping)", value="both"),
+            app_commands.Choice(name="Silent / None (No Alerts)", value="silent"),
         ]
     )
     async def notification(self, interaction: discord.Interaction, notify_preference: str | None = None) -> None:

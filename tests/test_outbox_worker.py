@@ -839,3 +839,256 @@ async def test_due_reminder_channel_preference_receives_link_button_view(service
     assert call_kwargs["embed"].url == expected_url
     assert call_kwargs.get("view") is not None
     assert call_kwargs["view"].children[0].url == expected_url
+
+
+@pytest.mark.asyncio
+async def test_task_created_notification_delivers_jump_url_and_link_button(services):
+    """Verify TASK_CREATED notifications to assignee and watchers include jump URL and link button view."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    bot = MagicMock()
+    dmd_users: dict[int, MagicMock] = {}
+
+    def get_mock_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=get_mock_user)
+    bot.fetch_user = AsyncMock(side_effect=get_mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="task_created_jump_test",
+        payload={
+            "task_id": "test-task-created-jump",
+            "short_id": "TASK-10",
+            "title": "Setup OAuth2 Flow",
+            "guild_id": guild_id,
+            "creator_discord_id": 5000,
+            "assignee_discord_id": 5001,
+            "watchers": [5002],
+            "discord_thread_id": 777111,
+            "discord_message_id": 777222,
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    expected_url = f"https://discord.com/channels/{guild_id}/777111/777222"
+
+    # Assignee notification
+    assert dmd_users[5001].send.await_count == 1
+    assignee_kwargs = dmd_users[5001].send.call_args.kwargs
+    assignee_embed = assignee_kwargs["embed"]
+    assignee_view = assignee_kwargs.get("view")
+    assert assignee_embed.url == expected_url
+    assert "Task Location:" not in (assignee_embed.description or "")
+    assert assignee_view is not None
+    assert assignee_view.children[0].url == expected_url
+    assert assignee_view.children[0].label == "Open Task"
+
+    # Watcher notification
+    assert dmd_users[5002].send.await_count == 1
+    watcher_kwargs = dmd_users[5002].send.call_args.kwargs
+    watcher_embed = watcher_kwargs["embed"]
+    watcher_view = watcher_kwargs.get("view")
+    assert watcher_embed.url == expected_url
+    assert "Task Location:" not in (watcher_embed.description or "")
+    assert watcher_view is not None
+    assert watcher_view.children[0].url == expected_url
+    assert watcher_view.children[0].label == "Open Task"
+
+
+@pytest.mark.asyncio
+async def test_task_status_changed_notification_delivers_jump_url_and_link_button(services):
+    """Verify TASK_STATUS_CHANGED notifications include jump URL and link button view."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    bot = MagicMock()
+    dmd_users: dict[int, MagicMock] = {}
+
+    def get_mock_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=get_mock_user)
+    bot.fetch_user = AsyncMock(side_effect=get_mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_STATUS_CHANGED,
+        idempotency_key="status_jump_test",
+        payload={
+            "task_id": "test-task-status-jump",
+            "short_id": "TASK-11",
+            "title": "Database Optimization",
+            "guild_id": guild_id,
+            "old_status": "notStarted",
+            "new_status": "inProgress",
+            "actor_discord_id": 9999,
+            "assignee_discord_id": 6001,
+            "watchers": [6002],
+            "discord_thread_id": 888111,
+            "discord_message_id": 888222,
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    expected_url = f"https://discord.com/channels/{guild_id}/888111/888222"
+
+    for uid in (6001, 6002):
+        assert dmd_users[uid].send.await_count == 1
+        kwargs = dmd_users[uid].send.call_args.kwargs
+        embed = kwargs["embed"]
+        view = kwargs.get("view")
+        assert embed.url == expected_url
+        assert "Task Location:" not in (embed.description or "")
+        assert view is not None
+        assert view.children[0].url == expected_url
+        assert view.children[0].label == "Open Task"
+
+
+@pytest.mark.asyncio
+async def test_task_note_added_notification_delivers_jump_url_and_link_button(services):
+    """Verify TASK_NOTE_ADDED notifications include jump URL and link button view."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    bot = MagicMock()
+    dmd_users: dict[int, MagicMock] = {}
+
+    def get_mock_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=get_mock_user)
+    bot.fetch_user = AsyncMock(side_effect=get_mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_NOTE_ADDED,
+        idempotency_key="note_jump_test",
+        payload={
+            "task_id": "test-task-note-jump",
+            "short_id": "TASK-12",
+            "title": "API Rate Limiting",
+            "guild_id": guild_id,
+            "actor_discord_id": 9999,
+            "assignee_discord_id": 7001,
+            "watchers": [7002],
+            "note": "Initial PR has been posted.",
+            "discord_thread_id": 999111,
+            "discord_message_id": 999222,
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    expected_url = f"https://discord.com/channels/{guild_id}/999111/999222"
+
+    for uid in (7001, 7002):
+        assert dmd_users[uid].send.await_count == 1
+        kwargs = dmd_users[uid].send.call_args.kwargs
+        embed = kwargs["embed"]
+        view = kwargs.get("view")
+        assert embed.url == expected_url
+        assert "Task Location:" not in (embed.description or "")
+        assert view is not None
+        assert view.children[0].url == expected_url
+        assert view.children[0].label == "Open Task"
+
+
+@pytest.mark.asyncio
+async def test_task_updated_notification_delivers_jump_url_and_link_button(services):
+    """Verify TASK_UPDATED notifications include jump URL and link button view."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import EventType
+    from src.domain.models import OutboxEvent
+
+    user_srv = services["user"]
+    guild_id = 999111
+    bot = MagicMock()
+    dmd_users: dict[int, MagicMock] = {}
+
+    def get_mock_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=get_mock_user)
+    bot.fetch_user = AsyncMock(side_effect=get_mock_user)
+
+    notifier = DiscordNotifier(bot, user_service=user_srv)
+    evt = OutboxEvent(
+        event_type=EventType.TASK_UPDATED,
+        idempotency_key="updated_jump_test",
+        payload={
+            "task_id": "test-task-updated-jump",
+            "short_id": "TASK-13",
+            "title": "Refactor Cogs",
+            "guild_id": guild_id,
+            "actor_discord_id": 9999,
+            "old_assignee_id": 8001,
+            "new_assignee_id": 8002,
+            "assignee_discord_id": 8002,
+            "watchers": [8003],
+            "update_type": "assignee",
+            "discord_thread_id": 555111,
+            "discord_message_id": 555222,
+        },
+    )
+    await notifier.dispatch_event(evt)
+
+    expected_url = f"https://discord.com/channels/{guild_id}/555111/555222"
+
+    for uid in (8001, 8002, 8003):
+        assert dmd_users[uid].send.await_count == 1
+        kwargs = dmd_users[uid].send.call_args.kwargs
+        embed = kwargs["embed"]
+        view = kwargs.get("view")
+        assert embed.url == expected_url
+        assert "Task Location:" not in (embed.description or "")
+        assert view is not None
+        assert view.children[0].url == expected_url
+        assert view.children[0].label == "Open Task"

@@ -33,8 +33,9 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - PostgreSQL 16 is managed via Docker Compose (`make db-up` / `docker compose up -d postgres`).
    - Unit and integration tests run against an in-memory SQLite database (`sqlite+aiosqlite:///:memory:`) and do not require PostgreSQL to be running.
 
-4. **NixOS Support**:
+4. **NixOS Support & Tool Availability**:
    - NixOS developers can use `direnv` (`use flake` in `.envrc`) or `nix develop` to automatically populate Python 3.13, `uv`, `psql`, `docker`, and required system libraries in their environment.
+   - If any needed CLI utility or dependency is missing from the environment, use `nix-shell -p <package>` (or enter a `nix-shell`) to run or provide it on demand.
 
 5. **Deployment & App Container Rebuild**:
    - When finished making code changes/updates, rebuild and restart the application container by running `make docker-build` (or `docker compose up -d --build app`).

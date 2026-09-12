@@ -342,9 +342,37 @@ class DiscordNotifier(INotificationDispatcher):
         recipients.discard(actor_id)  # Don't notify the person who triggered the change
 
         if recipients:
+            message_id = payload.get("discord_message_id")
+            if not thread_id and self.task_service:
+                try:
+                    task_obj = None
+                    task_id_raw = payload.get("task_id")
+                    if task_id_raw:
+                        try:
+                            task_obj = await self.task_service.get_by_id(UUID(str(task_id_raw)))
+                        except (ValueError, TypeError):
+                            task_obj = None
+                    if not task_obj and guild_id and short_id:
+                        task_obj = await self.task_service.get_by_short_id(guild_id, short_id)
+                    if task_obj:
+                        if not guild_id and task_obj.guild_id:
+                            guild_id = task_obj.guild_id
+                        if not thread_id and task_obj.discord_thread_id:
+                            thread_id = task_obj.discord_thread_id
+                        if not message_id and task_obj.discord_message_id:
+                            message_id = task_obj.discord_message_id
+                except Exception as e:
+                    logger.debug("Could not resolve task location from task_service for status_changed: %s", e)
+
+            jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
+            view = TaskLinkButtonView(jump_url) if jump_url else None
+
+            desc = f"Status changed from `{old_status}` to **`{new_status}`** by <@{actor_id}>."
+
             embed = discord.Embed(
                 title=f"Task Update: [{short_id}] {title}",
-                description=f"Status changed from `{old_status}` to **`{new_status}`** by <@{actor_id}>.",
+                url=jump_url,
+                description=desc,
                 color=discord.Color.green() if new_status == "completed" else discord.Color.blue(),
             )
             embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -358,6 +386,7 @@ class DiscordNotifier(INotificationDispatcher):
                     embed=embed,
                     thread=thread,
                     mention_text=f"<@{uid}> Task **[{short_id}] {title}** status updated to **`{new_status}`**",
+                    view=view,
                 )
 
     async def _handle_note_added(self, payload: dict) -> None:
@@ -401,9 +430,37 @@ class DiscordNotifier(INotificationDispatcher):
         recipients.discard(actor_id)
 
         if recipients:
+            message_id = payload.get("discord_message_id")
+            if not thread_id and self.task_service:
+                try:
+                    task_obj = None
+                    task_id_raw = payload.get("task_id")
+                    if task_id_raw:
+                        try:
+                            task_obj = await self.task_service.get_by_id(UUID(str(task_id_raw)))
+                        except (ValueError, TypeError):
+                            task_obj = None
+                    if not task_obj and guild_id and short_id:
+                        task_obj = await self.task_service.get_by_short_id(guild_id, short_id)
+                    if task_obj:
+                        if not guild_id and task_obj.guild_id:
+                            guild_id = task_obj.guild_id
+                        if not thread_id and task_obj.discord_thread_id:
+                            thread_id = task_obj.discord_thread_id
+                        if not message_id and task_obj.discord_message_id:
+                            message_id = task_obj.discord_message_id
+                except Exception as e:
+                    logger.debug("Could not resolve task location from task_service for note_added: %s", e)
+
+            jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
+            view = TaskLinkButtonView(jump_url) if jump_url else None
+
+            desc = f"<@{actor_id}> added a note:\n> {note}"
+
             embed = discord.Embed(
                 title=f"New Note: [{short_id}] {title}",
-                description=f"<@{actor_id}> added a note:\n> {note}",
+                url=jump_url,
+                description=desc,
                 color=discord.Color.blue(),
             )
             embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -414,14 +471,39 @@ class DiscordNotifier(INotificationDispatcher):
                     embed=embed,
                     thread=thread,
                     mention_text=f"<@{uid}> New note on **[{short_id}] {title}**",
+                    view=view,
                 )
 
     async def _handle_task_created(self, payload: dict) -> None:
+        short_id = payload.get("short_id", "")
+        title = payload.get("title", "")
         assignee_id = payload.get("assignee_discord_id")
         creator_id = payload.get("creator_discord_id")
         guild_id = payload.get("guild_id")
         thread_id = payload.get("discord_thread_id")
+        message_id = payload.get("discord_message_id")
         watchers: list[int] = payload.get("watchers", [])
+
+        if not thread_id and self.task_service:
+            try:
+                task = None
+                task_id_raw = payload.get("task_id")
+                if task_id_raw:
+                    try:
+                        task = await self.task_service.get_by_id(UUID(str(task_id_raw)))
+                    except (ValueError, TypeError):
+                        task = None
+                if not task and guild_id and short_id:
+                    task = await self.task_service.get_by_short_id(guild_id, short_id)
+                if task:
+                    if not guild_id and task.guild_id:
+                        guild_id = task.guild_id
+                    if not thread_id and task.discord_thread_id:
+                        thread_id = task.discord_thread_id
+                    if not message_id and task.discord_message_id:
+                        message_id = task.discord_message_id
+            except Exception as e:
+                logger.debug("Could not resolve task location from task_service for task_created: %s", e)
 
         thread: discord.Thread | None = None
         if thread_id:
@@ -432,13 +514,15 @@ class DiscordNotifier(INotificationDispatcher):
             except Exception:
                 pass
 
-        short_id = payload.get("short_id", "")
-        title = payload.get("title", "")
+        jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
+        view = TaskLinkButtonView(jump_url) if jump_url else None
 
         if assignee_id and assignee_id != creator_id:
+            desc = f"<@{creator_id}> assigned you a new task: **{title}**"
             embed = discord.Embed(
                 title=f"New Task Assigned: [{short_id}]",
-                description=f"<@{creator_id}> assigned you a new task: **{title}**",
+                url=jump_url,
+                description=desc,
                 color=discord.Color.blue(),
             )
             embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -449,6 +533,7 @@ class DiscordNotifier(INotificationDispatcher):
                 embed=embed,
                 thread=thread,
                 mention_text=f"<@{assignee_id}> You have been assigned to task **[{short_id}] {title}**!",
+                view=view,
             )
 
         # Notify watchers added during task creation
@@ -456,9 +541,11 @@ class DiscordNotifier(INotificationDispatcher):
         if assignee_id:
             watcher_recipients.discard(assignee_id)
         if watcher_recipients:
+            desc = f"<@{creator_id}> added you as a watcher to task **{title}**."
             watcher_embed = discord.Embed(
                 title=f"Added as Watcher: [{short_id}]",
-                description=f"<@{creator_id}> added you as a watcher to task **{title}**.",
+                url=jump_url,
+                description=desc,
                 color=discord.Color.blue(),
             )
             watcher_embed.set_footer(text=NOTIFICATION_FOOTER)
@@ -469,6 +556,7 @@ class DiscordNotifier(INotificationDispatcher):
                     embed=watcher_embed,
                     thread=thread,
                     mention_text=f"<@{w_id}> You were added as a watcher on task **[{short_id}] {title}**",
+                    view=view,
                 )
 
     async def _handle_task_updated(self, payload: dict) -> None:
@@ -566,8 +654,34 @@ class DiscordNotifier(INotificationDispatcher):
         # Notify watchers & assignee via DM / thread
         recipients.discard(actor_id)
         if recipients:
+            message_id = payload.get("discord_message_id")
+            if not thread_id and self.task_service:
+                try:
+                    task_obj = None
+                    task_id_raw = payload.get("task_id")
+                    if task_id_raw:
+                        try:
+                            task_obj = await self.task_service.get_by_id(UUID(str(task_id_raw)))
+                        except (ValueError, TypeError):
+                            task_obj = None
+                    if not task_obj and guild_id and short_id:
+                        task_obj = await self.task_service.get_by_short_id(guild_id, short_id)
+                    if task_obj:
+                        if not guild_id and task_obj.guild_id:
+                            guild_id = task_obj.guild_id
+                        if not thread_id and task_obj.discord_thread_id:
+                            thread_id = task_obj.discord_thread_id
+                        if not message_id and task_obj.discord_message_id:
+                            message_id = task_obj.discord_message_id
+                except Exception as e:
+                    logger.debug("Could not resolve task location from task_service for task_updated: %s", e)
+
+            jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
+            view = TaskLinkButtonView(jump_url) if jump_url else None
+
             embed = discord.Embed(
                 title=embed_title,
+                url=jump_url,
                 description=embed_desc,
                 color=embed_color,
             )
@@ -583,4 +697,5 @@ class DiscordNotifier(INotificationDispatcher):
                     embed=embed,
                     thread=thread,
                     mention_text=user_mention,
+                    view=view,
                 )

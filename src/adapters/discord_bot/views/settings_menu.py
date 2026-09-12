@@ -30,15 +30,20 @@ def build_settings_embed(user: discord.User | discord.Member, current_pref: Noti
         title=f"Notification Preferences • @{user.display_name}",
         description=(
             f"> **Current Active Mode**: `{pref_labels.get(current_pref, current_pref.value)}`\n\n"
-            "Select how you want to receive task assignments, updates, and deadline reminders in this server:\n\n"
-            "• **`DM Only`**: Private notifications delivered to your direct messages.\n"
-            "• **`Channel Ping`**: An `@mention` inside the task's forum thread.\n"
-            "• **`Both`**: Sends both a DM and an in-thread mention for maximum visibility.\n"
-            "• **`Silent`**: No direct pings (track tasks manually on the board)."
+            "Select how you want to receive task assignments, updates, and deadline reminders:\n\n"
+            "• 🔒 **`DM Only` (Recommended for Privacy)**:\n"
+            "  Delivered directly to your private direct messages with the bot. Permanent and only visible to you.\n\n"
+            "• 🌐 **`Channel Ping` (Public Workspace)**:\n"
+            "  An `@mention` posted inside the task thread. Visible to other members with channel access.\n"
+            "  *(Note: Discord does not permit background bot notifications to be ephemeral in channels.)*\n\n"
+            "• 🔔 **`Both` (DM + Thread Ping)**:\n"
+            "  Sends a private DM to your inbox plus an in-thread mention for maximum visibility.\n\n"
+            "• 🔕 **`Silent`**:\n"
+            "  No direct pings or DMs (track tasks manually on the Control Hub or task list)."
         ),
         color=discord.Color.dark_theme(),
     )
-    embed.set_footer(text="dgg-pm • Personal Notification Settings")
+    embed.set_footer(text="dgg-pm • Personal Notification Settings • Tip: Use DM Only for private alerts")
     return embed
 
 
@@ -193,7 +198,8 @@ class UserSettingsView(BaseView):
         # Test Channel delivery
         if pref in (NotificationPreference.CHANNEL, NotificationPreference.BOTH):
             results.append(
-                f"📢 **Channel Ping:** Mentions (`<@{interaction.user.id}>`) will ping you inside task threads."
+                f"📢 **Channel Ping:** Mentions (`<@{interaction.user.id}>`) will ping you inside task threads\n"
+                "   *(Visible to thread members; background bot notifications cannot be ephemeral).*"
             )
 
         status_msg = "\n\n".join(results)
