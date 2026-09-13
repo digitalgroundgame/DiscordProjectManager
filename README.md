@@ -209,11 +209,21 @@ docker compose up -d --build
 
 ### 7. Deploying to Coolify
 
-DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io):
+DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io).
+
+#### Recommended Branch Strategy
+* **`main`**: Active development and integration branch.
+* **`production`**: Dedicated deployment branch that Coolify tracks for automated builds.
+* **Promoting releases to production**:
+  ```bash
+  # Fast-forward production to current main:
+  git push origin main:production
+  ```
+  *(Alternatively, open and merge a Pull Request from `main` into `production` on GitHub.)*
 
 #### Option A: Docker Compose Stack (Recommended)
 1. In Coolify, create a new resource ➔ **Docker Compose**.
-2. Select this repository or paste [`docker-compose.yml`](docker-compose.yml).
+2. Point Coolify to this repository and set **Branch** to `production`.
 3. Configure your environment variables in Coolify:
    - `DISCORD_BOT_TOKEN`: Your Discord bot token
    - `DISCORD_CLIENT_ID`: Your Discord bot application ID
@@ -221,8 +231,8 @@ DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io):
 4. Click **Deploy**. Migrations run automatically on startup and the container healthcheck monitors `/healthz`.
 
 #### Option B: Standalone Application + Coolify PostgreSQL
-1. Create a PostgreSQL database service in Coolify.
-2. Create a new **Application** pointing to this repository (Build Pack: **Dockerfile**).
+1. Create a PostgreSQL 18 database service in Coolify.
+2. Create a new **Application** pointing to this repository (Build Pack: **Dockerfile**) and set **Branch** to `production`.
 3. Configure environment variables in the Coolify Application settings:
    - `DATABASE_URL`: Your Coolify PostgreSQL connection string (standard `postgres://` and `postgresql://` are auto-normalized to asyncpg)
    - `AUTO_RUN_MIGRATIONS`: `true`
