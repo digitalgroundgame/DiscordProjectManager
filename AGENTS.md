@@ -17,7 +17,9 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - **Lint & Fix**: `make lint-fix` (or `uv run ruff check --fix .`)
    - **Formatting**: `make format` (or `uv run ruff format .`)
    - **Full Check**: `make check` (runs lint, format-check, and tests)
-   - **Sync Dependencies**: `make sync` (or `uv sync --all-extras`)
+   - **Sync Dependencies**: `make sync` (or `uv run uv sync --all-extras`)
+   - **Sync Slash Commands**: `make sync-commands` (or `uv run python -m src.cli sync-commands`)
+
    - **Database Up**: `make db-up` (`docker compose up -d postgres`)
    - **Database Down**: `make db-down` (`docker compose stop postgres`)
    - **Database Initialization**: `make db-init`

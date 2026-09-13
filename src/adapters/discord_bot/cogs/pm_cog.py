@@ -56,6 +56,11 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     task_group = app_commands.Group(name="task", description="Task operations, assignments, and status")
     project_group = app_commands.Group(name="project", description="Project container and channel operations")
     squad_group = app_commands.Group(name="squad", description="Functional squad and squad lead management")
+    admin_group = app_commands.Group(
+        name="admin",
+        description="Administrative commands and maintenance operations",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
 
     def __init__(
         self,
@@ -355,8 +360,76 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await send_interaction_error(interaction, e, "posting pinned PM hub", logger, ephemeral=True)
 
     # ==========================================
+    # Admin Subgroup: /pm admin <cmd>
+    # ==========================================
+    @admin_group.command(
+        name="sync",
+        description="Synchronize application slash commands with Discord on demand.",
+    )
+    @app_commands.describe(
+        scope="Sync scope: 'guild' (current server, fast) or 'global' (all servers, slower propagation)",
+    )
+    @app_commands.choices(
+        scope=[
+            app_commands.Choice(name="Guild (Current Server)", value="guild"),
+            app_commands.Choice(name="Global (All Servers)", value="global"),
+        ]
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_sync(
+        self,
+        interaction: discord.Interaction,
+        scope: str = "guild",
+    ) -> None:
+        """Synchronize slash commands to the current guild or globally."""
+        if scope == "guild" and not interaction.guild:
+            await interaction.response.send_message(
+                "❌ Guild sync must be run inside a Discord server.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            guild_id = interaction.guild.id if (scope == "guild" and interaction.guild) else None
+            synced = await self.bot.sync_slash_commands(guild_id=guild_id)
+            if guild_id:
+                guild_name = interaction.guild.name if interaction.guild else str(guild_id)
+                await interaction.followup.send(
+                    f"✅ **Slash Commands Synchronized**\n"
+                    f"Successfully synced {len(synced)} slash commands to **{guild_name}** (`{guild_id}`).",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"✅ **Slash Commands Synchronized**\n"
+                    f"Successfully synced {len(synced)} slash commands globally. "
+                    f"*(Note: Discord global commands may take up to an hour to propagate to all clients.)*",
+                    ephemeral=True,
+                )
+        except discord.errors.Forbidden as exc:
+            if getattr(exc, "code", None) == 50001:
+                await interaction.followup.send(
+                    "❌ **Command Sync Failed (403 Missing Access)**\n"
+                    "The bot lacks access to sync application commands. "
+                    "Ensure the bot was invited with the `applications.commands` OAuth2 scope.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"❌ **Command Sync Failed (Forbidden)**: {exc}",
+                    ephemeral=True,
+                )
+        except Exception as exc:
+            logger.exception("Error during /pm admin sync: %s", exc)
+            await interaction.followup.send(
+                f"❌ **Command Sync Error**: {exc}",
+                ephemeral=True,
+            )
+
+    # ==========================================
     # Task Subgroup: /pm task <cmd>
     # ==========================================
+
     @task_group.command(name="create", description="Create a new task and thread in a project container.")
     @app_commands.describe(
         project_name="Target project name",

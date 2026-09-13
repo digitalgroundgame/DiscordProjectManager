@@ -1132,6 +1132,72 @@ async def test_bot_setup_hook_forbidden_50001_logging(services, caplog):
     assert "Action Required" not in caplog.text
 
 
+async def test_bot_setup_hook_skips_sync_when_disabled(services, caplog):
+    """Verify DggPmBot setup_hook skips tree.sync when SYNC_COMMANDS_ON_STARTUP is False."""
+    import logging
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+    from src.config import settings
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    with (
+        patch.object(settings, "SYNC_COMMANDS_ON_STARTUP", False),
+        patch.object(bot.tree, "sync", new_callable=AsyncMock) as mock_sync,
+        caplog.at_level(logging.INFO, logger="dgg_pm.bot"),
+    ):
+        await bot.setup_hook()
+
+    mock_sync.assert_not_called()
+    assert "Skipping startup slash command synchronization" in caplog.text
+
+
+async def test_bot_sync_slash_commands_guild_and_global(services):
+    """Verify bot.sync_slash_commands handles both guild-scoped and global synchronization."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    # 1. Guild scoped sync
+    mock_guild_cmd = MagicMock(name="GuildCmd")
+    with (
+        patch.object(bot.tree, "copy_global_to") as mock_copy,
+        patch.object(bot.tree, "sync", new_callable=AsyncMock, return_value=[mock_guild_cmd]) as mock_sync,
+    ):
+        result = await bot.sync_slash_commands(guild_id=987654321)
+
+        mock_copy.assert_called_once()
+        mock_sync.assert_awaited_once()
+        assert len(result) == 1
+        assert result[0] == mock_guild_cmd
+
+    # 2. Global scoped sync
+    mock_global_cmd = MagicMock(name="GlobalCmd")
+    with (
+        patch.object(bot.tree, "copy_global_to") as mock_copy,
+        patch.object(bot.tree, "sync", new_callable=AsyncMock, return_value=[mock_global_cmd]) as mock_sync,
+    ):
+        result = await bot.sync_slash_commands(guild_id=None)
+
+        mock_copy.assert_not_called()
+        mock_sync.assert_awaited_once_with()
+        assert len(result) == 1
+        assert result[0] == mock_global_cmd
+
+
 def test_project_rebuild_command_parameters():
     """Verify that project rebuild command requires 'project_name' and accepts optional 'forum'."""
     cmd = PmCog.project_rebuild
@@ -1404,3 +1470,111 @@ async def test_bot_on_ready_presence(services):
     activity = bot.change_presence.call_args.kwargs["activity"]
     assert activity.type == discord.ActivityType.watching
     assert activity.name == "tasks with /pm help"
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_command_metadata():
+    """Verify that PmCog defines admin_group with sync command, manage_guild check, and scope choices."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    sync_cmd = next((c for c in PmCog.admin_group.commands if c.name == "sync"), None)
+    assert sync_cmd is not None
+    assert "scope" in [p.name for p in sync_cmd.parameters]
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_guild_scope_execution(services):
+    """Verify /pm admin sync executes guild-level sync and replies with confirmation."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.sync_slash_commands = AsyncMock(return_value=[MagicMock(), MagicMock()])
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="guild")
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    mock_bot.sync_slash_commands.assert_awaited_once_with(guild_id=123456)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "2 slash commands" in msg
+    assert "Test Guild" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_global_scope_execution(services):
+    """Verify /pm admin sync executes global sync when scope is global."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.sync_slash_commands = AsyncMock(return_value=[MagicMock()])
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="global")
+
+    mock_bot.sync_slash_commands.assert_awaited_once_with(guild_id=None)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "globally" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_error_handling(services):
+    """Verify /pm admin sync catches 403 Forbidden 50001 and provides clear guidance."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status = 403
+    mock_resp.reason = "Forbidden"
+    forbidden_err = discord.Forbidden(mock_resp, "Missing Access")
+    forbidden_err.code = 50001
+    mock_bot.sync_slash_commands = AsyncMock(side_effect=forbidden_err)
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="guild")
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Command Sync Failed (403 Missing Access)" in msg
+    assert "applications.commands" in msg

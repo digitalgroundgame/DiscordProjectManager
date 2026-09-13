@@ -125,6 +125,7 @@ async def run_app() -> None:
             # Windows support fallback
             pass
 
+    has_fatal_error = False
     try:
         done, _pending = await asyncio.wait(
             tasks,
@@ -132,11 +133,26 @@ async def run_app() -> None:
         )
         for t in done:
             if t.exception():
+                has_fatal_error = True
                 exc = t.exception()
                 if isinstance(exc, discord.errors.Forbidden) and getattr(exc, "code", None) == 50001:
                     logger.critical(
-                        "Service task '%s' terminated: Bot is missing access to the Discord guild (code 50001).",
+                        "Service task '%s' terminated: Bot is missing access to the Discord guild (code 50001).\n"
+                        "Check your bot permissions and verify DISCORD_GUILD_ID.",
                         t.get_name(),
+                    )
+                elif isinstance(exc, discord.errors.LoginFailure):
+                    logger.critical(
+                        "Service task '%s' terminated: Invalid Discord Bot Token (LoginFailure).\n"
+                        "Please verify DISCORD_BOT_TOKEN in your environment or .env configuration.",
+                        t.get_name(),
+                    )
+                elif isinstance(exc, discord.errors.RateLimited):
+                    logger.critical(
+                        "Service task '%s' terminated: Discord API Rate Limited (retry_after=%s).\n"
+                        "Backing off to avoid Cloudflare IP bans and Gateway session exhaustion.",
+                        t.get_name(),
+                        getattr(exc, "retry_after", "unknown"),
                     )
                 else:
                     logger.error("Service task %s failed with exception: %s", t.get_name(), exc)
@@ -148,12 +164,27 @@ async def run_app() -> None:
         await close_db()
         logger.info("Graceful shutdown complete.")
 
+    if has_fatal_error:
+        backoff_seconds = settings.STARTUP_CRASH_BACKOFF_SECONDS
+        if backoff_seconds > 0:
+            logger.warning(
+                "Startup crash-loop backoff protection active: delaying exit by %.2fs to protect Gateway quota...",
+                backoff_seconds,
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=backoff_seconds)
+            except TimeoutError:
+                pass
+        sys.exit(1)
+
 
 def main():
     try:
         asyncio.run(run_app())
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt:
         sys.exit(0)
+    except SystemExit as exc:
+        sys.exit(exc.code)
 
 
 if __name__ == "__main__":

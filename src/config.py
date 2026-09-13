@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # If set, /metrics requires `Authorization: Bearer <API_METRICS_TOKEN>`.
     # When empty, /metrics is left open for local/dev use.
     API_METRICS_TOKEN: str = ""
+
+    # Command Sync & Startup Backoff Configuration
+    SYNC_COMMANDS_ON_STARTUP: bool | None = None
+    STARTUP_CRASH_BACKOFF_SECONDS: float = 30.0
+
+    @model_validator(mode="after")
+    def compute_sync_commands_on_startup(self) -> "Settings":
+        if self.SYNC_COMMANDS_ON_STARTUP is None:
+            self.SYNC_COMMANDS_ON_STARTUP = self.ENVIRONMENT.lower() == "development"
+        return self
 
 
 settings = Settings()

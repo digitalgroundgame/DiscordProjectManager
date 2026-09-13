@@ -23,3 +23,32 @@ def test_database_url_normalization(monkeypatch):
 
     cfg4 = Settings(_env_file=None, DATABASE_URL="sqlite+aiosqlite:///:memory:")
     assert cfg4.DATABASE_URL == "sqlite+aiosqlite:///:memory:"
+
+
+def test_sync_commands_on_startup_defaults(monkeypatch):
+    """Verifies that SYNC_COMMANDS_ON_STARTUP defaults to True in dev, False in prod, and respects explicit setting."""
+    monkeypatch.delenv("SYNC_COMMANDS_ON_STARTUP", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+    dev_cfg = Settings(_env_file=None, ENVIRONMENT="development")
+    assert dev_cfg.SYNC_COMMANDS_ON_STARTUP is True
+
+    prod_cfg = Settings(_env_file=None, ENVIRONMENT="production")
+    assert prod_cfg.SYNC_COMMANDS_ON_STARTUP is False
+
+    override_dev = Settings(_env_file=None, ENVIRONMENT="development", SYNC_COMMANDS_ON_STARTUP=False)
+    assert override_dev.SYNC_COMMANDS_ON_STARTUP is False
+
+    override_prod = Settings(_env_file=None, ENVIRONMENT="production", SYNC_COMMANDS_ON_STARTUP=True)
+    assert override_prod.SYNC_COMMANDS_ON_STARTUP is True
+
+
+def test_startup_crash_backoff_seconds_defaults(monkeypatch):
+    """Verifies that STARTUP_CRASH_BACKOFF_SECONDS defaults to 30.0 seconds."""
+    monkeypatch.delenv("STARTUP_CRASH_BACKOFF_SECONDS", raising=False)
+
+    cfg = Settings(_env_file=None)
+    assert cfg.STARTUP_CRASH_BACKOFF_SECONDS == 30.0
+
+    custom = Settings(_env_file=None, STARTUP_CRASH_BACKOFF_SECONDS=10.5)
+    assert custom.STARTUP_CRASH_BACKOFF_SECONDS == 10.5
