@@ -106,8 +106,31 @@ def test_gateway_retry_settings(monkeypatch):
     assert custom.GATEWAY_MAX_RETRIES == 10
 
 
-def test_minimal_configuration_uses_static_defaults():
+def test_minimal_configuration_uses_static_defaults(monkeypatch):
     """Verifies that providing only secrets leaves all operational tuning parameters at static defaults."""
+    for key in (
+        "DISCORD_GUILD_ID",
+        "ENVIRONMENT",
+        "AUTO_RUN_MIGRATIONS",
+        "OUTBOX_POLL_INTERVAL_SECONDS",
+        "OUTBOX_BATCH_SIZE",
+        "OUTBOX_MAX_RETRIES",
+        "OUTBOX_BACKOFF_CAP_SECONDS",
+        "OUTBOX_MAX_RETENTION_HOURS",
+        "API_HOST",
+        "API_PORT",
+        "DEBUG",
+        "API_METRICS_TOKEN",
+        "SYNC_COMMANDS_ON_STARTUP",
+        "STARTUP_CRASH_BACKOFF_SECONDS",
+        "GATEWAY_RETRY_INITIAL_DELAY_SECONDS",
+        "GATEWAY_RETRY_MAX_DELAY_SECONDS",
+        "GATEWAY_RETRY_BACKOFF_FACTOR",
+        "GATEWAY_RETRY_JITTER",
+        "GATEWAY_MAX_RETRIES",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     cfg = Settings(
         _env_file=None,
         DISCORD_BOT_TOKEN="mock_token",
@@ -138,4 +161,3 @@ def test_minimal_configuration_uses_static_defaults():
     assert cfg.GATEWAY_RETRY_BACKOFF_FACTOR == 2.0
     assert cfg.GATEWAY_RETRY_JITTER == 0.2
     assert cfg.GATEWAY_MAX_RETRIES is None
-
