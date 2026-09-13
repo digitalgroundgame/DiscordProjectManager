@@ -9,6 +9,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+import discord  # noqa: E402
 import uvicorn  # noqa: E402
 
 from src.adapters.api.app import api_app  # noqa: E402
@@ -131,7 +132,14 @@ async def run_app() -> None:
         )
         for t in done:
             if t.exception():
-                logger.error("Service task %s failed with exception: %s", t.get_name(), t.exception())
+                exc = t.exception()
+                if isinstance(exc, discord.errors.Forbidden) and getattr(exc, "code", None) == 50001:
+                    logger.critical(
+                        "Service task '%s' terminated: Bot is missing access to the Discord guild (code 50001).",
+                        t.get_name(),
+                    )
+                else:
+                    logger.error("Service task %s failed with exception: %s", t.get_name(), exc)
     finally:
         logger.info("Cleaning up platform resources...")
         worker.stop()

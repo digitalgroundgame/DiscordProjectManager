@@ -92,14 +92,34 @@ class DggPmBot(commands.Bot):
         )
 
         # Sync application slash commands
-        if settings.DISCORD_GUILD_ID:
-            guild = discord.Object(id=settings.DISCORD_GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            logger.info("Synced slash commands to development guild %s", settings.DISCORD_GUILD_ID)
-        else:
-            await self.tree.sync()
-            logger.info("Synced slash commands globally.")
+        try:
+            if settings.DISCORD_GUILD_ID:
+                guild = discord.Object(id=settings.DISCORD_GUILD_ID)
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                logger.info("Synced slash commands to development guild %s", settings.DISCORD_GUILD_ID)
+            else:
+                await self.tree.sync()
+                logger.info("Synced slash commands globally.")
+        except discord.errors.Forbidden as exc:
+            if exc.code == 50001:  # Missing Access
+                logger.critical(
+                    "\n"
+                    "================================================================================\n"
+                    "DISCORD GATEWAY ERROR: Missing Access (403 Forbidden / Error Code 50001)\n"
+                    "--------------------------------------------------------------------------------\n"
+                    "The bot failed to sync slash commands because it lacks access to server %s.\n\n"
+                    "Possible causes:\n"
+                    "  1. The bot has NOT been invited to server ID %s yet.\n"
+                    "  2. DISCORD_GUILD_ID in your .env does not match your server's actual ID.\n"
+                    "  3. The bot was invited without the 'applications.commands' OAuth2 scope.\n"
+                    "================================================================================",
+                    settings.DISCORD_GUILD_ID or "(Global)",
+                    settings.DISCORD_GUILD_ID or "(Global)",
+                )
+            else:
+                logger.error("Forbidden (403) while syncing slash commands (code %s): %s", exc.code, exc)
+            raise
 
     async def on_ready(self) -> None:
         logger.info(

@@ -1096,6 +1096,43 @@ async def test_pm_menu_command_and_bot_wiring(services):
     assert "view" in kwargs
 
 
+@pytest.mark.asyncio
+async def test_bot_setup_hook_forbidden_50001_logging(services, caplog):
+    """Verify DggPmBot setup_hook catches 403 Forbidden (50001) and logs clear instructions."""
+    import logging
+    from unittest.mock import patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+    from src.config import settings
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.status = 403
+    mock_resp.reason = "Forbidden"
+    forbidden_err = discord.Forbidden(mock_resp, "Missing Access")
+    forbidden_err.code = 50001
+
+    with (
+        patch.object(bot.tree, "sync", side_effect=forbidden_err),
+        patch.object(settings, "DISCORD_GUILD_ID", 123456789),
+        caplog.at_level(logging.CRITICAL, logger="dgg_pm.bot"),
+    ):
+        with pytest.raises(discord.Forbidden):
+            await bot.setup_hook()
+
+    assert "DISCORD GATEWAY ERROR: Missing Access" in caplog.text
+    assert "123456789" in caplog.text
+    assert "Possible causes:" in caplog.text
+    assert "Action Required" not in caplog.text
+
+
+
 def test_project_rebuild_command_parameters():
     """Verify that project rebuild command requires 'project_name' and accepts optional 'forum'."""
     cmd = PmCog.project_rebuild
