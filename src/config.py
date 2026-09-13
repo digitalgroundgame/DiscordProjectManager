@@ -3,6 +3,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Application configuration and static defaults.
+
+    Secrets and deployment targets (such as DISCORD_BOT_TOKEN and DATABASE_URL)
+    are loaded dynamically from `.env` or environment variables.
+
+    Operational tuning parameters (Outbox worker parameters, Gateway supervisor
+    retry policies, API host/port) have static production-ready defaults defined
+    below, but can still be optionally overridden via environment variables.
+    """
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     ENVIRONMENT: str = "development"

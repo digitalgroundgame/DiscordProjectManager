@@ -104,3 +104,38 @@ def test_gateway_retry_settings(monkeypatch):
     assert custom.GATEWAY_RETRY_BACKOFF_FACTOR == 1.5
     assert custom.GATEWAY_RETRY_JITTER == 0.1
     assert custom.GATEWAY_MAX_RETRIES == 10
+
+
+def test_minimal_configuration_uses_static_defaults():
+    """Verifies that providing only secrets leaves all operational tuning parameters at static defaults."""
+    cfg = Settings(
+        _env_file=None,
+        DISCORD_BOT_TOKEN="mock_token",
+        DISCORD_CLIENT_ID="123456",
+        DATABASE_URL="sqlite+aiosqlite:///:memory:",
+    )
+    # Secrets & IDs
+    assert cfg.DISCORD_BOT_TOKEN == "mock_token"
+    assert cfg.DISCORD_CLIENT_ID == "123456"
+    assert cfg.DISCORD_GUILD_ID is None
+
+    # Static Outbox tuning defaults
+    assert cfg.OUTBOX_POLL_INTERVAL_SECONDS == 5.0
+    assert cfg.OUTBOX_BATCH_SIZE == 10
+    assert cfg.OUTBOX_MAX_RETRIES == 150
+    assert cfg.OUTBOX_BACKOFF_CAP_SECONDS == 600.0
+    assert cfg.OUTBOX_MAX_RETENTION_HOURS == 48.0
+
+    # Static API defaults
+    assert cfg.API_HOST == "0.0.0.0"
+    assert cfg.API_PORT == 8000
+    assert cfg.DEBUG is False
+    assert cfg.API_METRICS_TOKEN == ""
+
+    # Static Gateway supervisor defaults
+    assert cfg.GATEWAY_RETRY_INITIAL_DELAY_SECONDS == 2.0
+    assert cfg.GATEWAY_RETRY_MAX_DELAY_SECONDS == 60.0
+    assert cfg.GATEWAY_RETRY_BACKOFF_FACTOR == 2.0
+    assert cfg.GATEWAY_RETRY_JITTER == 0.2
+    assert cfg.GATEWAY_MAX_RETRIES is None
+
