@@ -1132,7 +1132,6 @@ async def test_bot_setup_hook_forbidden_50001_logging(services, caplog):
     assert "Action Required" not in caplog.text
 
 
-
 def test_project_rebuild_command_parameters():
     """Verify that project rebuild command requires 'project_name' and accepts optional 'forum'."""
     cmd = PmCog.project_rebuild

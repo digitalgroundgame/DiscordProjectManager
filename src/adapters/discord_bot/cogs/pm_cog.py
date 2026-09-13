@@ -26,6 +26,7 @@ from src.adapters.discord_bot.workspace_protocol import (
     ProjectProvisionSpec,
 )
 from src.domain.enums import NotificationPreference, PriorityLevel, TaskStatus
+from src.domain.models import Task
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -537,17 +538,45 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         except Exception as e:
             await send_interaction_error(interaction, e, "listing tasks", logger, ephemeral=True)
 
+    async def _resolve_task_context(
+        self,
+        interaction: discord.Interaction,
+        task_short_id: str | None,
+    ) -> Task | None:
+        """Resolves target task either from explicitly provided short ID or implicitly from thread context."""
+        if not interaction.guild:
+            return None
+
+        if task_short_id:
+            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task_short_id)
+            if not task_entity:
+                await interaction.followup.send(f"❌ Task '{task_short_id}' not found.", ephemeral=True)
+                return None
+            return task_entity
+
+        # Implicit resolution from thread workspace channel ID
+        if interaction.channel_id:
+            task_entity = await self.task_service.get_by_thread_id(interaction.guild.id, interaction.channel_id)
+            if task_entity:
+                return task_entity
+
+        await interaction.followup.send(
+            "❌ No task specified and this command was not executed inside an active task thread workspace.\n"
+            "Please specify a task short ID (e.g. `APP-1`) or run this command inside the task's thread.",
+            ephemeral=True,
+        )
+        return None
+
     @task_group.command(name="history", description="View the full audit trail and status history of a task.")
-    @app_commands.describe(task="Task identifier (search by short ID or title)")
+    @app_commands.describe(task="Task identifier (search by short ID or title, or omit if inside thread)")
     @app_commands.autocomplete(task=task_autocomplete)
-    async def task_history(self, interaction: discord.Interaction, task: str) -> None:
+    async def task_history(self, interaction: discord.Interaction, task: str | None = None) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             history = await self.task_service.get_history(task_entity.id)
@@ -558,28 +587,27 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
             await send_interaction_error(
-                interaction, e, f"retrieving history for task '{task}'", logger, ephemeral=True
+                interaction, e, f"retrieving history for task '{task or 'current thread'}'", logger, ephemeral=True
             )
 
     @task_group.command(name="assign", description="Assign or reassign a task to a squad member.")
     @app_commands.describe(
-        task="Short ID of the task (e.g. APP-1)",
+        task="Short ID of the task (e.g. APP-1, or omit if inside thread)",
         assignee="Discord member to assign (or omit to unassign)",
     )
     @app_commands.autocomplete(task=task_autocomplete)
     async def task_assign(
         self,
         interaction: discord.Interaction,
-        task: str,
+        task: str | None = None,
         assignee: discord.Member | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, task_entity)
@@ -613,12 +641,14 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"assigning task '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"assigning task '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(name="status", description="Update the execution status of a task.")
     @app_commands.describe(
-        task="Short ID of the task",
         status="New task status",
+        task="Short ID of the task (omit if inside thread)",
         notes="Optional transition notes",
     )
     @app_commands.choices(
@@ -632,21 +662,34 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     async def task_status(
         self,
         interaction: discord.Interaction,
-        task: str,
         status: str,
+        task: str | None = None,
         notes: str | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, task_entity)
-            new_status = TaskStatus(status)
+            status_map = {
+                "not_started": TaskStatus.NOT_STARTED,
+                "notstarted": TaskStatus.NOT_STARTED,
+                "in_progress": TaskStatus.IN_PROGRESS,
+                "inprogress": TaskStatus.IN_PROGRESS,
+                "completed": TaskStatus.COMPLETED,
+            }
+            normalized_status = status.lower().replace("-", "_")
+            new_status = status_map.get(normalized_status)
+            if not new_status:
+                try:
+                    new_status = TaskStatus(status)
+                except ValueError:
+                    await interaction.followup.send(f"❌ Invalid status: '{status}'.", ephemeral=True)
+                    return
             updated_task = await self.task_service.update_status(
                 task_id=task_entity.id,
                 new_status=new_status,
@@ -669,19 +712,20 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"updating status for task '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"updating status for task '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(name="archive", description="Archive a completed or obsolete task.")
-    @app_commands.describe(task="Short ID of the task to archive")
+    @app_commands.describe(task="Short ID of the task to archive (omit if inside thread)")
     @app_commands.autocomplete(task=task_autocomplete)
-    async def task_archive(self, interaction: discord.Interaction, task: str) -> None:
+    async def task_archive(self, interaction: discord.Interaction, task: str | None = None) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, task_entity)
@@ -700,18 +744,19 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"archiving task '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"archiving task '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(name="unarchive", description="Restore an archived task.")
-    @app_commands.describe(task="Short ID of the task to restore")
-    async def task_unarchive(self, interaction: discord.Interaction, task: str) -> None:
+    @app_commands.describe(task="Short ID of the task to restore (omit if inside thread)")
+    async def task_unarchive(self, interaction: discord.Interaction, task: str | None = None) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, task_entity)
@@ -730,12 +775,14 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"restoring task '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"restoring task '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(name="watchers", description="Manage watcher subscribers on a task.")
     @app_commands.describe(
-        task="Short ID of the task",
         action="Action to perform",
+        task="Short ID of the task (omit if inside thread)",
         member="Target Discord member",
     )
     @app_commands.choices(
@@ -749,17 +796,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     async def task_watchers(
         self,
         interaction: discord.Interaction,
-        task: str,
         action: str,
+        task: str | None = None,
         member: discord.Member | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            task_entity = await self._resolve_task_context(interaction, task)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             target_user_id = member.id if member else interaction.user.id
@@ -789,97 +835,102 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"updating watchers for task '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"updating watchers for task '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(
         name="depend",
         description="Add a prerequisite dependency: this task requires another task to finish first.",
     )
     @app_commands.describe(
-        task="The dependent task that is blocked (e.g. INF-2)",
         depends_on="The prerequisite task that must finish first (e.g. INF-1)",
+        task="The dependent task that is blocked (omit if inside thread)",
     )
     @app_commands.autocomplete(task=task_autocomplete, depends_on=task_autocomplete)
     async def task_depend(
         self,
         interaction: discord.Interaction,
-        task: str,
         depends_on: str,
+        task: str | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            target_task = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            target_task = await self._resolve_task_context(interaction, task)
             if not target_task:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, target_task)
 
             await self.task_service.add_dependency(
                 guild_id=interaction.guild.id,
-                task_short_id=task,
+                task_short_id=target_task.short_id,
                 depends_on_short_id=depends_on,
                 actor_discord_id=interaction.user.id,
             )
-            await interaction.followup.send(
-                f"🔗 Linked dependency: **`[{task}]`** now depends on **`[{depends_on}]`** finishing first.",
-                ephemeral=True,
+            msg = (
+                f"🔗 Linked dependency: **`[{target_task.short_id}]`** "
+                f"now depends on **`[{depends_on}]`** finishing first."
             )
+            await interaction.followup.send(msg, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"linking dependency for '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"linking dependency for '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     @task_group.command(
         name="undepend",
         description="Remove a prerequisite dependency from a task.",
     )
     @app_commands.describe(
-        task="The dependent task (e.g. INF-2)",
         depends_on="The prerequisite task to unblock/unlink (e.g. INF-1)",
+        task="The dependent task (omit if inside thread)",
     )
     @app_commands.autocomplete(task=task_autocomplete, depends_on=task_autocomplete)
     async def task_undepend(
         self,
         interaction: discord.Interaction,
-        task: str,
         depends_on: str,
+        task: str | None = None,
     ) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            target_task = await self.task_service.get_by_short_id(interaction.guild.id, task)
+            target_task = await self._resolve_task_context(interaction, task)
             if not target_task:
-                await interaction.followup.send(f"❌ Task '{task}' not found.", ephemeral=True)
                 return
 
             await self.auth_service.require_task_mutation(interaction.user, target_task)
 
             removed = await self.task_service.remove_dependency(
                 guild_id=interaction.guild.id,
-                task_short_id=task,
+                task_short_id=target_task.short_id,
                 depends_on_short_id=depends_on,
                 actor_discord_id=interaction.user.id,
             )
             if removed:
-                await interaction.followup.send(
-                    f"🔓 Unlinked dependency: **`[{task}]`** no longer depends on **`[{depends_on}]`**.",
-                    ephemeral=True,
+                msg = (
+                    f"🔓 Unlinked dependency: **`[{target_task.short_id}]`** no longer depends on **`[{depends_on}]`**."
                 )
+                await interaction.followup.send(msg, ephemeral=True)
             else:
                 await interaction.followup.send(
-                    f"ℹ️ **`[{task}]`** did not depend on **`[{depends_on}]`**.",
+                    f"ℹ️ **`[{target_task.short_id}]`** did not depend on **`[{depends_on}]`**.",
                     ephemeral=True,
                 )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
-            await send_interaction_error(interaction, e, f"unlinking dependency for '{task}'", logger, ephemeral=True)
+            await send_interaction_error(
+                interaction, e, f"unlinking dependency for '{task or 'current thread'}'", logger, ephemeral=True
+            )
 
     # ==========================================
     # Project Subgroup: /pm project <cmd>

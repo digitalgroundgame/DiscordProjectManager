@@ -263,13 +263,23 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
 
                 if root_msg and hasattr(root_msg, "edit"):
                     fresh_embed = build_task_embed(task, project_name=resolved_proj_name)
+                    fresh_view = TaskActionView(
+                        task_id=task.id,
+                        current_status=task.status,
+                        current_priority=task.priority,
+                        task_service=self.task_service,
+                        current_assignee_id=task.assignee_discord_id,
+                        current_watchers=task.watchers,
+                    )
                     keep_archived = task.status == TaskStatus.COMPLETED or task.is_archived
                     async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
                         if isinstance(thread.parent, discord.ForumChannel):
                             thread_content = build_thread_workspace_content(task)
-                            await _maybe_await(root_msg.edit(content=thread_content, embed=fresh_embed))
+                            await _maybe_await(
+                                root_msg.edit(content=thread_content, embed=fresh_embed, view=fresh_view)
+                            )
                         else:
-                            await _maybe_await(root_msg.edit(embed=fresh_embed))
+                            await _maybe_await(root_msg.edit(embed=fresh_embed, view=fresh_view))
             except Exception as e:
                 logger.debug("Failed to sync starter embed for task %s: %s", task.short_id, e)
 
@@ -539,6 +549,44 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 return
             except Exception as e:
                 await send_interaction_error(interaction, e, "opening task controls", logger, ephemeral=True)
+                return
+
+        if action == "claim":
+            try:
+                if task.assignee_discord_id and task.assignee_discord_id != interaction.user.id:
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await _maybe_await(
+                            interaction.response.send_message(
+                                f"❌ Task is already claimed by <@{task.assignee_discord_id}>.",
+                                ephemeral=True,
+                            )
+                        )
+                    return
+                elif task.assignee_discord_id == interaction.user.id:
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await _maybe_await(
+                            interaction.response.send_message(
+                                "ℹ️ You are already assigned to this task.",
+                                ephemeral=True,
+                            )
+                        )
+                    return
+
+                if self.auth_service and interaction.guild:
+                    await self.auth_service.require_task_assignee_eligibility(
+                        interaction.guild, interaction.user.id, task.project_id
+                    )
+
+                updated_task = await self.task_service.update_assignee(
+                    task_id=task_id,
+                    new_assignee_id=interaction.user.id,
+                    actor_discord_id=interaction.user.id,
+                )
+                await self.refresh_action_card(interaction, updated_task)
+                await self.sync_workspace(updated_task)
+                return
+            except Exception as e:
+                await send_interaction_error(interaction, e, "claiming task", logger, ephemeral=True)
                 return
 
         if action == "unassign":
