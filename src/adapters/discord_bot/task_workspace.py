@@ -9,6 +9,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.thread_rate_limiter import ThreadRenameRateLimiter
 from src.adapters.discord_bot.views.forum_helpers import (
     resolve_forum_tags,
     unarchive_thread_if_needed,
@@ -30,6 +31,7 @@ from src.adapters.discord_bot.views.task_embed import (
 from src.adapters.discord_bot.workspace_protocol import (
     _UNSET,
     ITaskDiscordWorkspace,
+    SyncWorkspaceResult,
     TaskControlPanel,
     TaskWorkspaceRef,
 )
@@ -61,11 +63,13 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         task_service: TaskService,
         project_service: ProjectService | None = None,
         auth_service: AuthService | None = None,
+        rename_limiter: ThreadRenameRateLimiter | None = None,
     ):
         self.bot = bot
         self.task_service = task_service
         self.project_service = project_service
         self.auth_service = auth_service or (AuthService(project_service=project_service) if project_service else None)
+        self.rename_limiter = rename_limiter or ThreadRenameRateLimiter()
 
     async def _resolve_channel(
         self,
@@ -236,10 +240,10 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 thread = await _maybe_await(self.bot.fetch_channel(task.discord_thread_id))
         except Exception as e:
             logger.debug("Could not fetch thread %s for task %s: %s", task.discord_thread_id, task.short_id, e)
-            return False
+            return SyncWorkspaceResult(success=False)
 
         if not isinstance(thread, discord.Thread):
-            return False
+            return SyncWorkspaceResult(success=False)
 
         resolved_proj_name = project_name or (project.name if project else None)
         if not resolved_proj_name and task.project_id and self.project_service:
@@ -263,18 +267,31 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
 
                 if root_msg and hasattr(root_msg, "edit"):
                     fresh_embed = build_task_embed(task, project_name=resolved_proj_name)
+                    fresh_view = TaskActionView(
+                        task_id=task.id,
+                        current_status=task.status,
+                        current_priority=task.priority,
+                        task_service=self.task_service,
+                        current_assignee_id=task.assignee_discord_id,
+                        current_watchers=task.watchers,
+                    )
                     keep_archived = task.status == TaskStatus.COMPLETED or task.is_archived
                     async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
                         if isinstance(thread.parent, discord.ForumChannel):
                             thread_content = build_thread_workspace_content(task)
-                            await _maybe_await(root_msg.edit(content=thread_content, embed=fresh_embed))
+                            await _maybe_await(
+                                root_msg.edit(content=thread_content, embed=fresh_embed, view=fresh_view)
+                            )
                         else:
-                            await _maybe_await(root_msg.edit(embed=fresh_embed))
+                            await _maybe_await(root_msg.edit(embed=fresh_embed, view=fresh_view))
             except Exception as e:
                 logger.debug("Failed to sync starter embed for task %s: %s", task.short_id, e)
 
         # 2. Sync Thread Attributes (tags, title, archive state)
         edit_kwargs: dict[str, object] = {}
+        title_renamed = False
+        title_deferred = False
+        cooldown_remaining = 0.0
 
         if sync_tags and isinstance(thread.parent, discord.ForumChannel):
             tags_to_apply = resolve_forum_tags(
@@ -285,12 +302,19 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             )
             edit_kwargs["applied_tags"] = tags_to_apply
 
+        expected_name = None
         if sync_title:
             expected_name = f"[{task.short_id}] {task.title}"
             if len(expected_name) > 100:
                 expected_name = expected_name[:97] + "..."
-            if thread.name != expected_name:
-                edit_kwargs["name"] = expected_name
+            if getattr(thread, "name", None) != expected_name:
+                can_rename, _ = self.rename_limiter.can_rename(thread.id)
+                if can_rename:
+                    edit_kwargs["name"] = expected_name
+                else:
+                    rename_res = await self.rename_limiter.request_rename(thread, expected_name)
+                    title_deferred = rename_res.deferred
+                    cooldown_remaining = rename_res.cooldown_remaining_seconds
 
         if sync_archive:
             is_done = task.status == TaskStatus.COMPLETED or task.is_archived
@@ -302,15 +326,43 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         if edit_kwargs and hasattr(thread, "edit"):
             try:
                 await _maybe_await(thread.edit(**edit_kwargs))
+                if "name" in edit_kwargs:
+                    self.rename_limiter.record_rename(thread.id)
+                    title_renamed = True
             except Exception as e:
-                logger.warning(
-                    "Failed to edit thread state for task %s (%s): %s",
-                    task.short_id,
-                    task.discord_thread_id,
-                    e,
-                )
+                status = getattr(e, "status", None)
+                retry_after = getattr(e, "retry_after", None)
+                if "name" in edit_kwargs and (status == 429 or retry_after is not None):
+                    backoff = float(retry_after) if retry_after else 600.0
+                    self.rename_limiter.record_rate_limit(thread.id, backoff)
+                    rename_res = await self.rename_limiter.request_rename(thread, edit_kwargs["name"])
+                    title_deferred = rename_res.deferred
+                    cooldown_remaining = rename_res.cooldown_remaining_seconds
 
-        return True
+                    remaining_kwargs = {k: v for k, v in edit_kwargs.items() if k != "name"}
+                    if remaining_kwargs:
+                        try:
+                            await _maybe_await(thread.edit(**remaining_kwargs))
+                        except Exception as rem_err:
+                            logger.warning(
+                                "Failed to edit thread attributes without name for task %s: %s",
+                                task.short_id,
+                                rem_err,
+                            )
+                else:
+                    logger.warning(
+                        "Failed to edit thread state for task %s (%s): %s",
+                        task.short_id,
+                        task.discord_thread_id,
+                        e,
+                    )
+
+        return SyncWorkspaceResult(
+            success=True,
+            title_renamed=title_renamed,
+            title_deferred=title_deferred,
+            cooldown_remaining_seconds=cooldown_remaining,
+        )
 
     async def refresh_action_card(
         self,
@@ -406,6 +458,91 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 except Exception:
                     pass
             return msg
+
+    async def delete_workspace(
+        self,
+        task: Task,
+        *,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        """Permanently deletes or archives the Discord thread workspace and logs audit notification."""
+        thread = None
+        if task.discord_thread_id:
+            try:
+                if hasattr(self.bot, "get_channel"):
+                    thread = self.bot.get_channel(task.discord_thread_id)
+                if not thread and hasattr(self.bot, "fetch_channel"):
+                    thread = await _maybe_await(self.bot.fetch_channel(task.discord_thread_id))
+            except Exception as e:
+                logger.debug("Could not fetch thread %s for task deletion: %s", task.discord_thread_id, e)
+                thread = None
+
+        if thread and isinstance(thread, discord.Thread):
+            try:
+                if hasattr(thread, "delete"):
+                    await _maybe_await(thread.delete())
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete thread %s for task %s, attempting archive fallback: %s",
+                    task.discord_thread_id,
+                    task.short_id,
+                    e,
+                )
+                try:
+                    actor_str = f" by <@{actor_discord_id}>" if actor_discord_id else ""
+                    notice = f"⚠️ **This task was permanently deleted{actor_str}.** This thread is now closed."
+                    if hasattr(thread, "send"):
+                        await _maybe_await(thread.send(notice))
+                    del_name = f"[DELETED] {task.short_id}"
+                    if hasattr(thread, "edit"):
+                        await _maybe_await(thread.edit(name=del_name, archived=True, locked=True))
+                except Exception as fallback_err:
+                    logger.error(
+                        "Failed fallback archiving thread %s: %s",
+                        task.discord_thread_id,
+                        fallback_err,
+                    )
+
+        # Audit notification to project workspace activity log
+        if task.project_id and self.project_service:
+            try:
+                project = await self.project_service.get_by_id(task.project_id)
+                if project and project.discord_channel_id:
+                    proj_chan = None
+                    if hasattr(self.bot, "get_channel"):
+                        proj_chan = self.bot.get_channel(project.discord_channel_id)
+                    if not proj_chan and hasattr(self.bot, "fetch_channel"):
+                        proj_chan = await _maybe_await(self.bot.fetch_channel(project.discord_channel_id))
+
+                    if proj_chan:
+                        from datetime import UTC, datetime
+
+                        audit_embed = discord.Embed(
+                            title="🗑️ Task Deleted",
+                            description=f"Task **[{task.short_id}]** (`{task.title}`) was permanently deleted.",
+                            color=discord.Color.red(),
+                            timestamp=datetime.now(UTC),
+                        )
+                        if actor_discord_id:
+                            audit_embed.add_field(name="Deleted By", value=f"<@{actor_discord_id}>", inline=True)
+                        if task.status:
+                            audit_embed.add_field(name="Status", value=str(task.status.value), inline=True)
+
+                        if isinstance(proj_chan, discord.TextChannel):
+                            await _maybe_await(proj_chan.send(embed=audit_embed))
+                        elif isinstance(proj_chan, discord.ForumChannel):
+                            hub_thread = None
+                            threads = getattr(proj_chan, "threads", [])
+                            for t in threads:
+                                if "Control Hub" in t.name or "Management Hub" in t.name or "Hub" in t.name:
+                                    hub_thread = t
+                                    break
+                            if hub_thread and hasattr(hub_thread, "send"):
+                                await _maybe_await(hub_thread.send(embed=audit_embed))
+            except Exception as e:
+                logger.warning("Failed to dispatch delete audit notification to project channel: %s", e)
+
+        return True
 
     async def render_task_controls(
         self,
@@ -541,6 +678,44 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 await send_interaction_error(interaction, e, "opening task controls", logger, ephemeral=True)
                 return
 
+        if action == "claim":
+            try:
+                if task.assignee_discord_id and task.assignee_discord_id != interaction.user.id:
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await _maybe_await(
+                            interaction.response.send_message(
+                                f"❌ Task is already claimed by <@{task.assignee_discord_id}>.",
+                                ephemeral=True,
+                            )
+                        )
+                    return
+                elif task.assignee_discord_id == interaction.user.id:
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await _maybe_await(
+                            interaction.response.send_message(
+                                "ℹ️ You are already assigned to this task.",
+                                ephemeral=True,
+                            )
+                        )
+                    return
+
+                if self.auth_service and interaction.guild:
+                    await self.auth_service.require_task_assignee_eligibility(
+                        interaction.guild, interaction.user.id, task.project_id
+                    )
+
+                updated_task = await self.task_service.update_assignee(
+                    task_id=task_id,
+                    new_assignee_id=interaction.user.id,
+                    actor_discord_id=interaction.user.id,
+                )
+                await self.refresh_action_card(interaction, updated_task)
+                await self.sync_workspace(updated_task)
+                return
+            except Exception as e:
+                await send_interaction_error(interaction, e, "claiming task", logger, ephemeral=True)
+                return
+
         if action == "unassign":
             try:
                 updated_task = await self.task_service.update_assignee(
@@ -647,6 +822,32 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         target_status = TaskStatus.IN_PROGRESS if action in ("start", "reopen") else TaskStatus.COMPLETED
         if action == "notstarted":
             target_status = TaskStatus.NOT_STARTED
+
+        if action in ("start", "complete"):
+            incomplete = await self.task_service.get_unresolved_prerequisites(task.id)
+            if incomplete:
+                from src.adapters.discord_bot.views.task_blocked_view import (
+                    TaskBlockedConfirmView,
+                    build_task_blocked_confirm_embed,
+                )
+
+                embed = build_task_blocked_confirm_embed(task, target_status, incomplete)
+                view = TaskBlockedConfirmView(
+                    task=task,
+                    target_status=target_status,
+                    incomplete_prereqs=incomplete,
+                    author_id=interaction.user.id,
+                    task_service=self.task_service,
+                    auth_service=self.auth_service,
+                    workspace=self,
+                    bot=self.bot,
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await _maybe_await(interaction.response.send_message(embed=embed, view=view, ephemeral=True))
+                elif hasattr(interaction, "followup"):
+                    await _maybe_await(interaction.followup.send(embed=embed, view=view, ephemeral=True))
+                return
+
         try:
             note_action = "reopened" if action == "reopen" else f"updated to {target_status.value}"
             updated_task = await self.task_service.update_status(

@@ -2,7 +2,7 @@
 
 ## Development Environment
 
-This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) and Docker Compose, with first-class NixOS support via a lightweight [`flake.nix`](flake.nix) and `direnv`.
+This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) and Docker Compose, with first-class NixOS support via [`devenv.nix`](devenv.nix) and `direnv`.
 
 ### Rules for Tool & Command Execution
 
@@ -17,7 +17,9 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - **Lint & Fix**: `make lint-fix` (or `uv run ruff check --fix .`)
    - **Formatting**: `make format` (or `uv run ruff format .`)
    - **Full Check**: `make check` (runs lint, format-check, and tests)
-   - **Sync Dependencies**: `make sync` (or `uv sync --all-extras`)
+   - **Sync Dependencies**: `make sync` (or `uv run uv sync --all-extras`)
+   - **Sync Slash Commands**: `make sync-commands` (or `uv run python -m src.cli sync-commands`)
+
    - **Database Up**: `make db-up` (`docker compose up -d postgres`)
    - **Database Down**: `make db-down` (`docker compose stop postgres`)
    - **Database Initialization**: `make db-init`
@@ -34,7 +36,7 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - Unit and integration tests run against an in-memory SQLite database (`sqlite+aiosqlite:///:memory:`) and do not require PostgreSQL to be running.
 
 4. **NixOS Support & Tool Availability**:
-   - NixOS developers can use `direnv` (`use flake` in `.envrc`) or `nix develop` to automatically populate Python 3.13, `uv`, `psql`, `docker`, and required system libraries in their environment.
+   - NixOS developers can use `direnv` (`use devenv` in `.envrc`) or `devenv shell` to automatically populate Python 3.13, `uv`, `psql`, `docker`, and required system libraries in their environment.
    - If any needed CLI utility or dependency is missing from the environment, use `nix-shell -p <package>` (or enter a `nix-shell`) to run or provide it on demand.
 
 5. **Deployment & App Container Rebuild**:

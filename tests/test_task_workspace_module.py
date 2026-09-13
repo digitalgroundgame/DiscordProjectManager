@@ -205,7 +205,7 @@ async def test_sync_workspace_forum_and_archive(services):
     )
 
     ok = await adapter.sync_workspace(task, sync_title=True, sync_tags=True, sync_archive=True, sync_starter_card=True)
-    assert ok is True
+    assert ok.success is True
 
     mock_starter_msg.edit.assert_awaited_once()
     mock_thread.edit.assert_awaited_once()
@@ -213,6 +213,61 @@ async def test_sync_workspace_forum_and_archive(services):
     assert edit_kwargs.get("name") == "[AUD-10] Completed Audit"
     assert edit_kwargs.get("archived") is True
     assert edit_kwargs.get("applied_tags") == [tag_done]
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_throttles_thread_rename_and_updates_card(services):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.available_tags = []
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 888123
+    mock_thread.name = "[AUD-11] Old Name"
+    mock_thread.parent = mock_forum
+    mock_thread.archived = False
+    mock_thread.applied_tags = []
+    mock_thread.edit = AsyncMock()
+
+    mock_starter_msg = MagicMock(spec=discord.Message)
+    mock_starter_msg.edit = AsyncMock()
+    mock_thread.starter_message = mock_starter_msg
+
+    bot.get_channel = MagicMock(return_value=mock_thread)
+
+    # Force rate limiter for this thread to be on cooldown
+    adapter.rename_limiter.record_rate_limit(mock_thread.id, retry_after=300.0)
+
+    task = Task(
+        id=uuid4(),
+        guild_id=999,
+        short_id="AUD-11",
+        title="New Name Updated",
+        status=TaskStatus.NOT_STARTED,
+        priority=PriorityLevel.NORMAL,
+        creator_discord_id=1001,
+        discord_thread_id=888123,
+        discord_message_id=777222,
+    )
+
+    res = await adapter.sync_workspace(task, sync_title=True, sync_starter_card=True)
+    # Result should be truthy, with title_deferred=True
+    assert bool(res) is True
+    assert getattr(res, "title_deferred", False) is True
+    assert getattr(res, "cooldown_remaining_seconds", 0.0) > 0.0
+
+    # Starter embed card MUST have been updated immediately
+    mock_starter_msg.edit.assert_awaited_once()
+
+    # Thread.edit was NOT called with 'name' synchronously
+    if mock_thread.edit.await_count > 0:
+        for call in mock_thread.edit.await_args_list:
+            assert "name" not in call.kwargs
 
 
 @pytest.mark.asyncio
@@ -346,6 +401,77 @@ async def test_handle_action_status_and_permissions(services):
     await adapter.handle_action(auth_interaction, "complete", task.id)
     cur_task = await task_srv.get_by_id(task.id)
     assert cur_task.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_handle_action_blocked_state_start_and_complete_guards(services):
+    """handle_action with 'start' or 'complete' on a task with incomplete blockers presents confirmation view."""
+    from src.adapters.discord_bot.views.task_blocked_view import TaskBlockedConfirmView
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Guard Proj", prefix="GUA")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    # 1. Attempting 'start' on blocked task
+    interaction_start = MagicMock(spec=discord.Interaction)
+    interaction_start.guild_id = guild_id
+    interaction_start.user = MagicMock(id=2001)  # Assignee
+    interaction_start.response = MagicMock()
+    interaction_start.response.is_done.return_value = False
+    interaction_start.response.send_message = AsyncMock()
+
+    await adapter.handle_action(interaction_start, "start", blocked_task.id)
+
+    # Should send ephemeral warning view with blocker info
+    interaction_start.response.send_message.assert_awaited_once()
+    kwargs = interaction_start.response.send_message.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    assert isinstance(kwargs.get("view"), TaskBlockedConfirmView)
+    embed = kwargs.get("embed")
+    assert embed is not None
+    assert "Unresolved Dependencies" in embed.title
+    assert blocker.short_id in embed.fields[0].value
+
+    # Task status must NOT have changed in DB
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
+
+    # 2. Attempting 'complete' on blocked task
+    interaction_complete = MagicMock(spec=discord.Interaction)
+    interaction_complete.guild_id = guild_id
+    interaction_complete.user = MagicMock(id=2001)
+    interaction_complete.response = MagicMock()
+    interaction_complete.response.is_done.return_value = False
+    interaction_complete.response.send_message = AsyncMock()
+
+    await adapter.handle_action(interaction_complete, "complete", blocked_task.id)
+
+    interaction_complete.response.send_message.assert_awaited_once()
+    kwargs_c = interaction_complete.response.send_message.call_args.kwargs
+    assert isinstance(kwargs_c.get("view"), TaskBlockedConfirmView)
+    assert kwargs_c["view"].target_status == TaskStatus.COMPLETED
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
 
 
 @pytest.mark.asyncio

@@ -475,6 +475,23 @@ class TaskActionView(BaseView):
             )
             self.add_item(self.complete_btn)
 
+        if current_assignee_id is None:
+            self.claim_btn = discord.ui.Button(
+                label="Claim Task",
+                style=discord.ButtonStyle.success,
+                custom_id=f"task:claim:{task_id}",
+                row=0,
+            )
+            self.add_item(self.claim_btn)
+        else:
+            self.unassign_btn = discord.ui.Button(
+                label="Unassign Me",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"task:unassign:{task_id}",
+                row=0,
+            )
+            self.add_item(self.unassign_btn)
+
         self.note_btn = discord.ui.Button(
             label="Add Note",
             style=discord.ButtonStyle.primary,

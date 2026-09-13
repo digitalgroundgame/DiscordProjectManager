@@ -523,6 +523,63 @@ async def test_task_edit_modal_completed_archived_thread(services):
     interaction.response.edit_message.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_task_edit_modal_sends_cooldown_notice_on_deferred_rename(services):
+    from src.adapters.discord_bot.views.task_modals import TaskEditModal
+    from src.adapters.discord_bot.workspace_protocol import SyncWorkspaceResult
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cooldown Proj", prefix="CP")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        project_name=project.name,
+        title="Original Title",
+        creator_discord_id=1001,
+    )
+    await task_srv.update_discord_message_ids(task.id, discord_message_id=777, discord_thread_id=888)
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 888
+    mock_thread.archived = False
+    mock_thread.edit = AsyncMock()
+
+    modal = TaskEditModal(task=task, task_service=task_srv)
+    modal.title_input._value = "Renamed Title On Cooldown"
+    modal.body_input._value = "Some body"
+    modal.due_input._value = ""
+    modal.cc_input._value = ""
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(id=1001)
+    interaction.channel = mock_thread
+    interaction.message = MagicMock()
+    interaction.response = MagicMock()
+    interaction.response.edit_message = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+    interaction.client = MagicMock()
+    interaction.client.sync_root_task_message = AsyncMock()
+    interaction.client.sync_task_thread = AsyncMock(
+        return_value=SyncWorkspaceResult(
+            success=True,
+            title_renamed=False,
+            title_deferred=True,
+            cooldown_remaining_seconds=250.0,
+        )
+    )
+
+    await modal.on_submit(interaction)
+
+    interaction.response.edit_message.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once()
+    notice_msg = interaction.followup.send.call_args[0][0]
+    assert "Discord limits thread renames to 2 per 10 minutes" in notice_msg
+
+
 def test_get_task_jump_url():
     """Verify get_task_jump_url generates accurate universal Discord links."""
     from src.adapters.discord_bot.views.task_embed import get_task_jump_url

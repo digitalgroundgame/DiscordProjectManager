@@ -25,18 +25,30 @@ class TaskWorkspaceRef:
     jump_url: str
 
 
-@runtime_checkable
-class ITaskDiscordWorkspace(Protocol):
-    """Deep Interface for managing a Task's Discord presence, Thread Workspace, and lifecycle.
+@dataclass(frozen=True, slots=True)
+class SyncWorkspaceResult:
+    """Result of synchronizing a Discord thread workspace with a Task's domain state."""
 
-    Invariants:
-      - 1:1 Workspace Mapping: Every provisioned Task workspace corresponds to exactly
-        one parent Forum Channel or Text Channel thread containing one root Task Action Card.
-      - Tag Boundary: Forum Channel tags applied to a thread workspace never exceed Discord's
-        5-tag limit and preserve existing non-managed custom tags.
-      - Archive Invariant: Closed or archived tasks are guaranteed to remain archived after
-        any background event or interaction update, preventing sidebar channel pollution.
-      - Thread Unarchive Safety: Updates to archived threads never throw Discord HTTP errors;
+    success: bool
+    title_renamed: bool = False
+    title_deferred: bool = False
+    cooldown_remaining_seconds: float = 0.0
+
+    def __bool__(self) -> bool:
+        return self.success
+
+
+@runtime_checkable
+class TaskWorkspacePort(Protocol):
+    """Port defining the lifecycle operations for Discord-native task execution workspaces.
+
+    Every task mapped to Discord is anchored in a dedicated Discord Thread
+    (either within a ForumChannel or a standard TextChannel). Thread workspaces
+    contain an interactive Task Action Card as their starter message.
+
+    Thread Invariant:
+        When a task is COMPLETED or ARCHIVED, its thread workspace MUST be kept in
+        an archived state in Discord. If a mutation or comment is posted to an archived thread,
         the implementation guarantees safe temporary unarchival and state restoration.
     """
 
@@ -61,7 +73,7 @@ class ITaskDiscordWorkspace(Protocol):
         sync_tags: bool = True,
         sync_archive: bool = True,
         sync_starter_card: bool = True,
-    ) -> bool:
+    ) -> SyncWorkspaceResult | bool:
         """Synchronizes an existing Thread Workspace with the current Task domain model state."""
         ...
 
@@ -85,6 +97,15 @@ class ITaskDiscordWorkspace(Protocol):
         rearchive_if_completed: bool = True,
     ) -> discord.Message | None:
         """Posts an activity update, note, or Outbox Event notification into the Task's Thread Workspace."""
+        ...
+
+    async def delete_workspace(
+        self,
+        task: Task,
+        *,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        """Permanently deletes or archives the Discord thread workspace and logs audit notification."""
         ...
 
     async def render_task_controls(
@@ -123,6 +144,10 @@ class ITaskDiscordWorkspace(Protocol):
     ) -> Task | None:
         """Applies staged task control adjustments atomically, syncing thread tags and action card."""
         ...
+
+
+# Backwards compatibility alias
+ITaskDiscordWorkspace = TaskWorkspacePort
 
 
 @dataclass(frozen=True, slots=True)

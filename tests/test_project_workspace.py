@@ -585,3 +585,69 @@ async def test_rebuild_workspace_invokes_progress_callback(services):
     assert "tags" in steps
     assert "hub" in steps
     assert "tasks" in steps
+
+
+@pytest.mark.asyncio
+async def test_rebuild_workspace_handles_deferred_rename_gracefully(services):
+    from src.adapters.discord_bot.workspace_protocol import SyncWorkspaceResult
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    bot = MagicMock(spec=discord.Client)
+    mock_task_workspace = MagicMock()
+    # Simulate a deferred rename due to Discord rate limits
+    mock_task_workspace.sync_workspace = AsyncMock(
+        return_value=SyncWorkspaceResult(
+            success=True,
+            title_renamed=False,
+            title_deferred=True,
+            cooldown_remaining_seconds=120.0,
+        )
+    )
+
+    adapter = DiscordProjectWorkspaceAdapter(
+        bot=bot,
+        project_service=proj_srv,
+        task_service=task_srv,
+        task_workspace=mock_task_workspace,
+    )
+
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Rate Limit Project",
+        prefix="RLP",
+        discord_channel_id=4001,
+    )
+
+    t1 = await task_srv.create_task(
+        guild_id=guild_id,
+        project_name=project.name,
+        title="Check Rate Limit Handlers",
+        creator_discord_id=123,
+    )
+    await task_srv.update_discord_message_ids(t1.id, discord_message_id=9001, discord_thread_id=1001)
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 4001
+    mock_forum.guild = mock_guild
+    mock_forum.available_tags = []
+    mock_forum.threads = []
+
+    intact_thread = MagicMock(spec=discord.Thread, id=1001)
+
+    def get_channel(cid):
+        if cid == 4001:
+            return mock_forum
+        if cid == 1001:
+            return intact_thread
+        return None
+
+    mock_guild.get_channel = MagicMock(side_effect=get_channel)
+
+    result = await adapter.rebuild_workspace(project.id, guild=mock_guild)
+    assert result.tasks_reconciled == 1
+    assert any("deferred due to Discord rate limits" in w for w in result.warnings)

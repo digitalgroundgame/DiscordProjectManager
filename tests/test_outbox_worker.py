@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.adapters.db.tables import OutboxEventTable
 from src.adapters.worker.outbox_worker import OutboxWorker
@@ -138,7 +139,12 @@ async def test_outbox_worker_429_retries_are_capped(services, repos, db_session)
         scheduled_for=datetime.now(UTC),
     )
 
-    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=RateLimitedNotifier(), poll_interval=1.0)
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=RateLimitedNotifier(),
+        poll_interval=1.0,
+        max_retries=5,
+    )
 
     pending = await outbox_repo.fetch_pending_batch(limit=10)
     domain_evt = next(e for e in pending if e.idempotency_key == "test_rate_limited_capped")
@@ -151,6 +157,164 @@ async def test_outbox_worker_429_retries_are_capped(services, repos, db_session)
     row = (await db_session.execute(stmt)).scalar_one()
     assert row.status == OutboxStatus.FAILED.value
     assert row.retry_count == 5
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_survives_extended_outage_past_5_retries(services, repos, db_session):
+    """Verifies that an event with >5 retries during outages stays PENDING rather than permanently FAILED."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class OutageNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise ConnectionError("Discord API Outage 503")
+
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_extended_outage_survival",
+        payload={"msg": "Outage Test"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=OutageNotifier(), poll_interval=1.0)
+
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    domain_evt = next(e for e in pending if e.idempotency_key == "test_extended_outage_survival")
+    domain_evt.retry_count = 5  # 5 prior attempts. Under old policy, next attempt would transition to FAILED.
+
+    await worker._process_single_event(domain_evt)
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_extended_outage_survival")
+    row = (await db_session.execute(stmt)).scalar_one()
+
+    # Must survive and remain PENDING for next attempt (retry 6)
+    assert row.status == OutboxStatus.PENDING.value
+    assert row.retry_count == 6
+    # Delay for retry 6 should be min(600, 2**6 * 5 = 320) seconds
+    scheduled_diff = (row.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 310 <= scheduled_diff <= 330
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_exponential_backoff_progression_and_cap(services, repos, db_session):
+    """Verifies that exponential backoff doubles properly and enforces the configured cap."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class FailingNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise RuntimeError("API temporary error")
+
+    # Custom cap of 100.0s for testing
+    cap = 100.0
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=FailingNotifier(),
+        poll_interval=1.0,
+        backoff_cap_seconds=cap,
+    )
+
+    # Test retry 1: 2^1 * 5 = 10s
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_backoff_retry_1",
+        payload={"msg": "1"},
+        scheduled_for=datetime.now(UTC),
+    )
+    pending1 = await outbox_repo.fetch_pending_batch(limit=10)
+    domain1 = next(e for e in pending1 if e.idempotency_key == "test_backoff_retry_1")
+    domain1.retry_count = 0  # 1st failure
+    await worker._process_single_event(domain1)
+
+    db_session.expire_all()
+    stmt1 = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_backoff_retry_1")
+    row1 = (await db_session.execute(stmt1)).scalar_one()
+    diff1 = (row1.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 8 <= diff1 <= 12  # ~10s
+
+    # Test retry 7: 2^7 * 5 = 640s -> capped at 100s
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_backoff_retry_7_capped",
+        payload={"msg": "7"},
+        scheduled_for=datetime.now(UTC),
+    )
+    pending7 = await outbox_repo.fetch_pending_batch(limit=10)
+    domain7 = next(e for e in pending7 if e.idempotency_key == "test_backoff_retry_7_capped")
+    domain7.retry_count = 6  # 7th failure
+    await worker._process_single_event(domain7)
+
+    db_session.expire_all()
+    stmt7 = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_backoff_retry_7_capped")
+    row7 = (await db_session.execute(stmt7)).scalar_one()
+    diff7 = (row7.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 95 <= diff7 <= 105  # capped at ~100s
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_retention_window_expiration(services, repos, db_session):
+    """Verifies that an event exceeding max_retention_hours transitions to FAILED even if retry count is low."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class FailingNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise RuntimeError("Outage error")
+
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=FailingNotifier(),
+        poll_interval=1.0,
+        max_retries=150,
+        max_retention_hours=24.0,
+    )
+
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_retention_window_expired",
+        payload={"msg": "Old event"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    domain_evt = next(e for e in pending if e.idempotency_key == "test_retention_window_expired")
+    # Simulate event created 30 hours ago (beyond 24h retention window)
+    domain_evt.created_at = datetime.now(UTC) - timedelta(hours=30)
+    domain_evt.retry_count = 2  # Only 2 retries, well below max_retries 150
+
+    await worker._process_single_event(domain_evt)
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_retention_window_expired")
+    row = (await db_session.execute(stmt)).scalar_one()
+
+    # Must transition to FAILED due to retention window expiry
+    assert row.status == OutboxStatus.FAILED.value
+    assert row.retry_count == 3
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_custom_config_injection(repos):
+    """Verifies that OutboxWorker accepts and applies custom configuration parameters."""
+    outbox_repo = repos["outbox"]
+    mock_notifier = MockNotifier()
+
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=mock_notifier,
+        poll_interval=2.5,
+        batch_size=20,
+        max_retries=50,
+        backoff_cap_seconds=120.0,
+        max_retention_hours=12.0,
+    )
+
+    assert worker.poll_interval == 2.5
+    assert worker.batch_size == 20
+    assert worker.max_retries == 50
+    assert worker.backoff_cap_seconds == 120.0
+    assert worker.max_retention_hours == 12.0
 
 
 @pytest.mark.asyncio
@@ -219,6 +383,157 @@ async def test_outbox_worker_start_reclaims_and_dispatches_stranded_events(servi
     await task
 
     assert any(e.idempotency_key == "start_delivery_key" for e in mock_notifier.dispatched)
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_restores_pending_within_lookback(services, repos, db_session):
+    """Failed events within lookback window must be reclaimed to PENDING with reset retry count."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="failed_event_to_reclaim",
+        payload={"msg": "failed during outage"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    # Fail the event (exhausted retries during outage)
+    await outbox_repo.reschedule_or_fail(
+        event_id=event.id,
+        retry_count=150,
+        next_scheduled_for=datetime.now(UTC),
+        failed=True,
+    )
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "failed_event_to_reclaim")
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.FAILED.value
+    assert row.retry_count == 150
+
+    # Reclaim with 24h lookback
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 1
+
+    db_session.expire_all()
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.PENDING.value
+    assert row.retry_count == 0
+
+    # Re-running returns 0 as no more FAILED events remain
+    assert await outbox_repo.reclaim_failed_events(max_age_hours=24.0) == 0
+
+    # Now eligible for dispatch in pending batch
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    assert any(e.idempotency_key == "failed_event_to_reclaim" for e in pending)
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_ignores_events_outside_lookback(services, repos, db_session):
+    """Failed events older than lookback window must not be reclaimed."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    now = datetime.now(UTC)
+    old_event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="ancient_failed_event",
+        payload={"msg": "ancient failure"},
+        scheduled_for=now - timedelta(hours=72),
+    )
+
+    await outbox_repo.reschedule_or_fail(
+        event_id=old_event.id,
+        retry_count=150,
+        next_scheduled_for=now,
+        failed=True,
+    )
+
+    # Force created_at to 72 hours ago
+    await db_session.execute(
+        update(OutboxEventTable).where(OutboxEventTable.id == old_event.id).values(created_at=now - timedelta(hours=72))
+    )
+    await db_session.commit()
+
+    # Attempt reclaim with 24h lookback
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 0
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "ancient_failed_event")
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.FAILED.value
+
+    # Expanding lookback window to 96h reclaims it
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=96.0)
+    assert reclaimed == 1
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_preserves_processed_and_cancelled(services, repos, db_session):
+    """Reclaim must not touch PROCESSED or CANCELLED events."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    evt1 = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="processed_event_key",
+        payload={"msg": "already done"},
+        scheduled_for=datetime.now(UTC),
+    )
+    await outbox_repo.mark_processed(evt1.id)
+
+    evt2 = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="task_due:00000000-0000-0000-0000-000000000001:1h",
+        payload={"msg": "cancelled"},
+        scheduled_for=datetime.now(UTC),
+    )
+    await outbox_repo.cancel_task_reminders(UUID("00000000-0000-0000-0000-000000000001"))
+
+    reclaimed = await outbox_srv.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 0
+
+    db_session.expire_all()
+    stmt1 = select(OutboxEventTable).where(OutboxEventTable.id == evt1.id)
+    assert (await db_session.execute(stmt1)).scalar_one().status == OutboxStatus.PROCESSED.value
+    stmt2 = select(OutboxEventTable).where(OutboxEventTable.id == evt2.id)
+    assert (await db_session.execute(stmt2)).scalar_one().status == OutboxStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_dispatches_reclaimed_failed_events(services, repos):
+    """Outbox worker process_batch successfully dispatches reclaimed events without issue."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+    mock_notifier = MockNotifier()
+
+    event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="worker_reclaimed_key",
+        payload={"msg": "reclaim and deliver"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    # Fail the event
+    await outbox_repo.reschedule_or_fail(
+        event_id=event.id,
+        retry_count=150,
+        next_scheduled_for=datetime.now(UTC),
+        failed=True,
+    )
+
+    # Reclaim it
+    reclaimed = await outbox_srv.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 1
+
+    # Now let OutboxWorker process the batch
+    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=mock_notifier, poll_interval=0.005)
+    worker._running = True
+    processed = await worker.process_batch()
+    assert processed >= 1
+    assert any(e.idempotency_key == "worker_reclaimed_key" for e in mock_notifier.dispatched)
 
 
 @pytest.mark.asyncio

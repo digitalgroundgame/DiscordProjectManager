@@ -18,6 +18,8 @@ COPY src/ ./src/
 COPY alembic.ini .
 
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
 
 EXPOSE 8000
 

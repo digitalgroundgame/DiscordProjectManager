@@ -100,6 +100,10 @@ class ITaskRepo(ABC):
         """Soft-deletes or unarchives a task."""
 
     @abstractmethod
+    async def delete(self, task_id: UUID, session: Any | None = None) -> bool:
+        """Permanently deletes a task record, cascading dependencies, watchers, and history."""
+
+    @abstractmethod
     async def add_history(self, history: TaskHistory, session: Any | None = None) -> TaskHistory:
         """Appends a task history audit entry."""
 
@@ -268,6 +272,10 @@ class IOutboxRepo(ABC):
     @abstractmethod
     async def reclaim_stale_processing(self) -> int:
         """Resets stuck PROCESSING events back to PENDING so they can be redelivered (crash recovery)."""
+
+    @abstractmethod
+    async def reclaim_failed_events(self, max_age_hours: float = 24.0) -> int:
+        """Transitions recent FAILED events back to PENDING with reset retry count within lookback window."""
 
 
 class IUserPreferenceRepo(ABC):

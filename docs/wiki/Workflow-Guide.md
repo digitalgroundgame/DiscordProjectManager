@@ -30,11 +30,18 @@ flowchart TD
 
 Before creating projects and running commands in your server, configure your bot application and invite it to your Discord server:
 
-1. **Privileged Gateway Intents**:
+1. **Bot Invite / Installation Link**:
+   - Install the bot into your server using the official OAuth2 install link:
+     [Invite Bot to Discord Server](https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot)
+     ```text
+     https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot
+     ```
+2. **Privileged Gateway Intents**:
    - Ensure **Server Members Intent** (`GuildMembers`) is enabled in the [Discord Developer Portal](https://discord.com/developers/applications) under **Bot** ➔ **Privileged Gateway Intents** (required for squad roster synchronization and self-healing lead checks).
    - *(Note: `Message Content` intent is explicitly **NOT** required).*
-2. **Bot Permissions**:
-   - Verify the bot invite URL contains the following permissions (under OAuth2 URL Generator with `bot` and `applications.commands` scopes):
+3. **Bot Permissions**:
+   - The invite URL automatically requests the required permissions:
+     - `Manage Roles`
      - `Manage Channels` (for auto-tagging Forum channels)
      - `Manage Threads`
      - `View Channels`
@@ -44,6 +51,8 @@ Before creating projects and running commands in your server, configure your bot
      - `Manage Messages`
      - `Embed Links`
      - `Read Message History`
+     - `Attach Files`
+
 
 ---
 

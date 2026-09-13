@@ -1320,3 +1320,50 @@ async def test_task_action_controls_save_and_cancel_workflow(services):
     cancel_view = TaskActionControlsView(task, task_srv, auth_srv)
     await cancel_view._on_cancel_clicked(interaction_cancel)
     interaction_cancel.delete_original_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_auth_service_dependency_bypass_permissions(services):
+    """AuthService evaluates dependency bypass authority for managers, leads, mutators, and rejects others."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    guild_id = 998877881
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Platform Core",
+        prefix="COR",
+        lead_discord_id=5001,
+    )
+
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Protected Service",
+        creator_discord_id=1001,
+        project_id=project.id,
+        assignee_discord_id=5002,
+    )
+
+    admin_member = _make_mock_member(5000, is_admin=True)
+    lead_member = _make_mock_member(5001)
+    assignee_member = _make_mock_member(5002)
+    unauthorized_member = _make_mock_member(9999)
+
+    # 1. Server Manager bypass
+    assert await auth_srv.can_bypass_dependencies(admin_member, task) is True
+    await auth_srv.require_dependency_bypass(admin_member, task)
+
+    # 2. Project Lead bypass
+    assert await auth_srv.can_bypass_dependencies(lead_member, task) is True
+    await auth_srv.require_dependency_bypass(lead_member, task)
+
+    # 3. Assignee bypass
+    assert await auth_srv.can_bypass_dependencies(assignee_member, task) is True
+    await auth_srv.require_dependency_bypass(assignee_member, task)
+
+    # 4. Unauthorized user rejected
+    assert await auth_srv.can_bypass_dependencies(unauthorized_member, task) is False
+    with pytest.raises(PermissionDeniedError, match="do not have permission"):
+        await auth_srv.require_dependency_bypass(unauthorized_member, task)

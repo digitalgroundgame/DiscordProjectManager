@@ -1096,6 +1096,109 @@ async def test_pm_menu_command_and_bot_wiring(services):
     assert "view" in kwargs
 
 
+@pytest.mark.asyncio
+async def test_bot_setup_hook_forbidden_50001_logging(services, caplog):
+    """Verify DggPmBot setup_hook catches 403 Forbidden (50001) and logs clear instructions."""
+    import logging
+    from unittest.mock import patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+    from src.config import settings
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.status = 403
+    mock_resp.reason = "Forbidden"
+    forbidden_err = discord.Forbidden(mock_resp, "Missing Access")
+    forbidden_err.code = 50001
+
+    with (
+        patch.object(settings, "SYNC_COMMANDS_ON_STARTUP", True),
+        patch.object(bot.tree, "sync", side_effect=forbidden_err),
+        patch.object(settings, "DISCORD_GUILD_ID", 123456789),
+        caplog.at_level(logging.CRITICAL, logger="dgg_pm.bot"),
+    ):
+        with pytest.raises(discord.Forbidden):
+            await bot.setup_hook()
+
+    assert "DISCORD GATEWAY ERROR: Missing Access" in caplog.text
+    assert "123456789" in caplog.text
+    assert "Possible causes:" in caplog.text
+    assert "Action Required" not in caplog.text
+
+
+async def test_bot_setup_hook_skips_sync_when_disabled(services, caplog):
+    """Verify DggPmBot setup_hook skips tree.sync when SYNC_COMMANDS_ON_STARTUP is False."""
+    import logging
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+    from src.config import settings
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    with (
+        patch.object(settings, "SYNC_COMMANDS_ON_STARTUP", False),
+        patch.object(bot.tree, "sync", new_callable=AsyncMock) as mock_sync,
+        caplog.at_level(logging.INFO, logger="dgg_pm.bot"),
+    ):
+        await bot.setup_hook()
+
+    mock_sync.assert_not_called()
+    assert "Skipping startup slash command synchronization" in caplog.text
+
+
+async def test_bot_sync_slash_commands_guild_and_global(services):
+    """Verify bot.sync_slash_commands handles both guild-scoped and global synchronization."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+
+    # 1. Guild scoped sync
+    mock_guild_cmd = MagicMock(name="GuildCmd")
+    with (
+        patch.object(bot.tree, "copy_global_to") as mock_copy,
+        patch.object(bot.tree, "sync", new_callable=AsyncMock, return_value=[mock_guild_cmd]) as mock_sync,
+    ):
+        result = await bot.sync_slash_commands(guild_id=987654321)
+
+        mock_copy.assert_called_once()
+        mock_sync.assert_awaited_once()
+        assert len(result) == 1
+        assert result[0] == mock_guild_cmd
+
+    # 2. Global scoped sync
+    mock_global_cmd = MagicMock(name="GlobalCmd")
+    with (
+        patch.object(bot.tree, "copy_global_to") as mock_copy,
+        patch.object(bot.tree, "sync", new_callable=AsyncMock, return_value=[mock_global_cmd]) as mock_sync,
+    ):
+        result = await bot.sync_slash_commands(guild_id=None)
+
+        mock_copy.assert_not_called()
+        mock_sync.assert_awaited_once_with()
+        assert len(result) == 1
+        assert result[0] == mock_global_cmd
+
+
 def test_project_rebuild_command_parameters():
     """Verify that project rebuild command requires 'project_name' and accepts optional 'forum'."""
     cmd = PmCog.project_rebuild
@@ -1350,3 +1453,509 @@ async def test_pm_hub_view_overdue_button(services):
     send_kwargs = interaction.response.send_message.call_args.kwargs
     assert send_kwargs.get("ephemeral") is True
     assert "Overdue" in send_kwargs.get("embed").title
+
+
+@pytest.mark.asyncio
+async def test_bot_on_ready_presence(services):
+    """Verify DggPmBot on_ready sets watching activity to /pm help."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+    bot.change_presence = AsyncMock()
+    await bot.on_ready()
+    bot.change_presence.assert_awaited_once()
+    activity = bot.change_presence.call_args.kwargs["activity"]
+    assert activity.type == discord.ActivityType.watching
+    assert activity.name == "tasks with /pm help"
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_command_metadata():
+    """Verify that PmCog defines admin_group with sync command, manage_guild check, and scope choices."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    sync_cmd = next((c for c in PmCog.admin_group.commands if c.name == "sync"), None)
+    assert sync_cmd is not None
+    assert "scope" in [p.name for p in sync_cmd.parameters]
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_guild_scope_execution(services):
+    """Verify /pm admin sync executes guild-level sync and replies with confirmation."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.sync_slash_commands = AsyncMock(return_value=[MagicMock(), MagicMock()])
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="guild")
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    mock_bot.sync_slash_commands.assert_awaited_once_with(guild_id=123456)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Slash Commands Synchronized" in msg
+    assert "Test Guild" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_global_scope_execution(services):
+    """Verify /pm admin sync executes global sync when scope is global."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.sync_slash_commands = AsyncMock(return_value=[MagicMock()])
+    mock_bot.format_command_tree_summary = MagicMock(return_value="**Command Breakdown (33 executable commands)**")
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="global")
+
+    mock_bot.sync_slash_commands.assert_awaited_once_with(guild_id=None)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "globally" in msg
+    assert "Command Breakdown" in msg
+
+
+@pytest.mark.asyncio
+async def test_bot_command_tree_summary(services):
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+    with patch.object(bot.tree, "sync", new_callable=AsyncMock):
+        await bot.setup_hook()
+
+    summary = bot.get_command_tree_summary()
+
+    assert summary["total"] >= 30
+    assert "/pm task" in summary["breakdown"]
+    assert "create" in summary["breakdown"]["/pm task"]
+    assert "/pm project" in summary["breakdown"]
+
+    formatted = bot.format_command_tree_summary()
+    assert "Command Breakdown" in formatted
+    assert "/pm task" in formatted
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_error_handling(services):
+    """Verify /pm admin sync catches 403 Forbidden 50001 and provides clear guidance."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status = 403
+    mock_resp.reason = "Forbidden"
+    forbidden_err = discord.Forbidden(mock_resp, "Missing Access")
+    forbidden_err.code = 50001
+    mock_bot.sync_slash_commands = AsyncMock(side_effect=forbidden_err)
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=123456, name="Test Guild")
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_sync.callback(cog, interaction, scope="guild")
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Command Sync Failed (403 Missing Access)" in msg
+    assert "applications.commands" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_command_metadata():
+    """Verify that PmCog defines admin_group with retry-outbox command and hours parameter."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    cmd = next((c for c in PmCog.admin_group.commands if c.name == "retry-outbox"), None)
+    assert cmd is not None
+    assert "hours" in [p.name for p in cmd.parameters]
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_execution_reclaimed(services):
+    """Verify /pm admin retry-outbox reclaims failed events and reports success."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=3)
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=12.0)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    mock_outbox_svc.reclaim_failed_events.assert_awaited_once_with(max_age_hours=12.0)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox Events Reclaimed" in msg
+    assert "3" in msg
+    assert "12.0" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_execution_none_found(services):
+    """Verify /pm admin retry-outbox handles zero reclaimed events gracefully."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=0)
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "No Failed Events Found" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_service_missing(services):
+    """Verify /pm admin retry-outbox warns when outbox service is not available."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.outbox_service = None
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=None,
+        outbox_service=None,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox service is not available" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_error_handling(services):
+    """Verify /pm admin retry-outbox catches exceptions and sends error message."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(side_effect=RuntimeError("Database lock error"))
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox Reclaim Failed" in msg
+    assert "Database lock error" in msg
+
+
+@pytest.mark.asyncio
+async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
+    """Verify DggPmBot.on_ready triggers background reconciliation of failed outbox events."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=2)
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    with patch.object(bot, "change_presence", new_callable=AsyncMock):
+        await bot.on_ready()
+        # Yield control to allow background asyncio task to execute
+        await asyncio.sleep(0.01)
+
+    mock_outbox_svc.reclaim_failed_events.assert_awaited_once()
+
+
+def test_task_status_command_parameters():
+    """Verify that task-status command supports optional 'force' parameter."""
+    cmd = PmCog.task_status
+    params = {p.name: p for p in cmd.parameters}
+
+    assert "status" in params
+    assert params["status"].required is True
+
+    assert "force" in params
+    assert params["force"].required is False
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_without_force(services):
+    """task_status without force on a task with incomplete blockers presents TaskBlockedConfirmView and halts."""
+    from src.adapters.discord_bot.views.task_blocked_view import TaskBlockedConfirmView
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard Proj", prefix="CGP")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(id=2001)  # Assignee
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=False,
+    )
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.followup.send.assert_awaited_once()
+    send_kwargs = interaction.followup.send.call_args.kwargs
+    assert send_kwargs.get("ephemeral") is True
+    assert isinstance(send_kwargs.get("view"), TaskBlockedConfirmView)
+    assert send_kwargs["view"].target_status == TaskStatus.IN_PROGRESS
+    assert blocker.short_id in send_kwargs.get("embed").fields[0].value
+
+    # Verify task status did NOT change in database
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_with_force(services):
+    """task_status with force=True bypasses the dependency guard and updates task status."""
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard Force", prefix="CGF")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(id=2001)  # Assignee (authorized to bypass)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=True,
+    )
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.followup.send.assert_awaited_once()
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_with_force_unauthorized(services):
+    """task_status with force=True rejects users who lack bypass permissions."""
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard NoPerm", prefix="CGN")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    perms = discord.Permissions(manage_guild=False, administrator=False)
+    interaction.user = MagicMock(id=9999, guild_permissions=perms)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=True,
+    )
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "You do not have permission" in msg
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED

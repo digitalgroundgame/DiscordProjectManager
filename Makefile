@@ -1,4 +1,4 @@
-# Unexport any stale devenv environment variables if transitioning
+# Clean ambient virtualenv variables for deterministic uv execution
 unexport UV_PROJECT_ENVIRONMENT
 unexport VIRTUAL_ENV
 
@@ -30,6 +30,11 @@ run: ## Run the Discord bot application locally
 
 .PHONY: dev
 dev: run ## Alias for run
+
+.PHONY: sync-commands
+sync-commands: ## Synchronize slash commands to Discord on demand (usage: make sync-commands [GUILD_ID=...])
+	$(PYTHON) -m src.cli sync-commands $(if $(GUILD_ID),--guild-id $(GUILD_ID),)
+
 
 # --- Testing & Quality ---
 
