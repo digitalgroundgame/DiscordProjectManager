@@ -568,7 +568,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
 
                 if thread and isinstance(thread, discord.Thread):
                     try:
-                        await task_ws.sync_workspace(
+                        sync_res = await task_ws.sync_workspace(
                             task,
                             project=project,
                             project_name=project.name,
@@ -578,6 +578,11 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
                             sync_starter_card=True,
                         )
                         tasks_reconciled += 1
+                        if hasattr(sync_res, "title_deferred") and sync_res.title_deferred:
+                            warnings.append(
+                                f"Task {task.short_id} title rename deferred due to Discord rate limits "
+                                "(cooldown active)."
+                            )
                     except Exception as e:
                         logger.warning("Failed to sync workspace for task %s: %s", task.short_id, e)
                         warnings.append(f"Failed to sync task {task.short_id}: {e}")

@@ -204,8 +204,23 @@ class TaskEditModal(BaseModal):
 
                 if hasattr(interaction.client, "sync_root_task_message"):
                     await interaction.client.sync_root_task_message(updated_task)
+                title_deferred = False
                 if hasattr(interaction.client, "sync_task_thread"):
-                    await interaction.client.sync_task_thread(updated_task, sync_title=True, sync_archive=False)
+                    sync_res = await interaction.client.sync_task_thread(
+                        updated_task, sync_title=True, sync_archive=False
+                    )
+                    if hasattr(sync_res, "title_deferred") and sync_res.title_deferred:
+                        title_deferred = True
+
+                if title_deferred:
+                    notice = (
+                        "ℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
+                        "thread title will reflect changes shortly)."
+                    )
+                    try:
+                        await interaction.followup.send(notice, ephemeral=True)
+                    except Exception:
+                        pass
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating details for task '{self.short_id}'", logger, ephemeral=True

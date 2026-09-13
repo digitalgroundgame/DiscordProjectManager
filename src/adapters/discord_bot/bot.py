@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 from uuid import UUID
 
 import discord
@@ -213,9 +214,9 @@ class DggPmBot(commands.Bot):
         action: str | None = None,
         sync_title: bool = False,
         sync_archive: bool = True,
-    ) -> None:
+    ) -> Any:
         """Syncs the Discord thread state (applied tags, archive/unarchive, rename) for a task."""
-        await self.workspace.sync_workspace(
+        return await self.workspace.sync_workspace(
             task,
             sync_title=sync_title,
             sync_tags=True,

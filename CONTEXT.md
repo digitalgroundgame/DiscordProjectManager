@@ -19,6 +19,11 @@ _Avoid_: Overdue status, expired status, late state
 A high-level container aggregating related tasks, identified by a unique server prefix (e.g. `INF`), bound Discord channel, mapped Squad roles, and designated project lead.
 _Avoid_: Workspace, board, category, epic
 
+**Default Project**:
+The server-wide catch-all Project container (named "General Tasks" with prefix `TASK`) that anchors ad-hoc tasks not associated with a specific initiative.
+_Avoid_: Standalone container, inbox project, global project
+
+
 **Squad**:
 A functional contributor group mapped 1:1 with a Discord Server Role.
 _Avoid_: Team, group, department, user group

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -718,6 +718,95 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating status for task '{task or 'current thread'}'", logger, ephemeral=True
+            )
+
+    @task_group.command(name="update", description="Update a task's title, description, or due date.")
+    @app_commands.describe(
+        task="Short ID of the task to update (omit if inside thread)",
+        title="New task title",
+        description="New task description (use 'clear' to remove)",
+        due="New due date (e.g. 'tomorrow', 'in 3 days', 'clear')",
+    )
+    @app_commands.autocomplete(task=task_autocomplete)
+    async def task_update(
+        self,
+        interaction: discord.Interaction,
+        task: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        due: str | None = None,
+    ) -> None:
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            task_entity = await self._resolve_task_context(interaction, task)
+            if not task_entity:
+                return
+
+            if self.auth_service:
+                await self.auth_service.require_task_mutation(interaction.user, task_entity)
+
+            update_kwargs: dict[str, Any] = {}
+            if title is not None:
+                cleaned_title = title.strip()
+                if not cleaned_title:
+                    await interaction.followup.send("❌ Task title cannot be empty.", ephemeral=True)
+                    return
+                update_kwargs["title"] = cleaned_title
+
+            if description is not None:
+                desc_val = description.strip()
+                clear_body = desc_val == "" or desc_val.lower() in ("clear", "none", "remove")
+                update_kwargs["clear_body"] = clear_body
+                update_kwargs["body"] = None if clear_body else desc_val
+
+            if due is not None:
+                due_val = due.strip()
+                clear_due = due_val.lower() in ("clear", "none", "remove", "null", "unset")
+                update_kwargs["clear_due_at"] = clear_due
+                update_kwargs["due_at"] = None if clear_due else parse_natural_date(due_val)
+
+            if not update_kwargs:
+                await interaction.followup.send("ℹ️ No updates specified.", ephemeral=True)
+                return
+
+            updated_task = await self.task_service.update_details(
+                task_id=task_entity.id,
+                actor_discord_id=interaction.user.id,
+                **update_kwargs,
+            )
+
+            sync_res = None
+            if self.workspace:
+                sync_res = await self.workspace.sync_workspace(
+                    updated_task,
+                    sync_title=True,
+                    sync_starter_card=True,
+                )
+            elif hasattr(self.bot, "sync_task_thread"):
+                sync_res = await self.bot.sync_task_thread(updated_task, sync_title=True)
+            elif hasattr(self.bot, "sync_root_task_message"):
+                res = self.bot.sync_root_task_message(updated_task)
+                if hasattr(res, "__await__"):
+                    await res
+
+            title_deferred = hasattr(sync_res, "title_deferred") and sync_res.title_deferred
+            msg = f"✏️ Updated details for **[{updated_task.short_id}]**."
+            if title_deferred:
+                msg += (
+                    "\nℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
+                    "thread title will reflect changes shortly)."
+                )
+
+            embed = build_task_embed(updated_task)
+            await interaction.followup.send(msg, embed=embed)
+            from src.adapters.discord_bot.menu_manager import menu_manager
+
+            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+        except Exception as e:
+            await send_interaction_error(
+                interaction, e, f"updating details for task '{task or 'current thread'}'", logger, ephemeral=True
             )
 
     @task_group.command(name="archive", description="Archive a completed or obsolete task.")

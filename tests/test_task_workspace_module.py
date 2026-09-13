@@ -205,7 +205,7 @@ async def test_sync_workspace_forum_and_archive(services):
     )
 
     ok = await adapter.sync_workspace(task, sync_title=True, sync_tags=True, sync_archive=True, sync_starter_card=True)
-    assert ok is True
+    assert ok.success is True
 
     mock_starter_msg.edit.assert_awaited_once()
     mock_thread.edit.assert_awaited_once()
@@ -213,6 +213,61 @@ async def test_sync_workspace_forum_and_archive(services):
     assert edit_kwargs.get("name") == "[AUD-10] Completed Audit"
     assert edit_kwargs.get("archived") is True
     assert edit_kwargs.get("applied_tags") == [tag_done]
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_throttles_thread_rename_and_updates_card(services):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.available_tags = []
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 888123
+    mock_thread.name = "[AUD-11] Old Name"
+    mock_thread.parent = mock_forum
+    mock_thread.archived = False
+    mock_thread.applied_tags = []
+    mock_thread.edit = AsyncMock()
+
+    mock_starter_msg = MagicMock(spec=discord.Message)
+    mock_starter_msg.edit = AsyncMock()
+    mock_thread.starter_message = mock_starter_msg
+
+    bot.get_channel = MagicMock(return_value=mock_thread)
+
+    # Force rate limiter for this thread to be on cooldown
+    adapter.rename_limiter.record_rate_limit(mock_thread.id, retry_after=300.0)
+
+    task = Task(
+        id=uuid4(),
+        guild_id=999,
+        short_id="AUD-11",
+        title="New Name Updated",
+        status=TaskStatus.NOT_STARTED,
+        priority=PriorityLevel.NORMAL,
+        creator_discord_id=1001,
+        discord_thread_id=888123,
+        discord_message_id=777222,
+    )
+
+    res = await adapter.sync_workspace(task, sync_title=True, sync_starter_card=True)
+    # Result should be truthy, with title_deferred=True
+    assert bool(res) is True
+    assert getattr(res, "title_deferred", False) is True
+    assert getattr(res, "cooldown_remaining_seconds", 0.0) > 0.0
+
+    # Starter embed card MUST have been updated immediately
+    mock_starter_msg.edit.assert_awaited_once()
+
+    # Thread.edit was NOT called with 'name' synchronously
+    if mock_thread.edit.await_count > 0:
+        for call in mock_thread.edit.await_args_list:
+            assert "name" not in call.kwargs
 
 
 @pytest.mark.asyncio

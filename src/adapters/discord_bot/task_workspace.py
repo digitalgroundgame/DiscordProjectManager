@@ -9,6 +9,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.thread_rate_limiter import ThreadRenameRateLimiter
 from src.adapters.discord_bot.views.forum_helpers import (
     resolve_forum_tags,
     unarchive_thread_if_needed,
@@ -30,6 +31,7 @@ from src.adapters.discord_bot.views.task_embed import (
 from src.adapters.discord_bot.workspace_protocol import (
     _UNSET,
     ITaskDiscordWorkspace,
+    SyncWorkspaceResult,
     TaskControlPanel,
     TaskWorkspaceRef,
 )
@@ -61,11 +63,13 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         task_service: TaskService,
         project_service: ProjectService | None = None,
         auth_service: AuthService | None = None,
+        rename_limiter: ThreadRenameRateLimiter | None = None,
     ):
         self.bot = bot
         self.task_service = task_service
         self.project_service = project_service
         self.auth_service = auth_service or (AuthService(project_service=project_service) if project_service else None)
+        self.rename_limiter = rename_limiter or ThreadRenameRateLimiter()
 
     async def _resolve_channel(
         self,
@@ -236,10 +240,10 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 thread = await _maybe_await(self.bot.fetch_channel(task.discord_thread_id))
         except Exception as e:
             logger.debug("Could not fetch thread %s for task %s: %s", task.discord_thread_id, task.short_id, e)
-            return False
+            return SyncWorkspaceResult(success=False)
 
         if not isinstance(thread, discord.Thread):
-            return False
+            return SyncWorkspaceResult(success=False)
 
         resolved_proj_name = project_name or (project.name if project else None)
         if not resolved_proj_name and task.project_id and self.project_service:
@@ -285,6 +289,9 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
 
         # 2. Sync Thread Attributes (tags, title, archive state)
         edit_kwargs: dict[str, object] = {}
+        title_renamed = False
+        title_deferred = False
+        cooldown_remaining = 0.0
 
         if sync_tags and isinstance(thread.parent, discord.ForumChannel):
             tags_to_apply = resolve_forum_tags(
@@ -295,12 +302,19 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             )
             edit_kwargs["applied_tags"] = tags_to_apply
 
+        expected_name = None
         if sync_title:
             expected_name = f"[{task.short_id}] {task.title}"
             if len(expected_name) > 100:
                 expected_name = expected_name[:97] + "..."
-            if thread.name != expected_name:
-                edit_kwargs["name"] = expected_name
+            if getattr(thread, "name", None) != expected_name:
+                can_rename, _ = self.rename_limiter.can_rename(thread.id)
+                if can_rename:
+                    edit_kwargs["name"] = expected_name
+                else:
+                    rename_res = await self.rename_limiter.request_rename(thread, expected_name)
+                    title_deferred = rename_res.deferred
+                    cooldown_remaining = rename_res.cooldown_remaining_seconds
 
         if sync_archive:
             is_done = task.status == TaskStatus.COMPLETED or task.is_archived
@@ -312,15 +326,43 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         if edit_kwargs and hasattr(thread, "edit"):
             try:
                 await _maybe_await(thread.edit(**edit_kwargs))
+                if "name" in edit_kwargs:
+                    self.rename_limiter.record_rename(thread.id)
+                    title_renamed = True
             except Exception as e:
-                logger.warning(
-                    "Failed to edit thread state for task %s (%s): %s",
-                    task.short_id,
-                    task.discord_thread_id,
-                    e,
-                )
+                status = getattr(e, "status", None)
+                retry_after = getattr(e, "retry_after", None)
+                if "name" in edit_kwargs and (status == 429 or retry_after is not None):
+                    backoff = float(retry_after) if retry_after else 600.0
+                    self.rename_limiter.record_rate_limit(thread.id, backoff)
+                    rename_res = await self.rename_limiter.request_rename(thread, edit_kwargs["name"])
+                    title_deferred = rename_res.deferred
+                    cooldown_remaining = rename_res.cooldown_remaining_seconds
 
-        return True
+                    remaining_kwargs = {k: v for k, v in edit_kwargs.items() if k != "name"}
+                    if remaining_kwargs:
+                        try:
+                            await _maybe_await(thread.edit(**remaining_kwargs))
+                        except Exception as rem_err:
+                            logger.warning(
+                                "Failed to edit thread attributes without name for task %s: %s",
+                                task.short_id,
+                                rem_err,
+                            )
+                else:
+                    logger.warning(
+                        "Failed to edit thread state for task %s (%s): %s",
+                        task.short_id,
+                        task.discord_thread_id,
+                        e,
+                    )
+
+        return SyncWorkspaceResult(
+            success=True,
+            title_renamed=title_renamed,
+            title_deferred=title_deferred,
+            cooldown_remaining_seconds=cooldown_remaining,
+        )
 
     async def refresh_action_card(
         self,
