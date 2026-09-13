@@ -391,21 +391,29 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             guild_id = interaction.guild.id if (scope == "guild" and interaction.guild) else None
-            synced = await self.bot.sync_slash_commands(guild_id=guild_id)
+            await self.bot.sync_slash_commands(guild_id=guild_id)
+            summary_text = ""
+
+            if hasattr(self.bot, "format_command_tree_summary"):
+                summary_text = f"\n\n{self.bot.format_command_tree_summary()}"
+
             if guild_id:
                 guild_name = interaction.guild.name if interaction.guild else str(guild_id)
                 await interaction.followup.send(
                     f"✅ **Slash Commands Synchronized**\n"
-                    f"Successfully synced {len(synced)} slash commands to **{guild_name}** (`{guild_id}`).",
+                    f"Successfully synced slash commands to **{guild_name}** (`{guild_id}`)."
+                    f"{summary_text}",
                     ephemeral=True,
                 )
             else:
                 await interaction.followup.send(
                     f"✅ **Slash Commands Synchronized**\n"
-                    f"Successfully synced {len(synced)} slash commands globally. "
-                    f"*(Note: Discord global commands may take up to an hour to propagate to all clients.)*",
+                    f"Successfully synced slash commands globally. "
+                    f"*(Note: Discord global commands may take up to an hour to propagate to all clients.)*"
+                    f"{summary_text}",
                     ephemeral=True,
                 )
+
         except discord.errors.Forbidden as exc:
             if getattr(exc, "code", None) == 50001:
                 await interaction.followup.send(

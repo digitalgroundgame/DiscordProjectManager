@@ -30,19 +30,28 @@ async def sync_commands(guild_id: int | None = None, is_global: bool = False) ->
 
     target_guild_id = None if is_global else (guild_id or settings.DISCORD_GUILD_ID)
 
-    bot = create_cli_bot()
-    try:
-        # Load cogs so application commands are populated in bot.tree
-        await bot.add_cog(PmCog(bot=bot))
+    # Disable automatic startup sync inside setup_hook so CLI controls sync execution directly
+    settings.SYNC_COMMANDS_ON_STARTUP = False
 
+    bot = create_cli_bot()
+
+    try:
         # Perform HTTP login only (no Gateway WebSocket connection / no IDENTIFY count)
+        # login() invokes setup_hook(), which loads PmCog into the command tree
         await bot.login(token)
+
+        if not bot.get_cog("PmCog"):
+            await bot.add_cog(PmCog(bot=bot))
 
         scope_desc = f"guild {target_guild_id}" if target_guild_id else "globally across all servers"
         print(f"🔄 Synchronizing slash commands {scope_desc} via Discord HTTP API...")
 
-        synced = await bot.sync_slash_commands(guild_id=target_guild_id)
-        print(f"✅ Successfully synced {len(synced)} application slash commands {scope_desc}.")
+        await bot.sync_slash_commands(guild_id=target_guild_id)
+        print(f"✅ Successfully synced slash commands {scope_desc}.")
+
+        if hasattr(bot, "format_command_tree_summary"):
+            print()
+            print(bot.format_command_tree_summary())
         return 0
     except Exception as exc:
         logger.exception("Failed to sync slash commands via CLI: %s", exc)

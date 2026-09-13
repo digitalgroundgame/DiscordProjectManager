@@ -34,6 +34,8 @@ services:
       OUTBOX_POLL_INTERVAL_SECONDS: 5.0
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      PYTHONUNBUFFERED: "1"
+
     ports:
       - "8000:8000"
     healthcheck:

@@ -1511,7 +1511,7 @@ async def test_admin_sync_guild_scope_execution(services):
     mock_bot.sync_slash_commands.assert_awaited_once_with(guild_id=123456)
     interaction.followup.send.assert_awaited_once()
     msg = interaction.followup.send.call_args[0][0]
-    assert "2 slash commands" in msg
+    assert "Slash Commands Synchronized" in msg
     assert "Test Guild" in msg
 
 
@@ -1522,6 +1522,7 @@ async def test_admin_sync_global_scope_execution(services):
 
     mock_bot = MagicMock()
     mock_bot.sync_slash_commands = AsyncMock(return_value=[MagicMock()])
+    mock_bot.format_command_tree_summary = MagicMock(return_value="**Command Breakdown (33 executable commands)**")
 
     cog = PmCog(
         bot=mock_bot,
@@ -1543,6 +1544,34 @@ async def test_admin_sync_global_scope_execution(services):
     interaction.followup.send.assert_awaited_once()
     msg = interaction.followup.send.call_args[0][0]
     assert "globally" in msg
+    assert "Command Breakdown" in msg
+
+
+@pytest.mark.asyncio
+async def test_bot_command_tree_summary(services):
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+    )
+    with patch.object(bot.tree, "sync", new_callable=AsyncMock):
+        await bot.setup_hook()
+
+    summary = bot.get_command_tree_summary()
+
+    assert summary["total"] >= 30
+    assert "/pm task" in summary["breakdown"]
+    assert "create" in summary["breakdown"]["/pm task"]
+    assert "/pm project" in summary["breakdown"]
+
+    formatted = bot.format_command_tree_summary()
+    assert "Command Breakdown" in formatted
+    assert "/pm task" in formatted
 
 
 @pytest.mark.asyncio

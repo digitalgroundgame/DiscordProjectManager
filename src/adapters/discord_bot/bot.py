@@ -27,8 +27,8 @@ logger = logging.getLogger("dgg_pm.bot")
 class DggPmBot(commands.Bot):
     def __init__(
         self,
-        task_service: TaskService,
-        project_service: ProjectService,
+        task_service: TaskService | None = None,
+        project_service: ProjectService | None = None,
         squad_service: SquadService | None = None,
         user_service: UserService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
@@ -48,21 +48,34 @@ class DggPmBot(commands.Bot):
         self.project_service = project_service
         self.squad_service = squad_service
         self.user_service = user_service
-        self.auth_service = AuthService(project_service, self.squad_service)
-        self.workspace = workspace or DiscordTaskWorkspaceAdapter(
-            bot=self,
-            task_service=task_service,
-            project_service=project_service,
-            auth_service=self.auth_service,
+        self.auth_service = (
+            AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
         )
-        self.project_workspace = project_workspace or DiscordProjectWorkspaceAdapter(
-            bot=self,
-            project_service=project_service,
-            squad_service=self.squad_service,
-            task_service=task_service,
-            user_service=user_service,
-            auth_service=self.auth_service,
-        )
+        if workspace is not None:
+            self.workspace = workspace
+        elif task_service and project_service:
+            self.workspace = DiscordTaskWorkspaceAdapter(
+                bot=self,
+                task_service=task_service,
+                project_service=project_service,
+                auth_service=self.auth_service,
+            )
+        else:
+            self.workspace = None
+
+        if project_workspace is not None:
+            self.project_workspace = project_workspace
+        elif project_service:
+            self.project_workspace = DiscordProjectWorkspaceAdapter(
+                bot=self,
+                project_service=project_service,
+                squad_service=self.squad_service,
+                task_service=task_service,
+                user_service=user_service,
+                auth_service=self.auth_service,
+            )
+        else:
+            self.project_workspace = None
 
     async def setup_hook(self) -> None:
         """Invoked when bot is starting up before login."""
@@ -82,15 +95,16 @@ class DggPmBot(commands.Bot):
         logger.info("Loaded Discord cog: PmCog (unified /pm namespace)")
 
         # Register persistent views
-        self.add_view(
-            PmHubView(
-                project_service=self.project_service,
-                squad_service=self.squad_service,
-                task_service=self.task_service,
-                user_service=self.user_service,
-                auth_service=self.auth_service,
+        if self.project_service and self.squad_service and self.task_service and self.user_service:
+            self.add_view(
+                PmHubView(
+                    project_service=self.project_service,
+                    squad_service=self.squad_service,
+                    task_service=self.task_service,
+                    user_service=self.user_service,
+                    auth_service=self.auth_service,
+                )
             )
-        )
 
         # Sync application slash commands if configured
         if settings.SYNC_COMMANDS_ON_STARTUP:
@@ -133,6 +147,42 @@ class DggPmBot(commands.Bot):
             synced = await self.tree.sync()
             logger.info("Synced %d slash commands globally.", len(synced))
             return synced
+
+    def get_command_tree_summary(self) -> dict[str, Any]:
+        """Inspect the command tree and extract a structured breakdown of commands and subcommands."""
+        breakdown: dict[str, list[str]] = {}
+        total = 0
+
+        for cmd in self.tree.get_commands():
+            if hasattr(cmd, "commands") and cmd.commands:
+                for sub in cmd.commands:
+                    if hasattr(sub, "commands") and sub.commands:
+                        sub_list = [s2.name for s2 in sub.commands]
+                        breakdown[f"/{cmd.name} {sub.name}"] = sub_list
+                        total += len(sub_list)
+                    else:
+                        breakdown.setdefault(f"/{cmd.name}", []).append(sub.name)
+                        total += 1
+            else:
+                breakdown.setdefault("root", []).append(f"/{cmd.name}")
+                total += 1
+
+        return {
+            "total": total,
+            "breakdown": breakdown,
+        }
+
+    def format_command_tree_summary(self) -> str:
+        """Format command tree summary into a human-readable markdown message."""
+        summary = self.get_command_tree_summary()
+        total = summary["total"]
+        lines = [f"**Command Breakdown ({total} executable commands):**"]
+        for group, subs in summary["breakdown"].items():
+            if group == "root":
+                lines.append(f"• Root commands: {', '.join(f'`{s}`' for s in subs)}")
+            else:
+                lines.append(f"• `{group}` ({len(subs)}): {', '.join(f'`{s}`' for s in subs)}")
+        return "\n".join(lines)
 
     async def on_ready(self) -> None:
         logger.info(

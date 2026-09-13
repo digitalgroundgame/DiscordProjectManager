@@ -21,6 +21,7 @@ async def test_cli_sync_commands_requires_token(capsys):
 async def test_cli_sync_commands_guild_override():
     """Verify sync-commands syncs to specified guild when --guild-id is passed."""
     mock_bot = MagicMock()
+    mock_bot.get_cog.return_value = None
     mock_bot.add_cog = AsyncMock()
     mock_bot.login = AsyncMock()
     mock_bot.close = AsyncMock()
@@ -42,6 +43,7 @@ async def test_cli_sync_commands_guild_override():
 async def test_cli_sync_commands_global_flag():
     """Verify sync-commands syncs globally when --global is passed."""
     mock_bot = MagicMock()
+    mock_bot.get_cog.return_value = None
     mock_bot.add_cog = AsyncMock()
     mock_bot.login = AsyncMock()
     mock_bot.close = AsyncMock()
@@ -61,6 +63,7 @@ async def test_cli_sync_commands_global_flag():
 async def test_cli_sync_commands_preserves_gateway_sessions():
     """Verify sync-commands uses HTTP login only and does not invoke Gateway connect or start."""
     mock_bot = MagicMock()
+    mock_bot.get_cog.return_value = None
     mock_bot.add_cog = AsyncMock()
     mock_bot.login = AsyncMock()
     mock_bot.connect = AsyncMock()
