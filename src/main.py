@@ -81,6 +81,9 @@ async def run_app() -> None:
         notifier=notifier,
         poll_interval=settings.OUTBOX_POLL_INTERVAL_SECONDS,
         batch_size=settings.OUTBOX_BATCH_SIZE,
+        max_retries=settings.OUTBOX_MAX_RETRIES,
+        backoff_cap_seconds=settings.OUTBOX_BACKOFF_CAP_SECONDS,
+        max_retention_hours=settings.OUTBOX_MAX_RETENTION_HOURS,
     )
 
     # 5. Configure FastAPI Server

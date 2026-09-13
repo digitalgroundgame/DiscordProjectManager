@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Outbox Worker Configuration
     OUTBOX_POLL_INTERVAL_SECONDS: float = 5.0
     OUTBOX_BATCH_SIZE: int = 10
+    OUTBOX_MAX_RETRIES: int = 150
+    OUTBOX_BACKOFF_CAP_SECONDS: float = 600.0
+    OUTBOX_MAX_RETENTION_HOURS: float = 48.0
 
     # API / Health Server Configuration
     API_HOST: str = "0.0.0.0"

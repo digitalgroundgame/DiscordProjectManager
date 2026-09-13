@@ -52,3 +52,25 @@ def test_startup_crash_backoff_seconds_defaults(monkeypatch):
 
     custom = Settings(_env_file=None, STARTUP_CRASH_BACKOFF_SECONDS=10.5)
     assert custom.STARTUP_CRASH_BACKOFF_SECONDS == 10.5
+
+
+def test_outbox_retention_and_backoff_settings(monkeypatch):
+    """Verifies that outbox retention, max retries, and backoff cap have resilient defaults and support overrides."""
+    monkeypatch.delenv("OUTBOX_MAX_RETRIES", raising=False)
+    monkeypatch.delenv("OUTBOX_BACKOFF_CAP_SECONDS", raising=False)
+    monkeypatch.delenv("OUTBOX_MAX_RETENTION_HOURS", raising=False)
+
+    cfg = Settings(_env_file=None)
+    assert cfg.OUTBOX_MAX_RETRIES == 150
+    assert cfg.OUTBOX_BACKOFF_CAP_SECONDS == 600.0
+    assert cfg.OUTBOX_MAX_RETENTION_HOURS == 48.0
+
+    custom = Settings(
+        _env_file=None,
+        OUTBOX_MAX_RETRIES=20,
+        OUTBOX_BACKOFF_CAP_SECONDS=300.0,
+        OUTBOX_MAX_RETENTION_HOURS=24.0,
+    )
+    assert custom.OUTBOX_MAX_RETRIES == 20
+    assert custom.OUTBOX_BACKOFF_CAP_SECONDS == 300.0
+    assert custom.OUTBOX_MAX_RETENTION_HOURS == 24.0

@@ -138,7 +138,12 @@ async def test_outbox_worker_429_retries_are_capped(services, repos, db_session)
         scheduled_for=datetime.now(UTC),
     )
 
-    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=RateLimitedNotifier(), poll_interval=1.0)
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=RateLimitedNotifier(),
+        poll_interval=1.0,
+        max_retries=5,
+    )
 
     pending = await outbox_repo.fetch_pending_batch(limit=10)
     domain_evt = next(e for e in pending if e.idempotency_key == "test_rate_limited_capped")
@@ -151,6 +156,164 @@ async def test_outbox_worker_429_retries_are_capped(services, repos, db_session)
     row = (await db_session.execute(stmt)).scalar_one()
     assert row.status == OutboxStatus.FAILED.value
     assert row.retry_count == 5
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_survives_extended_outage_past_5_retries(services, repos, db_session):
+    """Verifies that an event with >5 retries during outages stays PENDING rather than permanently FAILED."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class OutageNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise ConnectionError("Discord API Outage 503")
+
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_extended_outage_survival",
+        payload={"msg": "Outage Test"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=OutageNotifier(), poll_interval=1.0)
+
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    domain_evt = next(e for e in pending if e.idempotency_key == "test_extended_outage_survival")
+    domain_evt.retry_count = 5  # 5 prior attempts. Under old policy, next attempt would transition to FAILED.
+
+    await worker._process_single_event(domain_evt)
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_extended_outage_survival")
+    row = (await db_session.execute(stmt)).scalar_one()
+
+    # Must survive and remain PENDING for next attempt (retry 6)
+    assert row.status == OutboxStatus.PENDING.value
+    assert row.retry_count == 6
+    # Delay for retry 6 should be min(600, 2**6 * 5 = 320) seconds
+    scheduled_diff = (row.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 310 <= scheduled_diff <= 330
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_exponential_backoff_progression_and_cap(services, repos, db_session):
+    """Verifies that exponential backoff doubles properly and enforces the configured cap."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class FailingNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise RuntimeError("API temporary error")
+
+    # Custom cap of 100.0s for testing
+    cap = 100.0
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=FailingNotifier(),
+        poll_interval=1.0,
+        backoff_cap_seconds=cap,
+    )
+
+    # Test retry 1: 2^1 * 5 = 10s
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_backoff_retry_1",
+        payload={"msg": "1"},
+        scheduled_for=datetime.now(UTC),
+    )
+    pending1 = await outbox_repo.fetch_pending_batch(limit=10)
+    domain1 = next(e for e in pending1 if e.idempotency_key == "test_backoff_retry_1")
+    domain1.retry_count = 0  # 1st failure
+    await worker._process_single_event(domain1)
+
+    db_session.expire_all()
+    stmt1 = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_backoff_retry_1")
+    row1 = (await db_session.execute(stmt1)).scalar_one()
+    diff1 = (row1.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 8 <= diff1 <= 12  # ~10s
+
+    # Test retry 7: 2^7 * 5 = 640s -> capped at 100s
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_backoff_retry_7_capped",
+        payload={"msg": "7"},
+        scheduled_for=datetime.now(UTC),
+    )
+    pending7 = await outbox_repo.fetch_pending_batch(limit=10)
+    domain7 = next(e for e in pending7 if e.idempotency_key == "test_backoff_retry_7_capped")
+    domain7.retry_count = 6  # 7th failure
+    await worker._process_single_event(domain7)
+
+    db_session.expire_all()
+    stmt7 = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_backoff_retry_7_capped")
+    row7 = (await db_session.execute(stmt7)).scalar_one()
+    diff7 = (row7.scheduled_for.replace(tzinfo=UTC) - datetime.now(UTC)).total_seconds()
+    assert 95 <= diff7 <= 105  # capped at ~100s
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_retention_window_expiration(services, repos, db_session):
+    """Verifies that an event exceeding max_retention_hours transitions to FAILED even if retry count is low."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    class FailingNotifier(INotificationDispatcher):
+        async def dispatch_event(self, event):
+            raise RuntimeError("Outage error")
+
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=FailingNotifier(),
+        poll_interval=1.0,
+        max_retries=150,
+        max_retention_hours=24.0,
+    )
+
+    await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="test_retention_window_expired",
+        payload={"msg": "Old event"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    domain_evt = next(e for e in pending if e.idempotency_key == "test_retention_window_expired")
+    # Simulate event created 30 hours ago (beyond 24h retention window)
+    domain_evt.created_at = datetime.now(UTC) - timedelta(hours=30)
+    domain_evt.retry_count = 2  # Only 2 retries, well below max_retries 150
+
+    await worker._process_single_event(domain_evt)
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "test_retention_window_expired")
+    row = (await db_session.execute(stmt)).scalar_one()
+
+    # Must transition to FAILED due to retention window expiry
+    assert row.status == OutboxStatus.FAILED.value
+    assert row.retry_count == 3
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_custom_config_injection(repos):
+    """Verifies that OutboxWorker accepts and applies custom configuration parameters."""
+    outbox_repo = repos["outbox"]
+    mock_notifier = MockNotifier()
+
+    worker = OutboxWorker(
+        outbox_repo=outbox_repo,
+        notifier=mock_notifier,
+        poll_interval=2.5,
+        batch_size=20,
+        max_retries=50,
+        backoff_cap_seconds=120.0,
+        max_retention_hours=12.0,
+    )
+
+    assert worker.poll_interval == 2.5
+    assert worker.batch_size == 20
+    assert worker.max_retries == 50
+    assert worker.backoff_cap_seconds == 120.0
+    assert worker.max_retention_hours == 12.0
 
 
 @pytest.mark.asyncio
