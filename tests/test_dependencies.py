@@ -217,3 +217,72 @@ async def test_project_tree_data_derivation(services):
     # Task B should now be unlocked and available / ready to start!
     assert node_map_after[task_b.short_id]["state"] == "available"
     assert node_map_after[task_c.short_id]["state"] == "locked"
+
+
+@pytest.mark.asyncio
+async def test_get_unresolved_prerequisites_lifecycle(services):
+    """TaskService.get_unresolved_prerequisites returns only prerequisites that are not yet COMPLETED."""
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877665
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Infra DAG", prefix="DAG")
+
+    task_1 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Database Setup",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+    task_2 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Redis Cache",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+    task_3 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="API Gateway",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[task_1.short_id, task_2.short_id],
+    )
+
+    # Initially: both task_1 and task_2 are unresolved blockers
+    unresolved_initial = await task_srv.get_unresolved_prerequisites(task_3.id)
+    unresolved_ids = {t.id for t in unresolved_initial}
+    assert unresolved_ids == {task_1.id, task_2.id}
+
+    # Transition task_1 to IN_PROGRESS: still unresolved!
+    task_1 = await task_srv.update_status(
+        task_1.id,
+        TaskStatus.IN_PROGRESS,
+        expected_version=task_1.version,
+        actor_discord_id=1001,
+    )
+    unresolved_in_prog = await task_srv.get_unresolved_prerequisites(task_3.id)
+    assert {t.id for t in unresolved_in_prog} == {task_1.id, task_2.id}
+
+    # Complete task_1: only task_2 remains unresolved
+    task_1 = await task_srv.update_status(
+        task_1.id,
+        TaskStatus.COMPLETED,
+        expected_version=task_1.version,
+        actor_discord_id=1001,
+    )
+    unresolved_partial = await task_srv.get_unresolved_prerequisites(task_3.id)
+    assert len(unresolved_partial) == 1
+    assert unresolved_partial[0].id == task_2.id
+
+    # Complete task_2: all blockers resolved
+    await task_srv.update_status(
+        task_2.id,
+        TaskStatus.COMPLETED,
+        expected_version=task_2.version,
+        actor_discord_id=1001,
+    )
+    unresolved_done = await task_srv.get_unresolved_prerequisites(task_3.id)
+    assert unresolved_done == []
+
+    # Task without dependencies returns empty list
+    assert await task_srv.get_unresolved_prerequisites(task_1.id) == []

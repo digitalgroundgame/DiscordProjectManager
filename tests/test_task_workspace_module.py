@@ -404,6 +404,77 @@ async def test_handle_action_status_and_permissions(services):
 
 
 @pytest.mark.asyncio
+async def test_handle_action_blocked_state_start_and_complete_guards(services):
+    """handle_action with 'start' or 'complete' on a task with incomplete blockers presents confirmation view."""
+    from src.adapters.discord_bot.views.task_blocked_view import TaskBlockedConfirmView
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Guard Proj", prefix="GUA")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    # 1. Attempting 'start' on blocked task
+    interaction_start = MagicMock(spec=discord.Interaction)
+    interaction_start.guild_id = guild_id
+    interaction_start.user = MagicMock(id=2001)  # Assignee
+    interaction_start.response = MagicMock()
+    interaction_start.response.is_done.return_value = False
+    interaction_start.response.send_message = AsyncMock()
+
+    await adapter.handle_action(interaction_start, "start", blocked_task.id)
+
+    # Should send ephemeral warning view with blocker info
+    interaction_start.response.send_message.assert_awaited_once()
+    kwargs = interaction_start.response.send_message.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    assert isinstance(kwargs.get("view"), TaskBlockedConfirmView)
+    embed = kwargs.get("embed")
+    assert embed is not None
+    assert "Unresolved Dependencies" in embed.title
+    assert blocker.short_id in embed.fields[0].value
+
+    # Task status must NOT have changed in DB
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
+
+    # 2. Attempting 'complete' on blocked task
+    interaction_complete = MagicMock(spec=discord.Interaction)
+    interaction_complete.guild_id = guild_id
+    interaction_complete.user = MagicMock(id=2001)
+    interaction_complete.response = MagicMock()
+    interaction_complete.response.is_done.return_value = False
+    interaction_complete.response.send_message = AsyncMock()
+
+    await adapter.handle_action(interaction_complete, "complete", blocked_task.id)
+
+    interaction_complete.response.send_message.assert_awaited_once()
+    kwargs_c = interaction_complete.response.send_message.call_args.kwargs
+    assert isinstance(kwargs_c.get("view"), TaskBlockedConfirmView)
+    assert kwargs_c["view"].target_status == TaskStatus.COMPLETED
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
+
+
+@pytest.mark.asyncio
 async def test_handle_action_unassign_and_priority(services):
     proj_srv = services["project"]
     task_srv = services["task"]

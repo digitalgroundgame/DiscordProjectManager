@@ -787,6 +787,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         status="New task status",
         task="Short ID of the task (omit if inside thread)",
         notes="Optional transition notes",
+        force="Bypass dependency guard if task has incomplete blockers",
     )
     @app_commands.choices(
         status=[
@@ -802,6 +803,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         status: str,
         task: str | None = None,
         notes: str | None = None,
+        force: bool = False,
     ) -> None:
         if not interaction.guild:
             return
@@ -827,6 +829,41 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 except ValueError:
                     await interaction.followup.send(f"❌ Invalid status: '{status}'.", ephemeral=True)
                     return
+
+            if new_status in (TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED):
+                unresolved = await self.task_service.get_unresolved_prerequisites(task_entity.id)
+                if unresolved:
+                    if not force:
+                        from src.adapters.discord_bot.views.task_blocked_view import (
+                            TaskBlockedConfirmView,
+                            build_task_blocked_confirm_embed,
+                        )
+
+                        embed = build_task_blocked_confirm_embed(task_entity, new_status, unresolved)
+                        view = TaskBlockedConfirmView(
+                            task=task_entity,
+                            target_status=new_status,
+                            incomplete_prereqs=unresolved,
+                            author_id=interaction.user.id,
+                            task_service=self.task_service,
+                            auth_service=self.auth_service,
+                            workspace=self.workspace,
+                            bot=self.bot,
+                            notes=notes,
+                        )
+                        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                        return
+                    else:
+                        if self.auth_service:
+                            await self.auth_service.require_dependency_bypass(interaction.user, task_entity)
+                        blocker_ids = ", ".join(f"[{p.short_id}]" for p in unresolved)
+                        bypass_note = f"bypassed unresolved blockers: {blocker_ids}"
+                        notes = (
+                            f"{notes} ({bypass_note})"
+                            if notes
+                            else f"Status updated to {new_status.value} ({bypass_note})"
+                        )
+
             updated_task = await self.task_service.update_status(
                 task_id=task_entity.id,
                 new_status=new_status,

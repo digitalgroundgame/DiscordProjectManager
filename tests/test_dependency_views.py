@@ -170,3 +170,86 @@ async def test_dependency_and_tree_cogs_slash_commands(services):
     interaction.followup.send.reset_mock()
     await pm_cog.pm_tree.callback(pm_cog, interaction=interaction, project_name="Security Audit", orientation=None)
     interaction.followup.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_task_blocked_confirm_view_and_embed(services):
+    """TaskBlockedConfirmView renders unresolved blockers, supports proceed (bypass) and cancel."""
+    from src.adapters.discord_bot.views.task_blocked_view import (
+        TaskBlockedConfirmView,
+        build_task_blocked_confirm_embed,
+    )
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877671
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Guard Project", prefix="GRD")
+    t1 = await task_srv.create_task(
+        guild_id=guild_id, title="Prerequisite Task", creator_discord_id=1001, project_id=project.id
+    )
+    t2 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Dependent Task",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[t1.short_id],
+    )
+
+    # 1. Embed content verification
+    embed = build_task_blocked_confirm_embed(t2, TaskStatus.IN_PROGRESS, [t1])
+    assert "Unresolved Dependencies" in embed.title
+    assert t2.short_id in embed.title
+    assert "Unresolved Blockers" in embed.fields[0].name
+    assert t1.short_id in embed.fields[0].value
+
+    # 2. View initialization
+    mock_workspace = MagicMock()
+    mock_workspace.refresh_action_card = AsyncMock()
+    mock_workspace.sync_workspace = AsyncMock()
+
+    view = TaskBlockedConfirmView(
+        task=t2,
+        target_status=TaskStatus.IN_PROGRESS,
+        incomplete_prereqs=[t1],
+        author_id=1001,
+        task_service=task_srv,
+        workspace=mock_workspace,
+    )
+
+    # Interaction check: unauthorized user rejected
+    bad_interaction = MagicMock(spec=discord.Interaction)
+    bad_interaction.user = MagicMock(id=9999)
+    bad_interaction.response = MagicMock()
+    bad_interaction.response.send_message = AsyncMock()
+    assert await view.interaction_check(bad_interaction) is False
+    bad_interaction.response.send_message.assert_awaited_once()
+
+    # Cancel button preserves NOT_STARTED status
+    cancel_interaction = MagicMock(spec=discord.Interaction)
+    cancel_interaction.user = MagicMock(id=1001)
+    cancel_interaction.response = MagicMock()
+    cancel_interaction.response.edit_message = AsyncMock()
+
+    await view.cancel_transition.callback(cancel_interaction)
+    cancel_interaction.response.edit_message.assert_awaited_once()
+    assert "cancelled" in cancel_interaction.response.edit_message.call_args.kwargs["content"]
+
+    t2_after_cancel = await task_srv.get_by_id(t2.id)
+    assert t2_after_cancel.status == TaskStatus.NOT_STARTED
+
+    # Proceed button transitions to IN_PROGRESS
+    proceed_interaction = MagicMock(spec=discord.Interaction)
+    proceed_interaction.user = MagicMock(id=1001)
+    proceed_interaction.response = MagicMock()
+    proceed_interaction.response.edit_message = AsyncMock()
+
+    await view.confirm_proceed.callback(proceed_interaction)
+    proceed_interaction.response.edit_message.assert_awaited_once()
+    assert "Bypassed" in proceed_interaction.response.edit_message.call_args.kwargs["content"]
+
+    t2_after_proceed = await task_srv.get_by_id(t2.id)
+    assert t2_after_proceed.status == TaskStatus.IN_PROGRESS
+    mock_workspace.refresh_action_card.assert_awaited_once()
+    mock_workspace.sync_workspace.assert_awaited_once()

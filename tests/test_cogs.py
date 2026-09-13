@@ -1767,3 +1767,195 @@ async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
         await asyncio.sleep(0.01)
 
     mock_outbox_svc.reclaim_failed_events.assert_awaited_once()
+
+
+def test_task_status_command_parameters():
+    """Verify that task-status command supports optional 'force' parameter."""
+    cmd = PmCog.task_status
+    params = {p.name: p for p in cmd.parameters}
+
+    assert "status" in params
+    assert params["status"].required is True
+
+    assert "force" in params
+    assert params["force"].required is False
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_without_force(services):
+    """task_status without force on a task with incomplete blockers presents TaskBlockedConfirmView and halts."""
+    from src.adapters.discord_bot.views.task_blocked_view import TaskBlockedConfirmView
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard Proj", prefix="CGP")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(id=2001)  # Assignee
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=False,
+    )
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.followup.send.assert_awaited_once()
+    send_kwargs = interaction.followup.send.call_args.kwargs
+    assert send_kwargs.get("ephemeral") is True
+    assert isinstance(send_kwargs.get("view"), TaskBlockedConfirmView)
+    assert send_kwargs["view"].target_status == TaskStatus.IN_PROGRESS
+    assert blocker.short_id in send_kwargs.get("embed").fields[0].value
+
+    # Verify task status did NOT change in database
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_with_force(services):
+    """task_status with force=True bypasses the dependency guard and updates task status."""
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard Force", prefix="CGF")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = MagicMock(id=2001)  # Assignee (authorized to bypass)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=True,
+    )
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.followup.send.assert_awaited_once()
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_task_status_blocked_guard_with_force_unauthorized(services):
+    """task_status with force=True rejects users who lack bypass permissions."""
+    from src.domain.enums import TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 998877
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Cog Guard NoPerm", prefix="CGN")
+    blocker = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocker Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+    )
+    blocked_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Blocked Task",
+        project_id=project.id,
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        prerequisite_short_ids=[blocker.short_id],
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    perms = discord.Permissions(manage_guild=False, administrator=False)
+    interaction.user = MagicMock(id=9999, guild_permissions=perms)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_status.callback(
+        cog,
+        interaction=interaction,
+        status="in_progress",
+        task=blocked_task.short_id,
+        force=True,
+    )
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "You do not have permission" in msg
+
+    task_in_db = await task_srv.get_by_id(blocked_task.id)
+    assert task_in_db.status == TaskStatus.NOT_STARTED
