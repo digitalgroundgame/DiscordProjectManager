@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -450,9 +450,15 @@ async def ensure_pinned_hub_post(
         if existing_thread:
             try:
                 if hasattr(existing_thread, "edit"):
-                    edit_res = existing_thread.edit(name=post_title, pinned=True)
-                    if hasattr(edit_res, "__await__"):
-                        await edit_res
+                    name_changed = getattr(existing_thread, "name", None) != post_title
+                    needs_pin = getattr(existing_thread, "pinned", None) is not True
+                    if name_changed or needs_pin:
+                        edit_kwargs: dict[str, Any] = {"pinned": True}
+                        if name_changed:
+                            edit_kwargs["name"] = post_title
+                        edit_res = existing_thread.edit(**edit_kwargs)
+                        if hasattr(edit_res, "__await__"):
+                            await edit_res
             except Exception as e:
                 logger.warning("Could not edit thread title/pin for %s: %s", getattr(existing_thread, "id", None), e)
 
