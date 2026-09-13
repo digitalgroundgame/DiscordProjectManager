@@ -273,6 +273,10 @@ class IOutboxRepo(ABC):
     async def reclaim_stale_processing(self) -> int:
         """Resets stuck PROCESSING events back to PENDING so they can be redelivered (crash recovery)."""
 
+    @abstractmethod
+    async def reclaim_failed_events(self, max_age_hours: float = 24.0) -> int:
+        """Transitions recent FAILED events back to PENDING with reset retry count within lookback window."""
+
 
 class IUserPreferenceRepo(ABC):
     @abstractmethod

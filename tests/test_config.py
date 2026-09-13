@@ -117,6 +117,7 @@ def test_minimal_configuration_uses_static_defaults(monkeypatch):
         "OUTBOX_MAX_RETRIES",
         "OUTBOX_BACKOFF_CAP_SECONDS",
         "OUTBOX_MAX_RETENTION_HOURS",
+        "OUTBOX_RECLAIM_LOOKBACK_HOURS",
         "API_HOST",
         "API_PORT",
         "DEBUG",
@@ -148,6 +149,7 @@ def test_minimal_configuration_uses_static_defaults(monkeypatch):
     assert cfg.OUTBOX_MAX_RETRIES == 150
     assert cfg.OUTBOX_BACKOFF_CAP_SECONDS == 600.0
     assert cfg.OUTBOX_MAX_RETENTION_HOURS == 48.0
+    assert cfg.OUTBOX_RECLAIM_LOOKBACK_HOURS == 24.0
 
     # Static API defaults
     assert cfg.API_HOST == "0.0.0.0"

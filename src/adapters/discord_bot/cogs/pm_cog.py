@@ -37,6 +37,7 @@ from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
 
 if TYPE_CHECKING:
+    from src.services.outbox_service import OutboxService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.cogs.pm")
@@ -70,6 +71,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         task_service: TaskService | None = None,
         auth_service: AuthService | None = None,
         user_service: UserService | None = None,
+        outbox_service: OutboxService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
     ):
@@ -81,6 +83,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
         )
         self.user_service = user_service
+        self.outbox_service = outbox_service or getattr(bot, "outbox_service", None)
         from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
         from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 
@@ -431,6 +434,55 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             logger.exception("Error during /pm admin sync: %s", exc)
             await interaction.followup.send(
                 f"❌ **Command Sync Error**: {exc}",
+                ephemeral=True,
+            )
+
+    @admin_group.command(
+        name="retry-outbox",
+        description="Reclaim and retry dead-lettered outbox events that failed during an outage.",
+    )
+    @app_commands.describe(
+        hours="Lookback window in hours to reclaim failed events (default: 24.0)",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_retry_outbox(
+        self,
+        interaction: discord.Interaction,
+        hours: float = 24.0,
+    ) -> None:
+        """Reclaim recent FAILED outbox events and reset them to PENDING for redelivery."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            outbox_service = getattr(self, "outbox_service", None) or getattr(self.bot, "outbox_service", None)
+            if not outbox_service and self.task_service:
+                outbox_service = getattr(self.task_service, "outbox_service", None)
+
+            if not outbox_service:
+                await interaction.followup.send(
+                    "❌ Outbox service is not available on this bot instance.",
+                    ephemeral=True,
+                )
+                return
+
+            count = await outbox_service.reclaim_failed_events(max_age_hours=hours)
+            if count > 0:
+                await interaction.followup.send(
+                    f"✅ **Outbox Events Reclaimed**\n"
+                    f"Successfully reclaimed **{count}** failed outbox event(s) "
+                    f"from the past **{hours:.1f}** hour(s).\n"
+                    f"They have been reset to `PENDING` with retry count cleared and are now queued for dispatch.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"ℹ️ **No Failed Events Found**\n"
+                    f"There were no `FAILED` outbox events within the past **{hours:.1f}** hour(s) to reclaim.",
+                    ephemeral=True,
+                )
+        except Exception as exc:
+            logger.exception("Error during /pm admin retry-outbox: %s", exc)
+            await interaction.followup.send(
+                f"❌ **Outbox Reclaim Failed**: {exc}",
                 ephemeral=True,
             )
 

@@ -68,6 +68,7 @@ async def run_app() -> None:
         project_service=project_service,
         squad_service=squad_service,
         user_service=user_service,
+        outbox_service=outbox_service,
     )
     notifier = DiscordNotifier(
         bot,
