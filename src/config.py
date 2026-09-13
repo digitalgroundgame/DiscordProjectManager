@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     OUTBOX_MAX_RETRIES: int = 150
     OUTBOX_BACKOFF_CAP_SECONDS: float = 600.0
     OUTBOX_MAX_RETENTION_HOURS: float = 48.0
+    OUTBOX_RECLAIM_LOOKBACK_HOURS: float = 24.0
 
     # API / Health Server Configuration
     API_HOST: str = "0.0.0.0"

@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -1151,6 +1151,33 @@ class PostgresOutboxRepo(BasePostgresRepo, IOutboxRepo):
                 update(OutboxEventTable)
                 .where(OutboxEventTable.status == OutboxStatus.PROCESSING.value)
                 .values(status=OutboxStatus.PENDING.value)
+            )
+            res = await session.execute(stmt)
+            await session.commit()
+            return res.rowcount or 0
+
+    async def reclaim_failed_events(self, max_age_hours: float = 24.0) -> int:
+        """Transitions recent FAILED events back to PENDING with reset retry count within lookback window.
+
+        Enables automatic recovery following prolonged Discord outages where events exhausted
+        their retry threshold and entered FAILED state. Reclaiming them makes them available
+        for normal worker polling and delivery once connectivity is restored.
+        """
+        async with self._get_session() as session:
+            now = datetime.now(UTC)
+            cutoff = now - timedelta(hours=max_age_hours)
+            stmt = (
+                update(OutboxEventTable)
+                .where(
+                    OutboxEventTable.status == OutboxStatus.FAILED.value,
+                    OutboxEventTable.created_at >= cutoff,
+                )
+                .values(
+                    status=OutboxStatus.PENDING.value,
+                    retry_count=0,
+                    scheduled_for=now,
+                )
+                .execution_options(synchronize_session=False)
             )
             res = await session.execute(stmt)
             await session.commit()

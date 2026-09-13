@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,7 @@ from src.adapters.discord_bot.workspace_protocol import (
 from src.config import settings
 from src.domain.models import Task
 from src.services.auth_service import AuthService
+from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
@@ -31,6 +33,7 @@ class DggPmBot(commands.Bot):
         project_service: ProjectService | None = None,
         squad_service: SquadService | None = None,
         user_service: UserService | None = None,
+        outbox_service: OutboxService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
     ):
@@ -48,6 +51,10 @@ class DggPmBot(commands.Bot):
         self.project_service = project_service
         self.squad_service = squad_service
         self.user_service = user_service
+        self.outbox_service = outbox_service or (
+            getattr(task_service, "outbox_service", None) if task_service else None
+        )
+        self._background_tasks: set[asyncio.Task] = set()
         self.auth_service = (
             AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
         )
@@ -88,6 +95,7 @@ class DggPmBot(commands.Bot):
                 task_service=self.task_service,
                 auth_service=self.auth_service,
                 user_service=self.user_service,
+                outbox_service=self.outbox_service,
                 workspace=self.workspace,
                 project_workspace=self.project_workspace,
             )
@@ -197,6 +205,32 @@ class DggPmBot(commands.Bot):
                 name="tasks with /pm help",
             )
         )
+        if self.outbox_service:
+            task = asyncio.create_task(
+                self._reconcile_failed_outbox_events(),
+                name="Reconcile-Failed-Outbox",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+    async def _reconcile_failed_outbox_events(self, max_age_hours: float | None = None) -> int:
+        """Reconcile and reclaim FAILED outbox events after gateway connection/reconnection."""
+        try:
+            if not self.outbox_service:
+                return 0
+            lookback = max_age_hours if max_age_hours is not None else settings.OUTBOX_RECLAIM_LOOKBACK_HOURS
+            count = await self.outbox_service.reclaim_failed_events(max_age_hours=lookback)
+            if count > 0:
+                logger.info(
+                    "Reconnected to Gateway: successfully reclaimed %d failed outbox event(s) "
+                    "(lookback: %sh) for retry.",
+                    count,
+                    lookback,
+                )
+            return count
+        except Exception as e:
+            logger.warning("Failed to reclaim failed outbox events on gateway reconnect: %s", e)
+            return 0
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         """Auto-prune squad lead records if the corresponding Discord role is removed from the member."""

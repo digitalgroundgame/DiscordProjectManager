@@ -1608,3 +1608,162 @@ async def test_admin_sync_error_handling(services):
     msg = interaction.followup.send.call_args[0][0]
     assert "Command Sync Failed (403 Missing Access)" in msg
     assert "applications.commands" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_command_metadata():
+    """Verify that PmCog defines admin_group with retry-outbox command and hours parameter."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    cmd = next((c for c in PmCog.admin_group.commands if c.name == "retry-outbox"), None)
+    assert cmd is not None
+    assert "hours" in [p.name for p in cmd.parameters]
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_execution_reclaimed(services):
+    """Verify /pm admin retry-outbox reclaims failed events and reports success."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=3)
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=12.0)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    mock_outbox_svc.reclaim_failed_events.assert_awaited_once_with(max_age_hours=12.0)
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox Events Reclaimed" in msg
+    assert "3" in msg
+    assert "12.0" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_execution_none_found(services):
+    """Verify /pm admin retry-outbox handles zero reclaimed events gracefully."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=0)
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "No Failed Events Found" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_service_missing(services):
+    """Verify /pm admin retry-outbox warns when outbox service is not available."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_bot = MagicMock()
+    mock_bot.outbox_service = None
+
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=None,
+        outbox_service=None,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox service is not available" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_outbox_error_handling(services):
+    """Verify /pm admin retry-outbox catches exceptions and sends error message."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(side_effect=RuntimeError("Database lock error"))
+
+    cog = PmCog(
+        bot=MagicMock(),
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.admin_retry_outbox.callback(cog, interaction, hours=24.0)
+
+    interaction.followup.send.assert_awaited_once()
+    msg = interaction.followup.send.call_args[0][0]
+    assert "Outbox Reclaim Failed" in msg
+    assert "Database lock error" in msg
+
+
+@pytest.mark.asyncio
+async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
+    """Verify DggPmBot.on_ready triggers background reconciliation of failed outbox events."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=2)
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    with patch.object(bot, "change_presence", new_callable=AsyncMock):
+        await bot.on_ready()
+        # Yield control to allow background asyncio task to execute
+        await asyncio.sleep(0.01)
+
+    mock_outbox_svc.reclaim_failed_events.assert_awaited_once()

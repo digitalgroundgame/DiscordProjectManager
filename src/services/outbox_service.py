@@ -105,3 +105,12 @@ class OutboxService:
     ) -> int:
         repo = outbox_repo or self.outbox_repo
         return await repo.cancel_task_reminders(task_id, session=session)
+
+    async def reclaim_failed_events(
+        self,
+        max_age_hours: float = 24.0,
+        outbox_repo: IOutboxRepo | None = None,
+    ) -> int:
+        """Reclaims failed outbox events within the lookback window to enable automatic recovery."""
+        repo = outbox_repo or self.outbox_repo
+        return await repo.reclaim_failed_events(max_age_hours=max_age_hours)

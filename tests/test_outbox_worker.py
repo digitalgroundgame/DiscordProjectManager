@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.adapters.db.tables import OutboxEventTable
 from src.adapters.worker.outbox_worker import OutboxWorker
@@ -382,6 +383,157 @@ async def test_outbox_worker_start_reclaims_and_dispatches_stranded_events(servi
     await task
 
     assert any(e.idempotency_key == "start_delivery_key" for e in mock_notifier.dispatched)
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_restores_pending_within_lookback(services, repos, db_session):
+    """Failed events within lookback window must be reclaimed to PENDING with reset retry count."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="failed_event_to_reclaim",
+        payload={"msg": "failed during outage"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    # Fail the event (exhausted retries during outage)
+    await outbox_repo.reschedule_or_fail(
+        event_id=event.id,
+        retry_count=150,
+        next_scheduled_for=datetime.now(UTC),
+        failed=True,
+    )
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "failed_event_to_reclaim")
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.FAILED.value
+    assert row.retry_count == 150
+
+    # Reclaim with 24h lookback
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 1
+
+    db_session.expire_all()
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.PENDING.value
+    assert row.retry_count == 0
+
+    # Re-running returns 0 as no more FAILED events remain
+    assert await outbox_repo.reclaim_failed_events(max_age_hours=24.0) == 0
+
+    # Now eligible for dispatch in pending batch
+    pending = await outbox_repo.fetch_pending_batch(limit=10)
+    assert any(e.idempotency_key == "failed_event_to_reclaim" for e in pending)
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_ignores_events_outside_lookback(services, repos, db_session):
+    """Failed events older than lookback window must not be reclaimed."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    now = datetime.now(UTC)
+    old_event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="ancient_failed_event",
+        payload={"msg": "ancient failure"},
+        scheduled_for=now - timedelta(hours=72),
+    )
+
+    await outbox_repo.reschedule_or_fail(
+        event_id=old_event.id,
+        retry_count=150,
+        next_scheduled_for=now,
+        failed=True,
+    )
+
+    # Force created_at to 72 hours ago
+    await db_session.execute(
+        update(OutboxEventTable).where(OutboxEventTable.id == old_event.id).values(created_at=now - timedelta(hours=72))
+    )
+    await db_session.commit()
+
+    # Attempt reclaim with 24h lookback
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 0
+
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.idempotency_key == "ancient_failed_event")
+    row = (await db_session.execute(stmt)).scalar_one()
+    assert row.status == OutboxStatus.FAILED.value
+
+    # Expanding lookback window to 96h reclaims it
+    reclaimed = await outbox_repo.reclaim_failed_events(max_age_hours=96.0)
+    assert reclaimed == 1
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failed_events_preserves_processed_and_cancelled(services, repos, db_session):
+    """Reclaim must not touch PROCESSED or CANCELLED events."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+
+    evt1 = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="processed_event_key",
+        payload={"msg": "already done"},
+        scheduled_for=datetime.now(UTC),
+    )
+    await outbox_repo.mark_processed(evt1.id)
+
+    evt2 = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_DUE_REMINDER,
+        idempotency_key="task_due:00000000-0000-0000-0000-000000000001:1h",
+        payload={"msg": "cancelled"},
+        scheduled_for=datetime.now(UTC),
+    )
+    await outbox_repo.cancel_task_reminders(UUID("00000000-0000-0000-0000-000000000001"))
+
+    reclaimed = await outbox_srv.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 0
+
+    db_session.expire_all()
+    stmt1 = select(OutboxEventTable).where(OutboxEventTable.id == evt1.id)
+    assert (await db_session.execute(stmt1)).scalar_one().status == OutboxStatus.PROCESSED.value
+    stmt2 = select(OutboxEventTable).where(OutboxEventTable.id == evt2.id)
+    assert (await db_session.execute(stmt2)).scalar_one().status == OutboxStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_dispatches_reclaimed_failed_events(services, repos):
+    """Outbox worker process_batch successfully dispatches reclaimed events without issue."""
+    outbox_srv = services["outbox"]
+    outbox_repo = repos["outbox"]
+    mock_notifier = MockNotifier()
+
+    event = await outbox_srv.enqueue_event(
+        event_type=EventType.TASK_CREATED,
+        idempotency_key="worker_reclaimed_key",
+        payload={"msg": "reclaim and deliver"},
+        scheduled_for=datetime.now(UTC),
+    )
+
+    # Fail the event
+    await outbox_repo.reschedule_or_fail(
+        event_id=event.id,
+        retry_count=150,
+        next_scheduled_for=datetime.now(UTC),
+        failed=True,
+    )
+
+    # Reclaim it
+    reclaimed = await outbox_srv.reclaim_failed_events(max_age_hours=24.0)
+    assert reclaimed == 1
+
+    # Now let OutboxWorker process the batch
+    worker = OutboxWorker(outbox_repo=outbox_repo, notifier=mock_notifier, poll_interval=0.005)
+    worker._running = True
+    processed = await worker.process_batch()
+    assert processed >= 1
+    assert any(e.idempotency_key == "worker_reclaimed_key" for e in mock_notifier.dispatched)
 
 
 @pytest.mark.asyncio
