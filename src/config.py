@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     SYNC_COMMANDS_ON_STARTUP: bool | None = None
     STARTUP_CRASH_BACKOFF_SECONDS: float = 30.0
 
+    # Gateway Supervisor Configuration
+    GATEWAY_RETRY_INITIAL_DELAY_SECONDS: float = 2.0
+    GATEWAY_RETRY_MAX_DELAY_SECONDS: float = 60.0
+    GATEWAY_RETRY_BACKOFF_FACTOR: float = 2.0
+    GATEWAY_RETRY_JITTER: float = 0.2
+    GATEWAY_MAX_RETRIES: int | None = None
+
+    @field_validator("GATEWAY_MAX_RETRIES", mode="before")
+    @classmethod
+    def empty_str_to_none_retries(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
     @model_validator(mode="after")
     def compute_sync_commands_on_startup(self) -> "Settings":
         if self.SYNC_COMMANDS_ON_STARTUP is None:

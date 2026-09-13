@@ -74,3 +74,33 @@ def test_outbox_retention_and_backoff_settings(monkeypatch):
     assert custom.OUTBOX_MAX_RETRIES == 20
     assert custom.OUTBOX_BACKOFF_CAP_SECONDS == 300.0
     assert custom.OUTBOX_MAX_RETENTION_HOURS == 24.0
+
+
+def test_gateway_retry_settings(monkeypatch):
+    """Verifies that gateway retry configuration has sensible defaults and supports overrides."""
+    monkeypatch.delenv("GATEWAY_RETRY_INITIAL_DELAY_SECONDS", raising=False)
+    monkeypatch.delenv("GATEWAY_RETRY_MAX_DELAY_SECONDS", raising=False)
+    monkeypatch.delenv("GATEWAY_RETRY_BACKOFF_FACTOR", raising=False)
+    monkeypatch.delenv("GATEWAY_RETRY_JITTER", raising=False)
+    monkeypatch.delenv("GATEWAY_MAX_RETRIES", raising=False)
+
+    cfg = Settings(_env_file=None)
+    assert cfg.GATEWAY_RETRY_INITIAL_DELAY_SECONDS == 2.0
+    assert cfg.GATEWAY_RETRY_MAX_DELAY_SECONDS == 60.0
+    assert cfg.GATEWAY_RETRY_BACKOFF_FACTOR == 2.0
+    assert cfg.GATEWAY_RETRY_JITTER == 0.2
+    assert cfg.GATEWAY_MAX_RETRIES is None
+
+    custom = Settings(
+        _env_file=None,
+        GATEWAY_RETRY_INITIAL_DELAY_SECONDS=1.0,
+        GATEWAY_RETRY_MAX_DELAY_SECONDS=30.0,
+        GATEWAY_RETRY_BACKOFF_FACTOR=1.5,
+        GATEWAY_RETRY_JITTER=0.1,
+        GATEWAY_MAX_RETRIES=10,
+    )
+    assert custom.GATEWAY_RETRY_INITIAL_DELAY_SECONDS == 1.0
+    assert custom.GATEWAY_RETRY_MAX_DELAY_SECONDS == 30.0
+    assert custom.GATEWAY_RETRY_BACKOFF_FACTOR == 1.5
+    assert custom.GATEWAY_RETRY_JITTER == 0.1
+    assert custom.GATEWAY_MAX_RETRIES == 10

@@ -24,6 +24,7 @@ from src.adapters.db.session import async_session_factory, close_db, init_db  # 
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 from src.adapters.discord_bot.bot import DggPmBot  # noqa: E402
 from src.adapters.discord_bot.discord_notifier import DiscordNotifier  # noqa: E402
+from src.adapters.discord_bot.gateway_supervisor import start_bot_with_retry  # noqa: E402
 from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.services.outbox_service import OutboxService  # noqa: E402
@@ -95,7 +96,29 @@ async def run_app() -> None:
     )
     uvicorn_server = uvicorn.Server(uvicorn_config)
 
-    # 6. Gather concurrent async tasks
+    # 6. Lifecycle Events and Shutdown Handler
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+    bg_tasks: set[asyncio.Task] = set()
+
+    def handle_signal():
+        logger.info("Received termination signal. Initiating graceful shutdown...")
+        worker.stop()
+        uvicorn_server.should_exit = True
+        stop_event.set()
+        if not bot.is_closed():
+            close_task = asyncio.create_task(bot.close())
+            bg_tasks.add(close_task)
+            close_task.add_done_callback(bg_tasks.discard)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, handle_signal)
+        except NotImplementedError:
+            # Windows support fallback
+            pass
+
+    # 7. Gather concurrent async tasks
     tasks = [
         asyncio.create_task(uvicorn_server.serve(), name="FastAPI-Health-Server"),
         asyncio.create_task(worker.start(), name="Outbox-Worker"),
@@ -104,29 +127,21 @@ async def run_app() -> None:
     if settings.DISCORD_BOT_TOKEN:
         tasks.append(
             asyncio.create_task(
-                bot.start(settings.DISCORD_BOT_TOKEN),
+                start_bot_with_retry(
+                    bot=bot,
+                    token=settings.DISCORD_BOT_TOKEN,
+                    stop_event=stop_event,
+                    initial_delay=settings.GATEWAY_RETRY_INITIAL_DELAY_SECONDS,
+                    max_delay=settings.GATEWAY_RETRY_MAX_DELAY_SECONDS,
+                    backoff_factor=settings.GATEWAY_RETRY_BACKOFF_FACTOR,
+                    jitter=settings.GATEWAY_RETRY_JITTER,
+                    max_retries=settings.GATEWAY_MAX_RETRIES,
+                ),
                 name="Discord-Bot-Gateway",
             )
         )
     else:
         logger.warning("DISCORD_BOT_TOKEN is not set. Bot Gateway will not start. (API & Worker running)")
-
-    # Shutdown handler
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def handle_signal():
-        logger.info("Received termination signal. Initiating graceful shutdown...")
-        worker.stop()
-        uvicorn_server.should_exit = True
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, handle_signal)
-        except NotImplementedError:
-            # Windows support fallback
-            pass
 
     has_fatal_error = False
     try:

@@ -1119,6 +1119,7 @@ async def test_bot_setup_hook_forbidden_50001_logging(services, caplog):
     forbidden_err.code = 50001
 
     with (
+        patch.object(settings, "SYNC_COMMANDS_ON_STARTUP", True),
         patch.object(bot.tree, "sync", side_effect=forbidden_err),
         patch.object(settings, "DISCORD_GUILD_ID", 123456789),
         caplog.at_level(logging.CRITICAL, logger="dgg_pm.bot"),

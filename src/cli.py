@@ -31,6 +31,7 @@ async def sync_commands(guild_id: int | None = None, is_global: bool = False) ->
     target_guild_id = None if is_global else (guild_id or settings.DISCORD_GUILD_ID)
 
     # Disable automatic startup sync inside setup_hook so CLI controls sync execution directly
+    orig_sync_on_startup = settings.SYNC_COMMANDS_ON_STARTUP
     settings.SYNC_COMMANDS_ON_STARTUP = False
 
     bot = create_cli_bot()
@@ -58,6 +59,7 @@ async def sync_commands(guild_id: int | None = None, is_global: bool = False) ->
         print(f"❌ Failed to sync slash commands: {exc}", file=sys.stderr)
         return 1
     finally:
+        settings.SYNC_COMMANDS_ON_STARTUP = orig_sync_on_startup
         await bot.close()
 
 
