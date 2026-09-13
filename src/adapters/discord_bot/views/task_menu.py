@@ -67,6 +67,7 @@ class TaskSelectProjectView(BaseView):
         current_page: int = 0,
         query: str = "",
         initial_interaction: discord.Interaction | None = None,
+        filter_to_channel: bool = False,
     ):
         super().__init__(timeout=180)
         self.all_projects = projects
@@ -78,6 +79,7 @@ class TaskSelectProjectView(BaseView):
         self.auth_service = auth_service
         self.current_page = current_page
         self.query = query
+        self.filter_to_channel = filter_to_channel
         self._initial_interaction = initial_interaction
         self._filtered_projects = self._filter_and_sort_projects()
         self._rebuild_items()
@@ -96,11 +98,15 @@ class TaskSelectProjectView(BaseView):
     def _filter_and_sort_projects(self) -> list[Project]:
         channel_ids = {cid for cid in (self.current_channel_id, self.parent_channel_id) if cid}
 
+        projects = self.all_projects
+        if self.filter_to_channel and channel_ids:
+            projects = [p for p in projects if p.discord_channel_id and p.discord_channel_id in channel_ids]
+
         def sort_key(p: Project) -> tuple[int, str]:
             is_chan = 0 if (p.discord_channel_id and p.discord_channel_id in channel_ids) else 1
             return (is_chan, p.name.lower())
 
-        sorted_proj = sorted(self.all_projects, key=sort_key)
+        sorted_proj = sorted(projects, key=sort_key)
         if not self.query:
             return sorted_proj
         q = self.query.lower()
@@ -156,9 +162,9 @@ class TaskSelectProjectView(BaseView):
         search_btn.callback = self._on_search_clicked
         self.add_item(search_btn)
 
-        if self.query:
+        if self.query or self.filter_to_channel:
             clear_btn = discord.ui.Button(
-                label="Clear Filter",
+                label="Clear Filter" if self.query else "Show All Projects",
                 style=discord.ButtonStyle.secondary,
                 row=1,
             )
@@ -212,6 +218,7 @@ class TaskSelectProjectView(BaseView):
 
     async def _on_clear_filter_clicked(self, interaction: discord.Interaction) -> None:
         self.query = ""
+        self.filter_to_channel = False
         self.current_page = 0
         self._filtered_projects = self._filter_and_sort_projects()
         self._rebuild_items()
@@ -350,6 +357,9 @@ def build_task_board_embed(
     return embed
 
 
+_UNSET = object()
+
+
 class TaskMenuView(BaseView):
     """Control Center View for Task Operations and Real-time Multi-dimensional Filtering."""
 
@@ -361,7 +371,7 @@ class TaskMenuView(BaseView):
         projects: list[Project] | None = None,
         current_channel_id: int | None = None,
         parent_channel_id: int | None = None,
-        initial_project_id: UUID | None = None,
+        initial_project_id: UUID | Any | None = _UNSET,
         initial_assignee_id: int | None = None,
         search_query: str = "",
         auth_service: AuthService | None = None,
@@ -394,9 +404,9 @@ class TaskMenuView(BaseView):
             p for p in self.projects if p.discord_channel_id and p.discord_channel_id in channel_ids
         ]
 
-        if initial_project_id is not None:
-            self.selected_project_id: UUID | None = initial_project_id
-        elif self.channel_projects:
+        if initial_project_id is not _UNSET:
+            self.selected_project_id = initial_project_id
+        elif len(self.channel_projects) == 1:
             self.selected_project_id = self.channel_projects[0].id
         else:
             self.selected_project_id = None
@@ -657,6 +667,7 @@ class TaskMenuView(BaseView):
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
             return
 
+        has_channel_projects = bool(self.channel_projects)
         view = TaskSelectProjectView(
             allowed_projects,
             self.task_service,
@@ -666,14 +677,21 @@ class TaskMenuView(BaseView):
             parent_channel_id=self.parent_channel_id,
             auth_service=self.auth_service,
             initial_interaction=interaction,
+            filter_to_channel=has_channel_projects,
         )
-        embed = discord.Embed(
-            title="📁 Select Project Container",
-            description=(
+        desc = (
+            "Choose which active project in this channel to create the task inside:\n"
+            "• Use **`Show All Projects`** or **`Search Projects`** to pick from any project."
+            if has_channel_projects
+            else (
                 "Choose which active project to create the task inside:\n"
                 "• Projects bound to this channel are listed at the top (`📍`).\n"
                 "• Use **`🔍 Search Projects`** to quickly filter across all projects."
-            ),
+            )
+        )
+        embed = discord.Embed(
+            title="📁 Select Project Container",
+            description=desc,
             color=discord.Color.blurple(),
         )
         await interaction.response.edit_message(embed=embed, view=view)

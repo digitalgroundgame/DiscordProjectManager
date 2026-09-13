@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -564,6 +565,7 @@ async def test_pm_hub_navigation(services):
     # Click New Task (opens modal and refreshes message)
     await hub_view.new_task_btn.callback(mock_interaction)
     mock_interaction.response.send_modal.assert_awaited_once()
+    await asyncio.sleep(0)
     mock_interaction.message.edit.assert_awaited_once()
 
     # Switch to projects tab (ephemeral)
@@ -1800,3 +1802,146 @@ async def test_task_details_modal_empty_title_from_hub_task_project_select_view_
 
     assert view.select.placeholder == "Select Project for New Task..."
     assert view.select.values == []
+
+
+@pytest.mark.asyncio
+async def test_task_select_project_view_channel_scoping(services):
+    """Verify TaskSelectProjectView filters strictly to channel projects when filter_to_channel=True."""
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 1122334455
+    forum_id = 99887711
+
+    p1 = await proj_srv.create_project(guild_id, "Forum Proj 1", "FP1", discord_channel_id=forum_id)
+    p2 = await proj_srv.create_project(guild_id, "Forum Proj 2", "FP2", discord_channel_id=forum_id)
+    p3 = await proj_srv.create_project(guild_id, "Other Proj", "OTH", discord_channel_id=55443322)
+
+    all_projs = [p1, p2, p3]
+
+    # When filter_to_channel=True, only projects in forum_id should appear in options
+    scoped_view = TaskSelectProjectView(
+        projects=all_projs,
+        task_service=task_srv,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        current_channel_id=forum_id,
+        filter_to_channel=True,
+    )
+    option_ids = {opt.value for opt in scoped_view.select.options}
+    assert option_ids == {str(p1.id), str(p2.id)}
+    assert str(p3.id) not in option_ids
+
+    # Clicking "Show All Projects" clears channel filter
+    clear_inter = MagicMock(spec=discord.Interaction)
+    clear_inter.response = MagicMock()
+    clear_inter.response.edit_message = AsyncMock()
+    await scoped_view._on_clear_filter_clicked(clear_inter)
+    clear_inter.response.edit_message.assert_awaited_once()
+    all_option_ids = {opt.value for opt in scoped_view.select.options}
+    assert all_option_ids == {str(p1.id), str(p2.id), str(p3.id)}
+
+
+@pytest.mark.asyncio
+async def test_task_menu_new_task_in_multi_project_channel(services):
+    """Verify clicking New Project Task in TaskMenuView in a multi-project channel filters to channel projects."""
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    guild_id = 9988776611
+    forum_id = 44556611
+
+    p1 = await proj_srv.create_project(guild_id, "Forum Alpha", "FPA", discord_channel_id=forum_id)
+    p2 = await proj_srv.create_project(guild_id, "Forum Beta", "FPB", discord_channel_id=forum_id)
+    p3 = await proj_srv.create_project(guild_id, "Other Gamma", "OTH", discord_channel_id=88990011)
+
+    all_projs = [p1, p2, p3]
+
+    task_view = TaskMenuView(
+        task_service=task_srv,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        projects=all_projs,
+        current_channel_id=forum_id,
+        initial_project_id=None,  # Global / multi-project scope in this channel
+    )
+
+    mock_inter = MagicMock(spec=discord.Interaction)
+    mock_inter.guild = MagicMock()
+    mock_inter.guild.id = guild_id
+    mock_inter.user = MagicMock()
+    mock_inter.user.id = 12345
+    mock_inter.user.guild_permissions.administrator = True
+    mock_inter.response = MagicMock()
+    mock_inter.response.edit_message = AsyncMock()
+    mock_inter.response.send_modal = AsyncMock()
+
+    await task_view._on_new_task_clicked(mock_inter)
+    mock_inter.response.edit_message.assert_awaited_once()
+
+    select_view = mock_inter.response.edit_message.call_args.kwargs.get("view")
+    assert isinstance(select_view, TaskSelectProjectView)
+    assert select_view.filter_to_channel is True
+    option_ids = {opt.value for opt in select_view.select.options}
+    assert option_ids == {str(p1.id), str(p2.id)}
+    assert str(p3.id) not in option_ids
+
+
+@pytest.mark.asyncio
+async def test_pm_hub_new_task_channel_permission_scoping(services):
+    """Verify clicking New Task in a forum where user lacks squad role does not dump other server projects."""
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    squad_srv = services["squad"]
+    user_srv = services["user"]
+    guild_id = 9988776622
+    forum_id = 44556622
+    other_chan_id = 77889922
+
+    # Forum has p1 and p2, mapped to squad1 and squad2
+    squad1 = await squad_srv.create_squad(guild_id=guild_id, name="Squad One", discord_role_id=1111)
+    squad2 = await squad_srv.create_squad(guild_id=guild_id, name="Squad Two", discord_role_id=2222)
+    squad3 = await squad_srv.create_squad(guild_id=guild_id, name="Squad Three", discord_role_id=3333)
+
+    p1 = await proj_srv.create_project(guild_id, "Forum One", "F1", discord_channel_id=forum_id)
+    await proj_srv.assign_squad_to_project(p1.id, squad1.id)
+
+    p2 = await proj_srv.create_project(guild_id, "Forum Two", "F2", discord_channel_id=forum_id)
+    await proj_srv.assign_squad_to_project(p2.id, squad2.id)
+
+    # p3 is in another channel, mapped to squad3
+    p3 = await proj_srv.create_project(guild_id, "Other Three", "F3", discord_channel_id=other_chan_id)
+    await proj_srv.assign_squad_to_project(p3.id, squad3.id)
+
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv, user_service=user_srv)
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = forum_id
+    mock_forum.name = "forum-hub"
+
+    # User only has squad3 role (role id 3333), not squad1 or squad2
+    mock_role = MagicMock()
+    mock_role.id = 3333
+    mock_user = MagicMock()
+    mock_user.id = 55555
+    mock_user.roles = [mock_role]
+    mock_user.guild_permissions.administrator = False
+    mock_user.guild_permissions.manage_guild = False
+
+    mock_inter = MagicMock(spec=discord.Interaction)
+    mock_inter.guild = MagicMock()
+    mock_inter.guild.id = guild_id
+    mock_inter.user = mock_user
+    mock_inter.channel = mock_forum
+    mock_inter.response = MagicMock()
+    mock_inter.response.send_message = AsyncMock()
+    mock_inter.response.send_modal = AsyncMock()
+
+    await hub_view.new_task_btn.callback(mock_inter)
+    mock_inter.response.send_message.assert_awaited_once()
+
+    call_kwargs = mock_inter.response.send_message.call_args.kwargs
+    # Should NOT send TaskSelectProjectView containing p3
+    assert call_kwargs.get("view") is None
+    msg = mock_inter.response.send_message.call_args.args[0]
+    assert "You do not have permission to create tasks in this channel's projects" in msg

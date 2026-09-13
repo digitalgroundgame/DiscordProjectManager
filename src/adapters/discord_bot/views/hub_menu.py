@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.views.hub_menu")
+_hub_bg_tasks: set[asyncio.Task] = set()
 
 
 class HubTaskProjectSelectView(BaseView):
@@ -368,13 +370,18 @@ class PmHubView(BaseView):
             return
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
 
-        # Refresh pinned control hub message in case it is out of date
-        await self._refresh_hub_message(interaction, projects=projects)
+        # Refresh pinned control hub message in the background so interaction doesn't time out
+        try:
+            task = asyncio.create_task(self._refresh_hub_message(interaction, projects=projects))
+            _hub_bg_tasks.add(task)
+            task.add_done_callback(_hub_bg_tasks.discard)
+        except Exception:
+            pass
 
         channel_id = interaction.channel.id if interaction.channel else None
         parent_id = getattr(interaction.channel, "parent_id", None)
         channel_ids = {cid for cid in (channel_id, parent_id) if cid}
-        channel_projects = [p for p in projects if p.discord_channel_id and p.discord_channel_id in channel_ids]
+        all_channel_projects = [p for p in projects if p.discord_channel_id and p.discord_channel_id in channel_ids]
 
         target_channel = interaction.channel
         if isinstance(target_channel, discord.Thread):
@@ -425,8 +432,19 @@ class PmHubView(BaseView):
                 color=discord.Color.blurple(),
             )
             await interaction.response.send_message(embed=embed, view=picker_view, ephemeral=True)
+        elif all_channel_projects:
+            # Channel is bound to projects, but user lacks permission to create tasks in any of them
+            from src.adapters.discord_bot.menu_manager import menu_manager
+
+            proj_names = ", ".join(f"**{p.name}**" for p in all_channel_projects)
+            await interaction.response.send_message(
+                f"❌ You do not have permission to create tasks in this channel's projects ({proj_names}). "
+                "Contact a Project Lead or server manager to be added to a project squad.",
+                ephemeral=True,
+            )
+            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         else:
-            # 0 channel projects
+            # 0 channel projects (unbound channel)
             if len(allowed_projects) == 1:
                 matched_proj = allowed_projects[0]
                 if matched_proj.discord_channel_id and not isinstance(target_channel, discord.ForumChannel):
@@ -471,6 +489,7 @@ class PmHubView(BaseView):
                     parent_channel_id=parent_id,
                     auth_service=auth_srv,
                     initial_interaction=interaction,
+                    filter_to_channel=False,
                 )
                 embed = discord.Embed(
                     title="Select Project Container",
