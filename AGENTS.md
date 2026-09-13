@@ -30,7 +30,7 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - **Database Shell**: `make db-shell`
 
 3. **Background Services**:
-   - PostgreSQL 16 is managed via Docker Compose (`make db-up` / `docker compose up -d postgres`).
+   - PostgreSQL 18 is managed via Docker Compose (`make db-up` / `docker compose up -d postgres`).
    - Unit and integration tests run against an in-memory SQLite database (`sqlite+aiosqlite:///:memory:`) and do not require PostgreSQL to be running.
 
 4. **NixOS Support & Tool Availability**:

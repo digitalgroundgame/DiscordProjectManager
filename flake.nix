@@ -18,7 +18,7 @@
           packages = with pkgs; [
             python313
             uv
-            postgresql_16
+            postgresql_18
             gnumake
             docker
             git
@@ -31,7 +31,7 @@
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
               stdenv.cc.cc.lib
               zlib
-              postgresql_16
+              postgresql_18
               openssl
             ]);
             PYTHONUNBUFFERED = "1";
