@@ -195,19 +195,19 @@ uv run python scripts/seed.py --no-discord
 ```
 
 
-### 5. NixOS / Nix Flakes Development
+### 5. NixOS / Devenv Development
 
-If you are developing on **NixOS** or using **Nix**:
+If you are developing on **NixOS** or using **devenv**:
 
 ```bash
 # Enter the development shell (provides Python 3.13, uv, postgresql client, gnumake, docker, and C libraries)
-nix develop
+devenv shell
 
 # Or with direnv (recommended):
 direnv allow
 ```
 
-Once inside the Nix shell, all standard `make` and `uv` commands work directly without additional configuration.
+Once inside the devenv shell, all standard `make` and `uv` commands work directly without additional configuration.
 
 ### 6. Running with Docker Compose (Full Stack)
 To run both the application and PostgreSQL in containers:

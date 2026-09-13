@@ -1,4 +1,4 @@
-# Unexport any stale devenv environment variables if transitioning
+# Clean ambient virtualenv variables for deterministic uv execution
 unexport UV_PROJECT_ENVIRONMENT
 unexport VIRTUAL_ENV
 
