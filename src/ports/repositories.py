@@ -100,6 +100,10 @@ class ITaskRepo(ABC):
         """Soft-deletes or unarchives a task."""
 
     @abstractmethod
+    async def delete(self, task_id: UUID, session: Any | None = None) -> bool:
+        """Permanently deletes a task record, cascading dependencies, watchers, and history."""
+
+    @abstractmethod
     async def add_history(self, history: TaskHistory, session: Any | None = None) -> TaskHistory:
         """Appends a task history audit entry."""
 

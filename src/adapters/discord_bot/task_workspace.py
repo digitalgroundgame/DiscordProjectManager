@@ -417,6 +417,91 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                     pass
             return msg
 
+    async def delete_workspace(
+        self,
+        task: Task,
+        *,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        """Permanently deletes or archives the Discord thread workspace and logs audit notification."""
+        thread = None
+        if task.discord_thread_id:
+            try:
+                if hasattr(self.bot, "get_channel"):
+                    thread = self.bot.get_channel(task.discord_thread_id)
+                if not thread and hasattr(self.bot, "fetch_channel"):
+                    thread = await _maybe_await(self.bot.fetch_channel(task.discord_thread_id))
+            except Exception as e:
+                logger.debug("Could not fetch thread %s for task deletion: %s", task.discord_thread_id, e)
+                thread = None
+
+        if thread and isinstance(thread, discord.Thread):
+            try:
+                if hasattr(thread, "delete"):
+                    await _maybe_await(thread.delete())
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete thread %s for task %s, attempting archive fallback: %s",
+                    task.discord_thread_id,
+                    task.short_id,
+                    e,
+                )
+                try:
+                    actor_str = f" by <@{actor_discord_id}>" if actor_discord_id else ""
+                    notice = f"⚠️ **This task was permanently deleted{actor_str}.** This thread is now closed."
+                    if hasattr(thread, "send"):
+                        await _maybe_await(thread.send(notice))
+                    del_name = f"[DELETED] {task.short_id}"
+                    if hasattr(thread, "edit"):
+                        await _maybe_await(thread.edit(name=del_name, archived=True, locked=True))
+                except Exception as fallback_err:
+                    logger.error(
+                        "Failed fallback archiving thread %s: %s",
+                        task.discord_thread_id,
+                        fallback_err,
+                    )
+
+        # Audit notification to project workspace activity log
+        if task.project_id and self.project_service:
+            try:
+                project = await self.project_service.get_by_id(task.project_id)
+                if project and project.discord_channel_id:
+                    proj_chan = None
+                    if hasattr(self.bot, "get_channel"):
+                        proj_chan = self.bot.get_channel(project.discord_channel_id)
+                    if not proj_chan and hasattr(self.bot, "fetch_channel"):
+                        proj_chan = await _maybe_await(self.bot.fetch_channel(project.discord_channel_id))
+
+                    if proj_chan:
+                        from datetime import UTC, datetime
+
+                        audit_embed = discord.Embed(
+                            title="🗑️ Task Deleted",
+                            description=f"Task **[{task.short_id}]** (`{task.title}`) was permanently deleted.",
+                            color=discord.Color.red(),
+                            timestamp=datetime.now(UTC),
+                        )
+                        if actor_discord_id:
+                            audit_embed.add_field(name="Deleted By", value=f"<@{actor_discord_id}>", inline=True)
+                        if task.status:
+                            audit_embed.add_field(name="Status", value=str(task.status.value), inline=True)
+
+                        if isinstance(proj_chan, discord.TextChannel):
+                            await _maybe_await(proj_chan.send(embed=audit_embed))
+                        elif isinstance(proj_chan, discord.ForumChannel):
+                            hub_thread = None
+                            threads = getattr(proj_chan, "threads", [])
+                            for t in threads:
+                                if "Control Hub" in t.name or "Management Hub" in t.name or "Hub" in t.name:
+                                    hub_thread = t
+                                    break
+                            if hub_thread and hasattr(hub_thread, "send"):
+                                await _maybe_await(hub_thread.send(embed=audit_embed))
+            except Exception as e:
+                logger.warning("Failed to dispatch delete audit notification to project channel: %s", e)
+
+        return True
+
     async def render_task_controls(
         self,
         interaction: discord.Interaction,

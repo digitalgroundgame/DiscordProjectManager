@@ -8,6 +8,7 @@ from uuid import UUID
 
 import discord
 
+from src.domain.enums import TaskStatus
 from src.domain.exceptions import PermissionDeniedError
 from src.domain.models import Project, Task
 
@@ -109,6 +110,41 @@ class AuthService:
             raise PermissionDeniedError(
                 "You do not have permission to modify this task. "
                 "You must be the assignee, creator, project lead, a squad member, or a server manager."
+            )
+
+    async def can_delete_task(self, user: discord.Member | discord.User, task: Task) -> bool:
+        """Determines if a user is authorized to delete a task.
+
+        Authorized if:
+        1. Server Manager (manage_guild or administrator).
+        2. Designated Project Lead for the task's project.
+        3. Original task creator, strictly if the task status is notStarted.
+        """
+        if self.is_server_manager(user):
+            return True
+
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return False
+
+        # Project Lead
+        if task.project_id:
+            project = await self.project_service.get_by_id(task.project_id)
+            if project and project.lead_discord_id and user_id == project.lead_discord_id:
+                return True
+
+        # Task Creator (only if status is notStarted)
+        if user_id == task.creator_discord_id and task.status == TaskStatus.NOT_STARTED:
+            return True
+
+        return False
+
+    async def require_task_deletion(self, user: discord.Member | discord.User, task: Task) -> None:
+        """Raises PermissionDeniedError if the user is not authorized to delete the task."""
+        if not await self.can_delete_task(user, task):
+            raise PermissionDeniedError(
+                "You do not have permission to delete this task. "
+                "Only Server Managers, Project Leads, or the task creator (if not started) can delete tasks."
             )
 
     async def can_create_task_in_project(

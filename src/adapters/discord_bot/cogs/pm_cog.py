@@ -14,6 +14,10 @@ from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
 from src.adapters.discord_bot.views.hub_menu import build_hub_welcome_embed
 from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
+from src.adapters.discord_bot.views.task_delete_view import (
+    TaskDeleteConfirmView,
+    build_task_delete_confirm_embed,
+)
 from src.adapters.discord_bot.views.task_embed import (
     build_task_embed,
     build_task_history_embed,
@@ -777,6 +781,40 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"restoring task '{task or 'current thread'}'", logger, ephemeral=True
+            )
+
+    @task_group.command(name="delete", description="Permanently delete a task with interactive confirmation.")
+    @app_commands.describe(task="Short ID of the task to delete (omit if inside thread)")
+    @app_commands.autocomplete(task=task_autocomplete)
+    async def task_delete(self, interaction: discord.Interaction, task: str | None = None) -> None:
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            task_entity = await self._resolve_task_context(interaction, task)
+            if not task_entity:
+                return
+
+            await self.auth_service.require_task_deletion(interaction.user, task_entity)
+
+            prereqs, dependents = await self.task_service.get_task_dependencies(task_entity.id)
+            embed = build_task_delete_confirm_embed(
+                task_entity,
+                prerequisites=prereqs,
+                dependents=dependents,
+            )
+            view = TaskDeleteConfirmView(
+                task=task_entity,
+                author_id=interaction.user.id,
+                task_service=self.task_service,
+                auth_service=self.auth_service,
+                workspace=self.workspace,
+                bot=self.bot,
+            )
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(
+                interaction, e, f"deleting task '{task or 'current thread'}'", logger, ephemeral=True
             )
 
     @task_group.command(name="watchers", description="Manage watcher subscribers on a task.")

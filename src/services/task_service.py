@@ -600,6 +600,20 @@ class TaskService:
                 await uow.tasks.add_history(history)
         return task
 
+    async def delete_task(self, task_id: UUID, actor_discord_id: int | None = None) -> Task | None:
+        """Permanently deletes a task, its dependencies, history, watchers, and cancels pending reminders."""
+        task = await self.get_by_id(task_id)
+        if not task:
+            return None
+
+        async with self._transaction() as uow:
+            await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
+            deleted = await uow.tasks.delete(task_id)
+            if not deleted:
+                return None
+
+        return task
+
     async def get_history(self, task_id: UUID) -> list[TaskHistory]:
         return await self.task_repo.get_history(task_id)
 

@@ -87,6 +87,15 @@ class ITaskDiscordWorkspace(Protocol):
         """Posts an activity update, note, or Outbox Event notification into the Task's Thread Workspace."""
         ...
 
+    async def delete_workspace(
+        self,
+        task: Task,
+        *,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        """Permanently deletes or archives the Discord thread workspace and logs audit notification."""
+        ...
+
     async def render_task_controls(
         self,
         interaction: discord.Interaction,

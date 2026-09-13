@@ -470,6 +470,34 @@ class PostgresTaskRepo(BasePostgresRepo, ITaskRepo):
             updated_row = fetch_res.scalar_one_or_none()
             return _to_domain_task(updated_row) if updated_row else None
 
+    async def delete(self, task_id: UUID, session: AsyncSession | None = None) -> bool:
+        async with self._get_session(session) as sess:
+            # Purge dependencies where this task is either dependent or prerequisite
+            dep_stmt = delete(TaskDependencyTable).where(
+                or_(
+                    TaskDependencyTable.task_id == task_id,
+                    TaskDependencyTable.depends_on_task_id == task_id,
+                )
+            )
+            await sess.execute(dep_stmt)
+
+            # Purge watchers
+            watchers_stmt = delete(TaskWatcherTable).where(TaskWatcherTable.task_id == task_id)
+            await sess.execute(watchers_stmt)
+
+            # Purge history
+            history_stmt = delete(TaskHistoryTable).where(TaskHistoryTable.task_id == task_id)
+            await sess.execute(history_stmt)
+
+            # Delete task record
+            stmt = delete(TaskTable).where(TaskTable.id == task_id)
+            res = await sess.execute(stmt)
+            if self._should_commit(session):
+                await sess.commit()
+            else:
+                await sess.flush()
+            return bool(res.rowcount and res.rowcount > 0)
+
     async def add_history(self, history: TaskHistory, session: AsyncSession | None = None) -> TaskHistory:
         async with self._get_session(session) as sess:
             row = TaskHistoryTable(
