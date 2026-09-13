@@ -124,10 +124,16 @@ DISCORD_GUILD_ID=your_test_guild_id   # Optional: faster command syncing in dev
 DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@localhost:5432/dgg_pm
 ```
 
-### 3. Discord Developer Portal Configuration
+### 3. Discord Developer Portal Configuration & Bot Invite
 When configuring your application in the [Discord Developer Portal](https://discord.com/developers/applications) and inviting the bot:
+- **Bot Invite Link**: Install the bot to your server using the official OAuth2 install link:
+  - [Invite Bot to Discord Server](https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot)
+  ```text
+  https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot
+  ```
 - **Privileged Gateway Intents**: Ensure **Server Members Intent** (`GuildMembers`) is enabled under the **Bot** tab. *(Note: `Message Content` is explicitly **NOT** required).*
-- **Bot Permissions**: Verify the bot invite URL contains the following permissions:
+- **Bot Permissions**: The invite link configures all necessary permissions:
+  - `Manage Roles`
   - `Manage Channels` (for auto-tagging Forum channels)
   - `Manage Threads`
   - `View Channels`
@@ -137,6 +143,8 @@ When configuring your application in the [Discord Developer Portal](https://disc
   - `Manage Messages`
   - `Embed Links`
   - `Read Message History`
+  - `Attach Files`
+
 
 ### 4. Local Development (Standard Python / uv)
 
