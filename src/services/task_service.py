@@ -5,8 +5,11 @@ import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from src.domain.timeline import ProjectTimeline
 
 from src.domain.enums import (
     EventType,
@@ -112,6 +115,7 @@ class TaskService:
         project_name: str | None = None,
         project_id: UUID | None = None,
         assignee_discord_id: int | None = None,
+        start_at: datetime | None = None,
         due_at: datetime | None = None,
         priority: PriorityLevel = PriorityLevel.NORMAL,
         body: str | None = None,
@@ -151,6 +155,7 @@ class TaskService:
                 priority=priority,
                 creator_discord_id=creator_discord_id,
                 assignee_discord_id=assignee_discord_id,
+                start_at=start_at,
                 due_at=due_at,
                 metadata_json=metadata_json or {},
                 watchers=clean_watchers,
@@ -742,3 +747,41 @@ class TaskService:
         project_name = project.name if project else "Project Tech Tree"
         tree = await self.get_project_tech_tree(guild_id, project_id, member_resolver=member_resolver)
         return tree.to_png(title=f"Tech Tree: {project_name}", orientation=orientation)
+
+    async def get_project_timeline(
+        self,
+        guild_id: int,
+        project_id: UUID,
+        member_resolver: Any = None,
+    ) -> ProjectTimeline:
+        from src.domain.timeline import ProjectTimeline
+
+        tasks, _ = await self.task_repo.list_tasks(
+            guild_id=guild_id,
+            project_id=project_id,
+            include_archived=False,
+            limit=500,
+        )
+        task_ids = [t.id for t in tasks]
+        deps = await self.task_repo.get_dependencies_for_tasks(task_ids) if tasks else []
+        return ProjectTimeline.build(tasks, deps, member_resolver=member_resolver)
+
+    async def render_project_timeline(
+        self,
+        guild_id: int,
+        project_id: UUID,
+        member_resolver: Any = None,
+    ) -> io.BytesIO:
+        project = await self.project_service.get_by_id(project_id)
+        project_name = project.name if project else "Project Timeline"
+        timeline = await self.get_project_timeline(guild_id, project_id, member_resolver=member_resolver)
+        return timeline.to_png(title=f"Timeline: {project_name}")
+
+    async def export_project_timeline_mermaid(
+        self,
+        guild_id: int,
+        project_id: UUID,
+        member_resolver: Any = None,
+    ) -> str:
+        timeline = await self.get_project_timeline(guild_id, project_id, member_resolver=member_resolver)
+        return timeline.to_mermaid()

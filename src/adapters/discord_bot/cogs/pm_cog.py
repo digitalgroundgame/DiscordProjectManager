@@ -1125,6 +1125,49 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 interaction, e, f"rendering tech tree for '{project_name}'", logger, ephemeral=True
             )
 
+    @project_group.command(
+        name="timeline",
+        description="View a project's timeline (Gantt chart) across calendar time.",
+    )
+    @app_commands.describe(project_name="Name of the project to view")
+    @app_commands.autocomplete(project_name=project_autocomplete)
+    async def project_timeline(
+        self,
+        interaction: discord.Interaction,
+        project_name: str,
+    ) -> None:
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
+            if not project:
+                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                return
+
+            await self.auth_service.require_project_view(interaction.user, project.id)
+
+            buf = await self.task_service.render_project_timeline(
+                guild_id=interaction.guild.id,
+                project_id=project.id,
+                member_resolver=interaction.guild,
+            )
+            file = discord.File(fp=buf, filename="project_timeline.png")
+            embed = discord.Embed(
+                title=f"📊 Timeline: [{project.prefix}] {project.name}",
+                description="Showing project execution schedule across calendar time.",
+                color=discord.Color.from_rgb(16, 152, 247),
+            )
+            embed.set_image(url="attachment://project_timeline.png")
+            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
+
+            view = TechTreeViewer(self.task_service, project, current_mode="timeline", auth_service=self.auth_service)
+            await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(
+                interaction, e, f"rendering timeline for '{project_name}'", logger, ephemeral=True
+            )
+
     @project_group.command(name="archive", description="Archive a project container.")
     @app_commands.describe(project_name="Name of the project to archive")
     @app_commands.autocomplete(project_name=project_autocomplete)
@@ -1721,3 +1764,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await send_interaction_error(
                 interaction, e, f"rendering tech tree for '{project_name}'", logger, ephemeral=True
             )
+
+    @app_commands.command(
+        name="timeline",
+        description="Quick shortcut to view a project's timeline (Gantt chart).",
+    )
+    @app_commands.describe(project_name="Name of the project to view")
+    @app_commands.autocomplete(project_name=project_autocomplete)
+    async def pm_timeline(
+        self,
+        interaction: discord.Interaction,
+        project_name: str,
+    ) -> None:
+        await self.project_timeline.callback(self, interaction=interaction, project_name=project_name)

@@ -72,8 +72,16 @@ A transactional event record enqueued atomically with database mutations and dis
 _Avoid_: Message event, webhook, notification record
 
 **Tech Tree**:
-A Directed Acyclic Graph (DAG) representing prerequisite dependency relationships between tasks in a project.
-_Avoid_: Dependency graph, gantt chart, blocker list
+A Directed Acyclic Graph (DAG) representing prerequisite dependency relationships and unlocking state between tasks in a project.
+_Avoid_: Dependency graph, blocker list
+
+**Project Timeline**:
+A chronological Gantt visualization of project tasks mapped across calendar time, depicting task execution spans, explicit or inferred start dates, deadlines, and inter-task dependencies.
+_Avoid_: Roadmap, calendar view, schedule table
+
+**Inferred Schedule**:
+A calculated execution window derived via Critical Path Method (CPM) from prerequisite completion states, task creation time, and due dates when explicit scheduling dates are unset.
+_Avoid_: Auto-schedule, estimated dates, guessed timeline
 
 **Notification Preference**:
 A member-configured delivery setting (`DM`, `CHANNEL`, `BOTH`, or `SILENT`) that governs how task updates and watcher summaries are dispatched.

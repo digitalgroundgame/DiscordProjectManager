@@ -104,6 +104,7 @@ class TaskTable(Base):
     priority = Column(String(20), nullable=False, default="normal")
     creator_discord_id = Column(BigInteger, nullable=False)
     assignee_discord_id = Column(BigInteger, nullable=True, index=True)
+    start_at = Column(DateTime(timezone=True), nullable=True, index=True)
     due_at = Column(DateTime(timezone=True), nullable=True, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     discord_message_id = Column(BigInteger, nullable=True)

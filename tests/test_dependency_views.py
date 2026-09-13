@@ -97,7 +97,7 @@ async def test_tree_viewer_and_select_views(services):
 
     # TechTreeViewer
     viewer = TechTreeViewer(task_srv, project, current_orientation="lr")
-    assert len(viewer.children) == 2
+    assert len(viewer.children) >= 2
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock()

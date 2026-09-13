@@ -18,38 +18,85 @@ logger = logging.getLogger("dgg_pm.views.tree_view")
 
 
 class TechTreeViewer(BaseView):
-    """Interactive view for displaying and switching orientation of a project Tech Tree."""
+    """Interactive view for displaying and switching orientation and mode of a project Tech Tree or Timeline."""
 
     def __init__(
         self,
         task_service: TaskService,
         project: Project,
         current_orientation: str = "lr",
+        current_mode: str = "tree",
         auth_service: AuthService | None = None,
     ):
         super().__init__(timeout=300)
         self.task_service = task_service
         self.project = project
         self.current_orientation = current_orientation
+        self.current_mode = current_mode
         self.auth_service = auth_service
 
+        # Mode toggles (Row 0)
+        self.tree_btn = discord.ui.Button(
+            label="Tech Tree",
+            emoji="🌲",
+            style=discord.ButtonStyle.primary if current_mode == "tree" else discord.ButtonStyle.secondary,
+            row=0,
+        )
+        self.tree_btn.callback = self._on_tree_clicked
+        self.add_item(self.tree_btn)
+
+        self.timeline_btn = discord.ui.Button(
+            label="Timeline",
+            emoji="📊",
+            style=discord.ButtonStyle.primary if current_mode == "timeline" else discord.ButtonStyle.secondary,
+            row=0,
+        )
+        self.timeline_btn.callback = self._on_timeline_clicked
+        self.add_item(self.timeline_btn)
+
+        # Orientation toggles (Row 1)
         self.lr_btn = discord.ui.Button(
-            label="Horizontal View",
+            label="Horizontal",
             emoji="↔️",
             style=discord.ButtonStyle.primary if current_orientation == "lr" else discord.ButtonStyle.secondary,
-            row=0,
+            disabled=current_mode != "tree",
+            row=1,
         )
         self.lr_btn.callback = self._on_lr_clicked
         self.add_item(self.lr_btn)
 
         self.tb_btn = discord.ui.Button(
-            label="Vertical View",
+            label="Vertical",
             emoji="↕️",
             style=discord.ButtonStyle.primary if current_orientation == "tb" else discord.ButtonStyle.secondary,
-            row=0,
+            disabled=current_mode != "tree",
+            row=1,
         )
         self.tb_btn.callback = self._on_tb_clicked
         self.add_item(self.tb_btn)
+
+        self.mermaid_btn = discord.ui.Button(
+            label="Export Mermaid",
+            emoji="📝",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.mermaid_btn.callback = self._on_mermaid_clicked
+        self.add_item(self.mermaid_btn)
+
+    async def _on_tree_clicked(self, interaction: discord.Interaction) -> None:
+        if self.current_mode == "tree":
+            await interaction.response.defer()
+            return
+        self.current_mode = "tree"
+        await self._rerender(interaction)
+
+    async def _on_timeline_clicked(self, interaction: discord.Interaction) -> None:
+        if self.current_mode == "timeline":
+            await interaction.response.defer()
+            return
+        self.current_mode = "timeline"
+        await self._rerender(interaction)
 
     async def _on_lr_clicked(self, interaction: discord.Interaction) -> None:
         if self.current_orientation == "lr":
@@ -64,6 +111,22 @@ class TechTreeViewer(BaseView):
             return
         self.current_orientation = "tb"
         await self._rerender(interaction)
+
+    async def _on_mermaid_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        if self.current_mode == "timeline":
+            code = await self.task_service.export_project_timeline_mermaid(
+                guild_id=interaction.guild.id, project_id=self.project.id
+            )
+        else:
+            tree = await self.task_service.get_project_tech_tree(
+                guild_id=interaction.guild.id, project_id=self.project.id, member_resolver=interaction.guild
+            )
+            code = tree.to_mermaid(orientation=self.current_orientation)
+
+        await interaction.followup.send(f"```mermaid\n{code}\n```", ephemeral=True)
 
     async def _rerender(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -80,26 +143,53 @@ class TechTreeViewer(BaseView):
 
         await interaction.response.defer()
 
-        buf = await self.task_service.render_project_tree(
-            guild_id=interaction.guild.id,
-            project_id=self.project.id,
-            orientation=self.current_orientation,
-            member_resolver=interaction.guild,
+        # Update button styles
+        self.tree_btn.style = (
+            discord.ButtonStyle.primary if self.current_mode == "tree" else discord.ButtonStyle.secondary
         )
-        file = discord.File(fp=buf, filename="tech_tree.png")
-        orient_label = "Horizontal (Left to Right)" if self.current_orientation == "lr" else "Vertical (Top to Bottom)"
-        embed = discord.Embed(
-            title=f"🌲 Tech Tree: [{self.project.prefix}] {self.project.name}",
-            description=f"Showing dependency graph in **{orient_label}** layout.",
-            color=discord.Color.from_rgb(16, 152, 247),
+        self.timeline_btn.style = (
+            discord.ButtonStyle.primary if self.current_mode == "timeline" else discord.ButtonStyle.secondary
         )
-        embed.set_image(url="attachment://tech_tree.png")
+        self.lr_btn.disabled = self.current_mode != "tree"
+        self.tb_btn.disabled = self.current_mode != "tree"
         self.lr_btn.style = (
             discord.ButtonStyle.primary if self.current_orientation == "lr" else discord.ButtonStyle.secondary
         )
         self.tb_btn.style = (
             discord.ButtonStyle.primary if self.current_orientation == "tb" else discord.ButtonStyle.secondary
         )
+
+        if self.current_mode == "timeline":
+            buf = await self.task_service.render_project_timeline(
+                guild_id=interaction.guild.id,
+                project_id=self.project.id,
+                member_resolver=interaction.guild,
+            )
+            file = discord.File(fp=buf, filename="project_timeline.png")
+            embed = discord.Embed(
+                title=f"📊 Timeline: [{self.project.prefix}] {self.project.name}",
+                description="Showing project execution schedule across calendar time.",
+                color=discord.Color.from_rgb(16, 152, 247),
+            )
+            embed.set_image(url="attachment://project_timeline.png")
+        else:
+            buf = await self.task_service.render_project_tree(
+                guild_id=interaction.guild.id,
+                project_id=self.project.id,
+                orientation=self.current_orientation,
+                member_resolver=interaction.guild,
+            )
+            file = discord.File(fp=buf, filename="tech_tree.png")
+            orient_label = (
+                "Horizontal (Left to Right)" if self.current_orientation == "lr" else "Vertical (Top to Bottom)"
+            )
+            embed = discord.Embed(
+                title=f"🌲 Tech Tree: [{self.project.prefix}] {self.project.name}",
+                description=f"Showing dependency graph in **{orient_label}** layout.",
+                color=discord.Color.from_rgb(16, 152, 247),
+            )
+            embed.set_image(url="attachment://tech_tree.png")
+
         await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
 
 

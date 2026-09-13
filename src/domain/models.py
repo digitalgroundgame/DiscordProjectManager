@@ -32,6 +32,7 @@ class Task(DomainModel):
     priority: PriorityLevel = PriorityLevel.NORMAL
     creator_discord_id: int
     assignee_discord_id: int | None = None
+    start_at: datetime | None = None
     due_at: datetime | None = None
     completed_at: datetime | None = None
     discord_message_id: int | None = None
