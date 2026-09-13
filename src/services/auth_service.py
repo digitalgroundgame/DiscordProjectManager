@@ -147,6 +147,25 @@ class AuthService:
                 "Only Server Managers, Project Leads, or the task creator (if not started) can delete tasks."
             )
 
+    async def can_bypass_dependencies(self, user: discord.Member | discord.User, task: Task) -> bool:
+        """Determines if a user has authority to bypass unresolved prerequisite blockers.
+
+        Server Managers, designated Project Leads, and authorized task mutators
+        can bypass with interactive confirmation.
+        """
+        if self.is_server_manager(user):
+            return True
+        if task.project_id and await self.is_project_lead(user, task.project_id):
+            return True
+        return await self.can_mutate_task(user, task)
+
+    async def require_dependency_bypass(self, user: discord.Member | discord.User, task: Task) -> None:
+        """Raises PermissionDeniedError if the user is not authorized to bypass prerequisite blockers."""
+        if not await self.can_bypass_dependencies(user, task):
+            raise PermissionDeniedError(
+                f"You do not have permission to bypass unresolved prerequisite blockers for [{task.short_id}]."
+            )
+
     async def can_create_task_in_project(
         self,
         user: discord.Member | discord.User,

@@ -705,6 +705,11 @@ class TaskService:
 
         return prereqs, dependents
 
+    async def get_unresolved_prerequisites(self, task_id: UUID) -> list[Task]:
+        """Returns all prerequisite tasks that are not yet marked COMPLETED."""
+        prereqs, _ = await self.get_task_dependencies(task_id)
+        return [p for p in prereqs if not p.is_completed]
+
     async def get_project_tech_tree(
         self,
         guild_id: int,

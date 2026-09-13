@@ -822,6 +822,32 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         target_status = TaskStatus.IN_PROGRESS if action in ("start", "reopen") else TaskStatus.COMPLETED
         if action == "notstarted":
             target_status = TaskStatus.NOT_STARTED
+
+        if action in ("start", "complete"):
+            incomplete = await self.task_service.get_unresolved_prerequisites(task.id)
+            if incomplete:
+                from src.adapters.discord_bot.views.task_blocked_view import (
+                    TaskBlockedConfirmView,
+                    build_task_blocked_confirm_embed,
+                )
+
+                embed = build_task_blocked_confirm_embed(task, target_status, incomplete)
+                view = TaskBlockedConfirmView(
+                    task=task,
+                    target_status=target_status,
+                    incomplete_prereqs=incomplete,
+                    author_id=interaction.user.id,
+                    task_service=self.task_service,
+                    auth_service=self.auth_service,
+                    workspace=self,
+                    bot=self.bot,
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await _maybe_await(interaction.response.send_message(embed=embed, view=view, ephemeral=True))
+                elif hasattr(interaction, "followup"):
+                    await _maybe_await(interaction.followup.send(embed=embed, view=view, ephemeral=True))
+                return
+
         try:
             note_action = "reopened" if action == "reopen" else f"updated to {target_status.value}"
             updated_task = await self.task_service.update_status(
