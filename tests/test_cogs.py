@@ -1386,3 +1386,21 @@ async def test_pm_hub_view_overdue_button(services):
     send_kwargs = interaction.response.send_message.call_args.kwargs
     assert send_kwargs.get("ephemeral") is True
     assert "Overdue" in send_kwargs.get("embed").title
+
+
+@pytest.mark.asyncio
+async def test_bot_on_ready_presence(services):
+    """Verify DggPmBot on_ready sets watching activity to /pm help."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+    bot.change_presence = AsyncMock()
+    await bot.on_ready()
+    bot.change_presence.assert_awaited_once()
+    activity = bot.change_presence.call_args.kwargs["activity"]
+    assert activity.type == discord.ActivityType.watching
+    assert activity.name == "tasks with /pm help"

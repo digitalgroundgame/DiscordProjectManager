@@ -131,7 +131,7 @@ class DggPmBot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="tasks with /help-pm",
+                name="tasks with /pm help",
             )
         )
 
