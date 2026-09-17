@@ -39,6 +39,10 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
         self.guild_lead_roles: IGuildLeadRoleRepository = None  # type: ignore[assignment]
 
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        return self._session_factory
+
     async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
         self.tasks = PostgresTaskRepo(self._session)

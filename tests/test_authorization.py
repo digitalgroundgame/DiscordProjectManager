@@ -686,7 +686,7 @@ async def test_permission_aware_project_menu_ui(services):
     assert manager_view.hub_btn is not None
 
     manager_embed = build_project_menu_embed(is_server_manager=True)
-    assert "New Project" in manager_embed.description
+    assert "Create Project" in manager_embed.description
     assert "Set Squad Role" in manager_embed.description
     assert "Archive Project" in manager_embed.description
     assert "Rebuild Workspace" in manager_embed.description
@@ -707,6 +707,7 @@ async def test_permission_aware_project_menu_ui(services):
 
     regular_embed = build_project_menu_embed(is_server_manager=False)
     assert "Active Projects" in regular_embed.description
+    assert "Create Project" not in regular_embed.description
     assert "New Project" not in regular_embed.description
     assert "Set Squad Role" not in regular_embed.description
     assert "Archive Project" not in regular_embed.description
@@ -1454,7 +1455,7 @@ async def test_pm_hub_projects_tab_authorizes_lead_role_to_create_projects(servi
 
     assert view.is_server_manager is True
     assert view.new_project_btn is not None
-    assert "New Project" in embed.description
+    assert "Create Project" in embed.description
 
     # 2. Regular member clicks Projects Hub
     interaction.response.send_message.reset_mock()
@@ -1469,4 +1470,151 @@ async def test_pm_hub_projects_tab_authorizes_lead_role_to_create_projects(servi
 
     assert reg_view.is_server_manager is False
     assert reg_view.new_project_btn is None
-    assert "New Project" not in reg_embed.description
+    assert "Create Project" not in reg_embed.description
+
+
+@pytest.mark.asyncio
+async def test_can_manage_projects_resolves_member_when_user_is_discord_user(services, repos):
+    """Verify that can_manage_projects resolves a discord.User via guild when roles attribute is absent."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_role_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_role_repo)
+
+    guild_id = 888111
+    lead_role_id = 999222
+    await lead_role_repo.add_lead_role(guild_id, lead_role_id)
+
+    # Mock discord.User without 'roles'
+    user = MagicMock(spec=discord.User)
+    user.id = 5001
+    user.guild_permissions = None
+    del user.roles
+
+    # Mock member that guild has
+    mock_member = _make_mock_member(5001, role_ids=[lead_role_id], manage_guild=False)
+    guild = MagicMock(spec=discord.Guild)
+    guild.id = guild_id
+    guild.get_member.return_value = mock_member
+
+    can_manage = await auth_srv.can_manage_projects(user, guild_id=guild_id, guild=guild)
+    assert can_manage is True
+    guild.get_member.assert_called_once_with(5001)
+
+
+@pytest.mark.asyncio
+async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_button(services, repos):
+    """Verify PmHubView auto-wires guild_lead_role_repo if auth_service is omitted, and has Create Project button."""
+    from src.adapters.discord_bot.views.hub_menu import PmHubView
+    from src.adapters.discord_bot.views.project_menu import ProjectChannelSelectView
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    lead_role_repo = repos["guild_lead_role"]
+
+    guild_id = 777111
+    lead_role_id = 888222
+    await lead_role_repo.add_lead_role(guild_id, lead_role_id)
+
+    lead_member = _make_mock_member(6001, role_ids=[lead_role_id], manage_guild=False)
+    reg_member = _make_mock_member(6002, role_ids=[], manage_guild=False)
+
+    # Instantiate PmHubView WITHOUT auth_service
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv)
+    assert hub_view.auth_service.guild_lead_role_repo is not None
+
+    # Verify Create Project button exists on row 1
+    assert hasattr(hub_view, "create_project_btn")
+    assert hub_view.create_project_btn.label == "Create Project"
+
+    # 1. Lead member clicks Create Project button directly on PmHubView
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = MagicMock(id=guild_id)
+    inter.guild.get_member.return_value = lead_member
+    inter.user = lead_member
+    inter.response = MagicMock()
+    inter.response.send_message = AsyncMock()
+
+    await hub_view.create_project_btn.callback(inter)
+    inter.response.send_message.assert_awaited_once()
+    kwargs = inter.response.send_message.call_args.kwargs
+    assert isinstance(kwargs["view"], ProjectChannelSelectView)
+
+    # 2. Regular member clicks Create Project button -> permission error
+    inter.response.send_message.reset_mock()
+    inter.user = reg_member
+    inter.guild.get_member.return_value = reg_member
+
+    await hub_view.create_project_btn.callback(inter)
+    inter.response.send_message.assert_awaited_once()
+    args, kwargs = inter.response.send_message.call_args
+    error_msg = kwargs.get("content", args[0] if args else "")
+    assert "You do not have permission" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_pm_cog_menu_authorizes_lead_role_for_project_creation(services, repos):
+    """Verify /pm menu checks can_manage_projects so Team Leads see Create Project button."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+    from src.adapters.discord_bot.views.admin_menu import PmDashboardView
+    from src.adapters.discord_bot.views.project_menu import ProjectMenuView
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    lead_role_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_role_repo)
+
+    guild_id = 999333
+    lead_role_id = 555666
+    await lead_role_repo.add_lead_role(guild_id, lead_role_id)
+
+    lead_member = _make_mock_member(7001, role_ids=[lead_role_id], manage_guild=False)
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+    )
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = MagicMock(id=guild_id)
+    inter.guild.name = "Test Guild"
+    inter.user = lead_member
+    inter.response = MagicMock()
+    inter.response.send_message = AsyncMock()
+
+    await cog.menu.callback(cog, inter)
+
+    inter.response.send_message.assert_awaited_once()
+    dash_view = inter.response.send_message.call_args.kwargs["view"]
+    dash_embed = inter.response.send_message.call_args.kwargs["embed"]
+    assert "Create Project" in dash_embed.fields[3].value
+
+    assert isinstance(dash_view, PmDashboardView)
+    assert dash_view.is_server_manager is True
+    assert dash_view.new_proj_btn is not None
+    assert dash_view.new_proj_btn.label == "Create Project"
+    # Lead role should NOT see Lead Roles admin button (only Server Managers can configure roles)
+    assert getattr(dash_view, "lead_roles_btn", None) is None
+
+    # Clicking Projects button from dashboard opens ProjectMenuView with Create Project button
+    proj_inter = MagicMock(spec=discord.Interaction)
+    proj_inter.guild = inter.guild
+    proj_inter.user = lead_member
+    proj_inter.response = MagicMock()
+    proj_inter.response.edit_message = AsyncMock()
+
+    await dash_view._on_projects_clicked(proj_inter)
+    proj_inter.response.edit_message.assert_awaited_once()
+    proj_view = proj_inter.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(proj_view, ProjectMenuView)
+    assert proj_view.is_server_manager is True
+    assert proj_view.new_project_btn is not None
+    assert proj_view.new_project_btn.label == "Create Project"

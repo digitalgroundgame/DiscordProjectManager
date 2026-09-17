@@ -38,6 +38,7 @@ def build_pm_dashboard_embed(
     active_tasks_count: int = 0,
     current_pref: NotificationPreference = NotificationPreference.DM,
     is_server_manager: bool = False,
+    is_server_admin: bool | None = None,
 ) -> discord.Embed:
     """Builds the main Project Management & Administration Workspace embed for /pm menu."""
     guild_name = guild.name if guild else "Server"
@@ -51,7 +52,13 @@ def build_pm_dashboard_embed(
     }
     pref_str = pref_labels.get(current_pref, current_pref.value)
 
-    role_badge = "Server Administrator / Manager" if is_server_manager else "Project Contributor"
+    effective_admin = is_server_admin if is_server_admin is not None else is_server_manager
+    if effective_admin:
+        role_badge = "Server Administrator / Manager"
+    elif is_server_manager:
+        role_badge = "Team Lead / Project Manager"
+    else:
+        role_badge = "Project Contributor"
 
     embed = discord.Embed(
         title="Project Management Control Center",
@@ -80,15 +87,21 @@ def build_pm_dashboard_embed(
     )
 
     if is_server_manager:
+        actions = [
+            "• **`Create Project`**: Launch the multi-step project creation wizard.",
+            "• **`Projects`**: Manage channels, assign squad roles, set leads, archive.",
+        ]
+        if effective_admin:
+            actions.append("• **`Lead Roles`**: Assign or view authorized Team Lead Discord roles.")
+        actions.extend(
+            [
+                "• **`Server Overview`**: Server-wide project status & completion metrics.",
+                "• **`Settings`**: Configure personal notification preferences.",
+            ]
+        )
         embed.add_field(
             name="Management Actions",
-            value=(
-                "• **`New Project`**: Launch the multi-step project creation wizard.\n"
-                "• **`Projects`**: Manage channels, assign squad roles, set leads, archive.\n"
-                "• **`Lead Roles`**: Assign or view authorized Team Lead Discord roles.\n"
-                "• **`Server Overview`**: Server-wide project status & completion metrics.\n"
-                "• **`Settings`**: Configure personal notification preferences."
-            ),
+            value="\n".join(actions),
             inline=False,
         )
     else:
@@ -372,6 +385,7 @@ class PmDashboardView(BaseView):
         initial_interaction: discord.Interaction | None = None,
         user: discord.Member | discord.User | None = None,
         is_server_manager: bool | None = None,
+        is_server_admin: bool | None = None,
         auth_service: AuthService | None = None,
     ):
         super().__init__(timeout=180)
@@ -390,6 +404,13 @@ class PmDashboardView(BaseView):
         else:
             self.is_server_manager = True
 
+        if is_server_admin is not None:
+            self.is_server_admin = is_server_admin
+        elif effective_user is not None:
+            self.is_server_admin = AuthService.is_server_manager(effective_user)
+        else:
+            self.is_server_admin = self.is_server_manager
+
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -398,13 +419,16 @@ class PmDashboardView(BaseView):
         # Row 0: Core Management Buttons
         if self.is_server_manager:
             self.new_proj_btn = discord.ui.Button(
-                label="New Project",
+                label="Create Project",
                 style=discord.ButtonStyle.success,
                 row=0,
             )
             self.new_proj_btn.callback = self._on_new_project_clicked
             self.add_item(self.new_proj_btn)
+        else:
+            self.new_proj_btn = None
 
+        if self.is_server_admin:
             self.lead_roles_btn = discord.ui.Button(
                 label="Lead Roles",
                 style=discord.ButtonStyle.secondary,
@@ -413,7 +437,6 @@ class PmDashboardView(BaseView):
             self.lead_roles_btn.callback = self._on_lead_roles_clicked
             self.add_item(self.lead_roles_btn)
         else:
-            self.new_proj_btn = None
             self.lead_roles_btn = None
 
         self.projects_btn = discord.ui.Button(

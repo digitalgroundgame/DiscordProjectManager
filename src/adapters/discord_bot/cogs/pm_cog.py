@@ -187,6 +187,17 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 else NotificationPreference.DM
             )
 
+            can_manage = (
+                await self.auth_service.can_manage_projects(
+                    interaction.user,
+                    guild_id=interaction.guild.id,
+                    guild=interaction.guild,
+                )
+                if self.auth_service
+                else False
+            )
+            is_server_admin = self.auth_service.is_server_manager(interaction.user) if self.auth_service else False
+
             view = PmDashboardView(
                 project_service=self.project_service,
                 squad_service=self.squad_service,
@@ -194,6 +205,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 user_service=self.user_service,
                 auth_service=self.auth_service,
                 initial_interaction=interaction,
+                is_server_manager=can_manage,
+                is_server_admin=is_server_admin,
             )
             embed = build_pm_dashboard_embed(
                 guild=interaction.guild,
@@ -201,7 +214,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
-                is_server_manager=view.is_server_manager,
+                is_server_manager=can_manage,
+                is_server_admin=is_server_admin,
             )
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager

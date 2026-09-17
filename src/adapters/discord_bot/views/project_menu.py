@@ -2581,7 +2581,7 @@ class ProjectMenuView(BaseView):
 
         if self.is_server_manager:
             self.new_project_btn = discord.ui.Button(
-                label="New Project",
+                label="Create Project",
                 style=discord.ButtonStyle.primary,
                 row=0,
             )
@@ -2771,7 +2771,13 @@ class ProjectMenuView(BaseView):
             from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
 
             if self.task_service:
-                view = PmHubView(self.project_service, self.squad_service, self.task_service, self.user_service)
+                view = PmHubView(
+                    self.project_service,
+                    self.squad_service,
+                    self.task_service,
+                    self.user_service,
+                    auth_service=self.auth_service,
+                )
                 embed = build_hub_welcome_embed()
                 await interaction.response.edit_message(content=None, embed=embed, view=view)
 
@@ -2969,7 +2975,7 @@ def build_project_menu_embed(is_server_manager: bool = True) -> discord.Embed:
         embed.description = (
             "> **Project Administration & Squad Routing**\n"
             "> Manage project containers, channel bindings, squad roles, and project leads.\n\n"
-            "• **`New Project`**: Create a project container bound to a Forum channel\n"
+            "• **`Create Project`**: Create a project container bound to a Forum channel\n"
             "• **`Active Projects`**: View all running projects, squad roles, and designated leads\n"
             "• **`Set Squad Role`**: Map a Discord role as the project's contributor squad\n"
             "• **`Set Project Lead`**: Designate the project owner / lead with elevated permissions\n"

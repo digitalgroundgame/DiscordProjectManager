@@ -50,7 +50,12 @@ class AuthService:
             return await self.guild_lead_role_repo.list_lead_role_ids(guild_id)
         return set()
 
-    async def can_manage_projects(self, user: discord.Member | discord.User, guild_id: int | None = None) -> bool:
+    async def can_manage_projects(
+        self,
+        user: discord.Member | discord.User,
+        guild_id: int | None = None,
+        guild: discord.Guild | None = None,
+    ) -> bool:
         """Checks if user has authority to create and manage projects and squads:
         1. Discord Server Manager (manage_guild or administrator).
         2. Holds any authorized Team Lead role configured for the guild.
@@ -59,31 +64,52 @@ class AuthService:
         if self.is_server_manager(user):
             return True
 
-        if not guild_id or not hasattr(user, "roles"):
+        target_guild_id = guild_id or (guild.id if guild else None) or getattr(getattr(user, "guild", None), "id", None)
+        if not target_guild_id:
             return False
+
+        # If user is a discord.User or missing roles, attempt to resolve member from guild
+        member = user
+        if not hasattr(member, "roles") or not getattr(member, "roles", None):
+            target_guild = guild or getattr(user, "guild", None)
+            if target_guild:
+                if hasattr(target_guild, "get_member"):
+                    m = target_guild.get_member(user.id)
+                    if m:
+                        member = m
+                if (not hasattr(member, "roles") or not getattr(member, "roles", None)) and hasattr(
+                    target_guild, "fetch_member"
+                ):
+                    try:
+                        member = await target_guild.fetch_member(user.id)
+                    except Exception:
+                        pass
 
         # 2. Check configured Team Lead roles
         if self.guild_lead_role_repo:
-            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(guild_id)
+            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(target_guild_id)
             if lead_role_ids:
-                user_role_ids = {r.id for r in getattr(user, "roles", []) if hasattr(r, "id")}
+                user_role_ids = {r.id for r in getattr(member, "roles", []) if hasattr(r, "id")}
                 if any(rid in user_role_ids for rid in lead_role_ids):
                     return True
 
         # 3. Check if active Squad Lead in this guild
-        if self.squad_service and getattr(user, "id", None):
-            squads = await self.squad_service.list_squads(guild_id)
+        if self.squad_service and getattr(member, "id", None):
+            squads = await self.squad_service.list_squads(target_guild_id)
             for s in squads:
-                if await self.squad_service.is_squad_lead(s.id, user.id):
+                if await self.squad_service.is_squad_lead(s.id, member.id):
                     return True
 
         return False
 
     async def require_project_management(
-        self, user: discord.Member | discord.User, guild_id: int | None = None
+        self,
+        user: discord.Member | discord.User,
+        guild_id: int | None = None,
+        guild: discord.Guild | None = None,
     ) -> None:
         """Raises PermissionDeniedError if the user cannot create or manage projects and squads."""
-        if not await self.can_manage_projects(user, guild_id):
+        if not await self.can_manage_projects(user, guild_id=guild_id, guild=guild):
             raise PermissionDeniedError(
                 "You do not have permission to manage projects or squads. "
                 "You must be a Discord Server Manager or hold an authorized Team Lead role."

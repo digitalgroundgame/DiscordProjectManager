@@ -10,6 +10,7 @@ from src.domain.enums import PriorityLevel, TaskStatus
 
 if TYPE_CHECKING:
     from src.domain.models import Task
+    from src.services.auth_service import AuthService
     from src.services.project_service import ProjectService
     from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
@@ -352,6 +353,7 @@ async def ensure_pinned_hub_post(
     task_service: TaskService | None = None,
     user_service: UserService | None = None,
     project_name: str | None = None,
+    auth_service: AuthService | None = None,
 ) -> tuple[bool, str]:
     """Ensures a pinned Project Management Hub post exists in the given Forum or Text channel."""
     from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
@@ -411,12 +413,25 @@ async def ensure_pinned_hub_post(
             except Exception as e:
                 logger.debug("Could not auto-create user_service for hub: %s", e)
 
+        uow = getattr(task_service, "uow", None)
+        sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
+        if not auth_service and squad_service and sf:
+            try:
+                from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+                from src.services.auth_service import AuthService
+
+                lead_repo = PostgresGuildLeadRoleRepository(sf)
+                auth_service = AuthService(project_service, squad_service, guild_lead_role_repo=lead_repo)
+            except Exception as e:
+                logger.debug("Could not auto-create auth_service for hub: %s", e)
+
         if squad_service:
             view = PmHubView(
                 project_service=project_service,
                 squad_service=squad_service,
                 task_service=task_service,
                 user_service=user_service,
+                auth_service=auth_service,
             )
 
     if isinstance(channel, discord.ForumChannel):
