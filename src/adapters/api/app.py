@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 
+from src import __version__
 from src.adapters.db.session import get_session
 from src.adapters.db.tables import OutboxEventTable, ProjectTable, TaskTable
 from src.config import settings
@@ -9,7 +10,7 @@ from src.config import settings
 api_app = FastAPI(
     title="dgg-pm Service API",
     description="Health and metrics service for Discord-Native Task Management Platform",
-    version="0.1.0",
+    version=__version__,
 )
 
 _bearer_scheme = HTTPBearer(auto_error=False)
