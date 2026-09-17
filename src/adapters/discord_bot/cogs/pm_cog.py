@@ -56,7 +56,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
     task_group = app_commands.Group(name="task", description="Task operations, assignments, and status")
     project_group = app_commands.Group(name="project", description="Project container and channel operations")
-    squad_group = app_commands.Group(name="squad", description="Functional squad and squad lead management")
     admin_group = app_commands.Group(
         name="admin",
         description="Administrative commands and maintenance operations",
@@ -241,8 +240,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 "• `/pm task history [task]`: View task audit trail\n"
                 "• `/pm project create [name] [prefix] [channel]`: Create project & bind forum\n"
                 "• `/pm project list`: View all active projects\n"
-                "• `/pm squad lead [action] [squad] [user]`: Designate/remove squad lead\n"
-                "• `/pm squad list`: View server squad rosters and leads\n"
+                "• `/pm project role [project] [action] [role]`: Map or unmap Discord role\n"
+                "• `/pm project lead [project] [user] [action]`: Designate project squad lead\n"
                 "• `/pm post-hub [channel]`: Post and pin interactive PM Hub in forum/channel\n"
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1873,162 +1872,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except Exception as e:
             await send_interaction_error(interaction, e, "initiating project rebuild", logger, ephemeral=True)
-
-    # ==========================================
-    # Squad Subgroup: /pm squad <cmd>
-    # ==========================================
-    @squad_group.command(name="create", description="Create a functional squad mapped to a Discord role.")
-    @app_commands.describe(
-        role="Discord server role representing the squad",
-        squad_name="Optional custom squad name",
-    )
-    async def squad_create(
-        self,
-        interaction: discord.Interaction,
-        role: discord.Role,
-        squad_name: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            name = squad_name.strip() if squad_name else role.name
-            squad = await self.squad_service.create_squad(
-                guild_id=interaction.guild.id,
-                name=name,
-                discord_role_id=role.id,
-            )
-            embed = discord.Embed(
-                title=f"👥 Squad Created: {squad.name}",
-                description=f"Mapped Discord Role: <@&{squad.discord_role_id}>",
-                color=discord.Color.teal(),
-            )
-            await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"creating squad for role '{role.name}'", logger, ephemeral=True
-            )
-
-    @squad_group.command(name="lead", description="Designate or remove a Squad Lead for a functional squad.")
-    @app_commands.describe(
-        action="Action to perform (Add or Remove Squad Lead)",
-        squad_name="Name of the functional squad",
-        user="Discord member to designate or remove as Squad Lead",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add Squad Lead", value="add"),
-            app_commands.Choice(name="Remove Squad Lead", value="remove"),
-        ]
-    )
-    @app_commands.autocomplete(squad_name=squad_autocomplete)
-    async def squad_lead(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        squad_name: str,
-        user: discord.Member,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            squad = await self.squad_service.get_by_name(interaction.guild.id, squad_name)
-            if not squad:
-                await interaction.followup.send(f"❌ Squad '{squad_name}' not found.", ephemeral=True)
-                return
-
-            await self.auth_service.require_squad_lead_management(interaction.user, squad.id)
-
-            if action == "add":
-                if hasattr(user, "roles"):
-                    has_role = any(r.id == squad.discord_role_id for r in user.roles)
-                    if not has_role:
-                        await interaction.followup.send(
-                            f"❌ <@{user.id}> is not part of squad **{squad.name}** "
-                            f"(missing role <@&{squad.discord_role_id}>).\n"
-                            f"Please assign them the Discord role first.",
-                            ephemeral=True,
-                        )
-                        return
-                await self.squad_service.add_squad_lead(squad.id, user.id)
-                msg = (
-                    f"⭐ Designated <@{user.id}> as **Squad Lead** for squad "
-                    f"**{squad.name}** (<@&{squad.discord_role_id}>)."
-                )
-            else:
-                await self.squad_service.remove_squad_lead(squad.id, user.id)
-                msg = f"✅ Removed Squad Lead status from <@{user.id}> for squad **{squad.name}**."
-
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"managing squad lead for '{squad_name}'", logger, ephemeral=True
-            )
-
-    @squad_group.command(name="list", description="List all functional squads and live Discord role rosters.")
-    async def squad_list(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            squads = await self.squad_service.list_squads(interaction.guild.id)
-            if not squads:
-                await interaction.followup.send("👥 No squads created yet. Use `/pm squad create` to set one up.")
-                return
-
-            embed = discord.Embed(title="👥 Server Squads & Rosters", color=discord.Color.teal())
-            for s in squads:
-                leads = await self.squad_service.list_squad_leads(s.id)
-                role = interaction.guild.get_role(s.discord_role_id) if hasattr(interaction.guild, "get_role") else None
-                role_members = getattr(role, "members", []) if role else []
-                role_member_ids = {m.id for m in role_members}
-
-                # Auto-prune leads who lost the Discord role
-                if role is not None:
-                    valid_leads = []
-                    for uid in leads:
-                        if uid not in role_member_ids:
-                            await self.squad_service.remove_squad_lead(s.id, uid)
-                        else:
-                            valid_leads.append(uid)
-                    leads = valid_leads
-
-                lead_strs = [f"<@{uid}>" for uid in leads]
-                if lead_strs:
-                    lead_line = f"⭐ **Squad Lead**: {', '.join(lead_strs)}"
-                else:
-                    lead_line = "⭐ **Squad Lead**: None designated"
-
-                other_members = [f"<@{m.id}>" for m in role_members if m.id not in leads]
-                member_count = len(role_members)
-                if other_members:
-                    sample = ", ".join(other_members[:8])
-                    if len(other_members) > 8:
-                        sample += f" *(+{len(other_members) - 8} more)*"
-                    members_line = f"👤 **Members ({member_count})**: {sample}"
-                elif role_members:
-                    members_line = f"👤 **Members ({member_count})**: (All leads)"
-                else:
-                    members_line = f"👤 **Members ({member_count})**: None with role <@&{s.discord_role_id}>"
-
-                field_val = f"Role: <@&{s.discord_role_id}>\n{lead_line}\n{members_line}"
-                embed.add_field(name=f"**{s.name}**", value=field_val, inline=False)
-
-            await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "listing squads", logger, ephemeral=True)
 
     @app_commands.command(name="tree", description="Render tech-tree dependency graph for a project.")
     @app_commands.describe(

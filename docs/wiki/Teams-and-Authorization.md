@@ -93,5 +93,5 @@ If an administrator strips a Discord role from a user in server settings (or if 
    - Discord bot event listeners (`on_member_update` and `on_member_remove`) immediately detect when a squad role is stripped or when a member leaves the server and delete their record from PostgreSQL.
 
 3. **Tier 3: Display-Time Reconciliation**:
-   - `/pm squad list` (alias: `/pm team list`) and the interactive Squad Roster detail menu cross-reference database records against live Discord `role.members` and automatically clean up any lingering records on-the-fly.
+   - The interactive Squad Roster detail menu and project views cross-reference database records against live Discord `role.members` and automatically clean up any lingering records on-the-fly.
 

@@ -203,7 +203,10 @@ async def test_squad_lead_cog_enforcement(services):
         auth_service=auth_srv,
     )
 
+    project = await proj_srv.create_project(guild_id=guild_id, name="DevOps Proj", prefix="DOP")
     squad = await squad_srv.create_squad(guild_id=guild_id, name="DevOps", discord_role_id=777888)
+    await proj_srv.assign_squad_to_project(project.id, squad.id)
+
     lead_id = 5001
     await squad_srv.add_squad_lead(squad.id, user_discord_id=lead_id)
 
@@ -218,12 +221,12 @@ async def test_squad_lead_cog_enforcement(services):
     interaction_lead.followup = MagicMock()
     interaction_lead.followup.send = AsyncMock()
 
-    await pm_cog.squad_lead.callback(
+    await pm_cog.project_lead.callback(
         pm_cog,
         interaction=interaction_lead,
-        action="add",
-        squad_name="DevOps",
+        project_name="DevOps Proj",
         user=target_user,
+        action="add",
     )
 
     interaction_lead.followup.send.assert_awaited_once()
@@ -240,15 +243,15 @@ async def test_squad_lead_cog_enforcement(services):
     interaction_ineligible.followup = MagicMock()
     interaction_ineligible.followup.send = AsyncMock()
 
-    await pm_cog.squad_lead.callback(
+    await pm_cog.project_lead.callback(
         pm_cog,
         interaction=interaction_ineligible,
-        action="add",
-        squad_name="DevOps",
+        project_name="DevOps Proj",
         user=ineligible_user,
+        action="add",
     )
     interaction_ineligible.followup.send.assert_awaited_once()
-    assert "is not part of" in interaction_ineligible.followup.send.await_args.args[0]
+    assert "does not hold" in interaction_ineligible.followup.send.await_args.args[0]
 
     # 3. Regular member attempts to designate lead (Permission Denied)
     unauthorized_user = _make_mock_member(5099, role_ids=[777888])
@@ -260,12 +263,12 @@ async def test_squad_lead_cog_enforcement(services):
     interaction_denied.followup = MagicMock()
     interaction_denied.followup.send = AsyncMock()
 
-    await pm_cog.squad_lead.callback(
+    await pm_cog.project_lead.callback(
         pm_cog,
         interaction=interaction_denied,
-        action="add",
-        squad_name="DevOps",
+        project_name="DevOps Proj",
         user=target_user,
+        action="add",
     )
     interaction_denied.followup.send.assert_awaited_once()
     assert "you do not have permission" in interaction_denied.followup.send.await_args.args[0].lower()

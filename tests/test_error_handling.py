@@ -225,15 +225,15 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
     last_call_arg = interaction.followup.send.call_args[0][0]
     assert "already exists" in last_call_arg
 
-    # 2. Squad Subcommand: Duplicate squad name translates to clean error message
+    # 2. Project Role: Non-existent project translates to clean error message
     interaction.followup.send.reset_mock()
-    await services["squad"].create_squad(guild_id=guild_id, name="Blue Squad", discord_role_id=5555)
     mock_role = MagicMock(spec=discord.Role)
     mock_role.id = 6666
-    await pm_cog.squad_create.callback(pm_cog, interaction, role=mock_role, squad_name="Blue Squad")
+    mock_role.name = "Blue Squad"
+    await pm_cog.project_role.callback(pm_cog, interaction, project_name="NON-EXISTENT", role=mock_role, action="add")
     interaction.followup.send.assert_awaited()
     last_call_arg = interaction.followup.send.call_args[0][0]
-    assert "already exists" in last_call_arg
+    assert "not found" in last_call_arg
 
     # 3. Task Cog: Status update on non-existent task
     interaction.followup.send.reset_mock()
@@ -323,7 +323,7 @@ async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
 
     interaction = MagicMock(spec=discord.Interaction)
     interaction.command = MagicMock()
-    interaction.command.qualified_name = "pm squad create"
+    interaction.command.qualified_name = "pm project create"
     interaction.response = MagicMock()
     interaction.response.is_done.return_value = False
     interaction.response.send_message = AsyncMock()
@@ -337,4 +337,4 @@ async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
     sent_msg = interaction.response.send_message.call_args[0][0]
     assert "Manage Server" in sent_msg
     assert interaction.response.send_message.call_args[1].get("ephemeral") is True
-    assert "App command check failure while executing '/pm squad create'" in caplog.text
+    assert "App command check failure while executing '/pm project create'" in caplog.text

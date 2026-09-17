@@ -50,18 +50,6 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 
 ---
 
-## 👥 Squad Commands (`/pm squad <command>`)
-
-*(Backwards compatible alias: `/pm team <command>`)*
-
-| Subcommand | Parameters | Description | Permission Required |
-| :--- | :--- | :--- | :--- |
-| **`create`** | `role` (required)<br>`squad_name` (optional) | Creates a functional squad mapped to an existing Discord Server Role. | `Manage Server` OR Authorized Team Lead Role |
-| **`lead`** | `action` (required: `add`, `remove`)<br>`squad_name` (required)<br>`user` (required) | Designates or removes a Squad Lead by squad name. | `Manage Server` OR Authorized Team Lead Role OR Active Squad Lead |
-| **`list`** | None | Displays all squads, designated leads, and live Discord role member counts. | `@everyone` |
-
----
-
 ## 🛡️ Admin Commands (`/pm admin <command>`)
 
 | Subcommand | Parameters | Description | Permission Required |

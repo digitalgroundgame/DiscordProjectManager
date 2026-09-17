@@ -96,9 +96,8 @@ All bot operations are isolated under the unified `/pm` slash command namespace:
 | **`/pm task history`** | Standard Member | View full chronological audit trail of a task |
 | **`/pm project create`**| `Manage Server` | Instantiate project container, map Squad role, provision forum |
 | **`/pm project list`**  | Standard Member | List all active project containers and bound channels |
-| **`/pm squad create`**  | `Manage Server` | Define a functional squad mapped 1:1 with a Discord role |
-| **`/pm squad lead`**    | `Manage Server` / Lead | Designate or remove a Squad Lead |
-| **`/pm squad list`**    | Standard Member | Display all configured squads, leads, and member rosters |
+| **`/pm project role`**  | `Manage Server` / Lead | Map or unmap Discord native roles to a project container |
+| **`/pm project lead`**  | `Manage Server` / Lead | Designate or remove a Squad Lead for a project's squads |
 
 *For complete parameters, options, and permission breakdowns, see the [Slash Commands Reference](docs/wiki/Slash-Commands-Reference.md).*
 

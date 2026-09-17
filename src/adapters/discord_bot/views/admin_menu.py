@@ -614,7 +614,7 @@ class PmDashboardView(BaseView):
                 "• `/task-depend` & `/task-undepend`: Manage task prerequisites and DAG dependencies.\n"
                 "• `/tree`: Render Civilization-style Tech Tree dependency diagrams.\n"
                 "• `/project-create`: Create a project and bind it to a Forum channel.\n"
-                "• `/pm squad create`: Map a Discord role to a contributor squad.\n\n"
+                "• `/pm project role`: Map a Discord role to a project container.\n\n"
                 "**Interactive Views**:\n"
                 "• In Forum channels, check the pinned **Control Hub** post to create tasks and view tech trees!\n"
                 "• All modal inputs and buttons run ephemerally to keep channels clean."

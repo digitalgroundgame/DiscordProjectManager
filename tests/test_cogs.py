@@ -2090,18 +2090,21 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
     assert embed is not None
     assert "Team Lead Project" in embed.title
 
-    # Team Lead creates squad
+    # Team Lead maps additional role to project
+    new_role = MagicMock(spec=discord.Role)
+    new_role.id = 55556666
+    new_role.name = "Designers"
     interaction.followup.send.reset_mock()
-    await cog.squad_create.callback(
+    await cog.project_role.callback(
         cog,
         interaction,
-        role=squad_role,
-        squad_name="Dev Squad",
+        project_name="Team Lead Project",
+        role=new_role,
+        action="add",
     )
     interaction.followup.send.assert_awaited()
-    embed = interaction.followup.send.call_args[1].get("embed")
-    assert embed is not None
-    assert "Dev Squad" in embed.title
+    sent_msg = interaction.followup.send.call_args[0][0]
+    assert "Mapped role" in sent_msg
 
     # 2. Regular user (does NOT have team_lead_role_id, manage_guild=False)
     other_role = MagicMock(spec=discord.Role, id=other_role_id, name="Member")
@@ -2126,14 +2129,47 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
     sent_msg = interaction.followup.send.call_args[0][0]
     assert "You do not have permission" in sent_msg
 
-    # Regular user fails creating squad
+    # Regular user fails mapping role to project
     interaction.followup.send.reset_mock()
-    await cog.squad_create.callback(
+    await cog.project_role.callback(
         cog,
         interaction,
-        role=squad_role,
-        squad_name="Unauthorized Squad",
+        project_name="Team Lead Project",
+        role=new_role,
+        action="add",
     )
     interaction.followup.send.assert_awaited()
     sent_msg = interaction.followup.send.call_args[0][0]
     assert "You do not have permission" in sent_msg
+
+
+def test_pm_cog_does_not_expose_squad_command_group():
+    """Verify /pm slash command surface does not register a standalone squad command group."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    bot = MagicMock()
+    cog = PmCog(bot=bot)
+    command_names = [cmd.name for cmd in cog.app_command.commands]
+    assert "squad" not in command_names
+    assert not hasattr(cog, "squad_group")
+
+
+@pytest.mark.asyncio
+async def test_pm_cog_help_command_does_not_mention_squad_commands():
+    """Verify /pm help documentation does not list deleted /pm squad commands."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    bot = MagicMock()
+    cog = PmCog(bot=bot)
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await cog.help_command.callback(cog, interaction=interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    embed = interaction.response.send_message.call_args[1].get("embed")
+    assert embed is not None
+    assert "/pm squad" not in embed.description
+    assert "/pm project role" in embed.description
+    assert "/pm project lead" in embed.description
