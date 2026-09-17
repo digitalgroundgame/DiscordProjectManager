@@ -37,16 +37,16 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 
 | Subcommand | Parameters | Description | Permission Required |
 | :--- | :--- | :--- | :--- |
-| **`create`** | `name` (required)<br>`prefix` (required)<br>`role` (required: `@Role`)<br>`channel` (optional)<br>`description` (optional)<br>`category` (optional) | Creates a project container, maps the squad Discord role, and automatically provisions standard tags + pinned Control Hub if a forum channel is linked. | `Manage Server` |
+| **`create`** | `name` (required)<br>`prefix` (required)<br>`role` (required: `@Role`)<br>`channel` (optional)<br>`description` (optional)<br>`category` (optional) | Creates a project container, maps the squad Discord role, and automatically provisions standard tags + pinned Control Hub if a forum channel is linked. | `Manage Server` OR Authorized Team Lead Role |
 | **`tree`** | `project_name` (required)<br>`orientation` (optional: `lr`, `tb`) | Renders the interactive visual dependency graph for the project. | `@everyone` |
-| **`role`** | `project_name` (required)<br>`role` (required: `@Role`)<br>`action` (required: `add`, `remove`) | Maps or unmaps additional Discord squad roles to a project container (for cross-functional squads). | `Manage Server` |
-| **`squad`** | `project_name` (required)<br>`squad_name` (required)<br>`action` (required: `add`, `remove`) | Maps or unmaps a functional squad to a project container (alias: `team`). | `Manage Server` |
-| **`lead`** | `project_name` (required)<br>`user` (required: `@Member`)<br>`action` (required: `add`, `remove`) | Designates or removes a Squad Lead for the project's squads. | `Manage Server` OR Active Squad Lead |
+| **`role`** | `project_name` (required)<br>`role` (required: `@Role`)<br>`action` (required: `add`, `remove`) | Maps or unmaps additional Discord squad roles to a project container (for cross-functional squads). | `Manage Server` OR Authorized Team Lead Role |
+| **`squad`** | `project_name` (required)<br>`squad_name` (required)<br>`action` (required: `add`, `remove`) | Maps or unmaps a functional squad to a project container (alias: `team`). | `Manage Server` OR Authorized Team Lead Role |
+| **`lead`** | `project_name` (required)<br>`user` (required: `@Member`)<br>`action` (required: `add`, `remove`) | Designates or removes a Squad Lead for the project's squads. | `Manage Server` OR Authorized Team Lead Role OR Active Squad Lead |
 | **`list`** | None | Lists all active project containers and their bound Discord channels. | `@everyone` |
-| **`archive`** | `project_name` (required) | Archives a project container and cascades thread archiving. | `Manage Server` |
-| **`unarchive`** | `project_name` (required) | Restores an archived project container and reopens task threads. | `Manage Server` |
-| **`setup_forum`** | `forum` (required) | Automatically configures standard PM tags on a Discord Forum Channel. | `Manage Server` |
-| **`rebuild`** | `project_name` (required)<br>`forum` (optional: `#Channel`) | Reconstructs and reconciles a project's Discord presence (forum channel, tags, control hub, and task thread workspaces) from database state. | `Manage Server` |
+| **`archive`** | `project_name` (required) | Archives a project container and cascades thread archiving. | `Manage Server` OR Authorized Team Lead Role |
+| **`unarchive`** | `project_name` (required) | Restores an archived project container and reopens task threads. | `Manage Server` OR Authorized Team Lead Role |
+| **`setup_forum`** | `forum` (required) | Automatically configures standard PM tags on a Discord Forum Channel. | `Manage Server` OR Authorized Team Lead Role |
+| **`rebuild`** | `project_name` (required)<br>`forum` (optional: `#Channel`) | Reconstructs and reconciles a project's Discord presence (forum channel, tags, control hub, and task thread workspaces) from database state. | `Manage Server` OR Authorized Team Lead Role |
 
 ---
 
@@ -56,8 +56,8 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 
 | Subcommand | Parameters | Description | Permission Required |
 | :--- | :--- | :--- | :--- |
-| **`create`** | `role` (required)<br>`squad_name` (optional) | Creates a functional squad mapped to an existing Discord Server Role. | `Manage Server` |
-| **`lead`** | `action` (required: `add`, `remove`)<br>`squad_name` (required)<br>`user` (required) | Designates or removes a Squad Lead by squad name. | `Manage Server` OR Active Squad Lead |
+| **`create`** | `role` (required)<br>`squad_name` (optional) | Creates a functional squad mapped to an existing Discord Server Role. | `Manage Server` OR Authorized Team Lead Role |
+| **`lead`** | `action` (required: `add`, `remove`)<br>`squad_name` (required)<br>`user` (required) | Designates or removes a Squad Lead by squad name. | `Manage Server` OR Authorized Team Lead Role OR Active Squad Lead |
 | **`list`** | None | Displays all squads, designated leads, and live Discord role member counts. | `@everyone` |
 
 ---
@@ -66,5 +66,7 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 
 | Subcommand | Parameters | Description | Permission Required |
 | :--- | :--- | :--- | :--- |
+| **`lead-role`** | `action` (required: `add`, `remove`, `list`)<br>`role` (optional: `@Role`) | Registers, removes, or lists Discord server roles authorized as Team Leads for project and squad management. | `Manage Server` |
 | **`sync`** | `scope` (optional: `guild`, `global`) | Synchronizes application slash commands with Discord on demand without restarting the bot. | `Manage Server` |
+
 

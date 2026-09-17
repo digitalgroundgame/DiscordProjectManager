@@ -9,7 +9,13 @@ DGG-PM implements a Discord-native permission model. Discord server roles act as
 ```
 ┌────────────────────────────────────────────────────────┐
 │  Server Managers (Manage Server / Administrator)       │
-│  - Full bypass across all projects, tasks, and squads  │
+│  - Full server bypass; configure Team Lead roles       │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+┌──────────────────────────▼─────────────────────────────┐
+│  Authorized Team Lead Roles & Active Squad Leads       │
+│  - Create and manage projects, channels, & squads      │
+│  - Granted via server role without Discord admin perms │
 └──────────────────────────┬─────────────────────────────┘
                            │
 ┌──────────────────────────▼─────────────────────────────┐
@@ -32,14 +38,46 @@ DGG-PM implements a Discord-native permission model. Discord server roles act as
 
 ## 🛡️ Mutation Authorization Matrix
 
-| Action | Server Manager | Squad Lead | Squad Member (Mapped Role) | Task Assignee | Task Creator | Other Server Member |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Create Project / Squad** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Designate / Remove Lead** | ✅ | ✅ (Own Squad) | ❌ | ❌ | ❌ | ❌ |
-| **Create Project Task** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **Mutate / Edit Task** | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Assign Task to Member** | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ (Target must hold squad role) |
-| **Self-Service Watchers (CC)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (Add/Remove Self) |
+| Action | Server Manager | Authorized Team Lead Role | Squad Lead | Squad Member (Mapped Role) | Task Assignee | Task Creator | Other Server Member |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Configure Lead Roles** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Create Project / Squad** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Manage Project (Role, Archive)** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Designate / Remove Squad Lead** | ✅ | ✅ | ✅ (Own Squad) | ❌ | ❌ | ❌ | ❌ |
+| **Create Project Task** | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Mutate / Edit Task** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Assign Task to Member** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ (Target must hold squad role) |
+| **Self-Service Watchers (CC)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (Add/Remove Self) |
+
+---
+
+## 🎖️ Configurable Team Lead Roles
+
+To adhere to the principle of least privilege, DGG-PM allows server managers to authorize specific Discord server roles as **Team Lead roles**. Members holding these roles can create and manage project containers, map squads, bind channels, and designate leads **without requiring server-wide `Manage Server` or `Administrator` permissions**.
+
+### 1. Interactive Admin Dashboard (`/pm menu`)
+1. Open the project dashboard using `/pm menu`.
+2. Members with `Manage Server` or `Administrator` permissions will see a **`Lead Roles`** button in the top action row.
+3. Clicking **`Lead Roles`** opens the interactive role management portal:
+   - Displays all currently authorized Team Lead roles in an embed list.
+   - Includes a native Discord **Role Select** dropdown to select any server role.
+   - Provides 1-click **`Assign Role`** and **`Remove Role`** actions.
+   - Includes a **`Back to Dashboard`** button to return cleanly.
+
+### 2. Slash Command Management (`/pm admin lead-role`)
+Server Managers can also configure authorized roles via slash commands:
+- **Add a Lead Role**:
+  ```text
+  /pm admin lead-role action:add role:@Engineering Lead
+  ```
+- **Remove a Lead Role**:
+  ```text
+  /pm admin lead-role action:remove role:@Engineering Lead
+  ```
+- **List All Lead Roles**:
+  ```text
+  /pm admin lead-role action:list
+  ```
 
 ---
 
@@ -56,3 +94,4 @@ If an administrator strips a Discord role from a user in server settings (or if 
 
 3. **Tier 3: Display-Time Reconciliation**:
    - `/pm squad list` (alias: `/pm team list`) and the interactive Squad Roster detail menu cross-reference database records against live Discord `role.members` and automatically clean up any lingering records on-the-fly.
+

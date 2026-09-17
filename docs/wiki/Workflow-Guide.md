@@ -58,9 +58,28 @@ Before creating projects and running commands in your server, configure your bot
 
 ## 🛠️ Step-by-Step Setup (Admins & Leads)
 
-### 1. Create a Project & Map Discord Role (1 Step)
-In DGG-PM, projects are directly bound to the Discord Server Role representing the functional squad working on that project.
+### 1. (Optional) Authorize Team Lead Roles (Server Managers)
+Server managers can delegate project creation and management authority to trusted team lead roles without granting full Discord administrator permissions:
 
+- **Via Interactive Menu**: Run `/pm menu`, click the **`Lead Roles`** button, select the role (e.g. `@Engineering Lead`) from the dropdown, and click **`Assign Role`**.
+- **Via Slash Command**:
+  ```text
+  /pm admin lead-role action:add role:@Engineering Lead
+  ```
+
+Members with this role can now create projects, bind channels, and map squads across the server.
+
+---
+
+### 2. Create a Project & Map Discord Role
+Projects can be created by Server Managers or any member holding an Authorized Team Lead role.
+
+#### Option A: Zero-Command Interactive Creation
+1. From any pinned **Control Hub**, click **`📁 Create Project`** (or open `/pm menu` and click **`Create Project`**).
+2. Select an existing Forum Channel (or choose to create a new one).
+3. Fill out the popup modal with Project Name, Prefix, and primary squad role.
+
+#### Option B: Slash Command
 ```text
 /pm project create name:Mobile App prefix:MOB role:@Mobile Developers channel:#mobile-dev-forum
 ```
@@ -73,18 +92,18 @@ In DGG-PM, projects are directly bound to the Discord Server Role representing t
 
 ---
 
-### 2. Optional: Designate Team Leads
-Assign one or more members holding the project's role as Team Leads:
+### 3. Designate Squad Leads
+Assign one or more members holding the project's role as Squad Leads:
 
 ```text
 /pm project lead project_name:Mobile App user:@Alice action:add
 ```
 > [!NOTE]
-> Team leads can manage task assignments and mutations for their project. If an admin strips the Discord role from a user in server settings, their lead privileges are revoked immediately and automatically cleaned up.
+> Squad leads can manage task assignments, squad rosters, and mutations for their project. If an admin strips the Discord role from a user in server settings, their lead privileges are revoked immediately and automatically cleaned up via our 3-tier self-healing system.
 
 ---
 
-### 3. Optional: Add Additional Roles (Cross-Functional Projects)
+### 4. Optional: Add Additional Roles (Cross-Functional Projects)
 If a project needs multiple squads (e.g. adding `@QA` or `@Design`):
 
 ```text
