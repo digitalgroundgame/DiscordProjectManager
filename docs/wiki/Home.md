@@ -20,12 +20,13 @@ Welcome to the **DGG-PM** GitHub Wiki!
 
 3. **[Squads & Authorization Matrix](Teams-and-Authorization.md)**
    - Discord-native role membership.
+   - Configurable Team Lead roles for delegated project management.
    - Squad Leads & 3-tier self-healing protection.
    - Role-restricted task assignments and mutation guards.
 
 4. **[Forum Channels & Interactive Hubs](Forum-Channels-and-Hubs.md)**
    - Automatic PM tag provisioning (Status, Priority, Unassigned).
-   - Automated pinned control center post creation.
+   - Automated pinned control center post creation with direct Project & Task creation.
    - Dynamic Task Action Cards & thread workspaces.
 
 5. **[Database Migrations Manual (Alembic)](../migrations.md)**
@@ -38,5 +39,7 @@ Welcome to the **DGG-PM** GitHub Wiki!
 
 - **Single Namespace (`/pm`)**: No top-level slash command clutter or collisions with other server bots.
 - **100% Discord-Native**: Discord Server Roles are the real-time source of truth for squad rosters.
+- **Flexible Least-Privilege Delegation**: Authorize designated Discord roles as Team Leads for project and squad management without granting server-wide administrator permissions.
 - **Zero-Command Workflows**: Pinned Forum Hubs, Modals, Dropdowns, and Action Cards allow daily operations without typing CLI commands.
 - **Self-Healing State**: Stripping a Discord role instantly revokes lead privileges and cleans up database records automatically.
+

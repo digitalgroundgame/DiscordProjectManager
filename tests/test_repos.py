@@ -156,3 +156,36 @@ async def test_repo_list_tasks_overdue_pagination(repos, services):
     assert total2 == 5
     assert len(p2_tasks) == 2
     assert p1_tasks[0].id != p2_tasks[0].id
+
+
+@pytest.mark.asyncio
+async def test_guild_lead_role_repo_lifecycle(db_session):
+    """Verify IGuildLeadRoleRepository can add, list, and remove authorized lead role IDs."""
+    from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+
+    repo = PostgresGuildLeadRoleRepository(db_session)
+    guild_id = 9876543210
+
+    # Initially empty
+    assert await repo.list_lead_role_ids(guild_id) == set()
+
+    # Add roles
+    await repo.add_lead_role(guild_id, 111222)
+    await repo.add_lead_role(guild_id, 333444)
+
+    # Adding duplicate is idempotent
+    await repo.add_lead_role(guild_id, 111222)
+
+    lead_roles = await repo.list_lead_role_ids(guild_id)
+    assert lead_roles == {111222, 333444}
+
+    # Different guild is isolated
+    assert await repo.list_lead_role_ids(555555) == set()
+
+    # Remove existing role
+    assert await repo.remove_lead_role(guild_id, 111222) is True
+    assert await repo.list_lead_role_ids(guild_id) == {333444}
+
+    # Remove non-existent role
+    assert await repo.remove_lead_role(guild_id, 999999) is False
+    assert await repo.list_lead_role_ids(guild_id) == {333444}

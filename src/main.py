@@ -14,6 +14,7 @@ import uvicorn  # noqa: E402
 
 from src.adapters.api.app import api_app  # noqa: E402
 from src.adapters.db.postgres_repo import (  # noqa: E402
+    PostgresGuildLeadRoleRepository,
     PostgresOutboxRepo,
     PostgresProjectRepo,
     PostgresSquadRepo,
@@ -54,6 +55,7 @@ async def run_app() -> None:
     squad_repo = PostgresSquadRepo(async_session_factory)
     outbox_repo = PostgresOutboxRepo(async_session_factory)
     user_pref_repo = PostgresUserPreferenceRepo(async_session_factory)
+    guild_lead_role_repo = PostgresGuildLeadRoleRepository(async_session_factory)
 
     uow = SqlAlchemyUnitOfWork(async_session_factory)
     project_service = ProjectService(project_repo)
@@ -69,6 +71,7 @@ async def run_app() -> None:
         squad_service=squad_service,
         user_service=user_service,
         outbox_service=outbox_service,
+        guild_lead_role_repo=guild_lead_role_repo,
     )
     notifier = DiscordNotifier(
         bot,

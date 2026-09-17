@@ -241,3 +241,100 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
     interaction.followup.send.assert_awaited()
     last_call_arg = interaction.followup.send.call_args[0][0]
     assert "not found" in last_call_arg
+
+
+def test_translate_error_app_command_errors():
+    """Verify translate_error correctly formats discord.app_commands errors without unexpected flags."""
+    # 1. MissingPermissions
+    missing_perm_err = discord.app_commands.MissingPermissions(["manage_guild"])
+    msg, unexpected = translate_error(missing_perm_err, "creating project")
+    assert not unexpected
+    assert "Manage Server" in msg
+    assert "missing required Discord permission" in msg
+
+    # 2. BotMissingPermissions
+    bot_missing_err = discord.app_commands.BotMissingPermissions(["manage_channels"])
+    msg, unexpected = translate_error(bot_missing_err, "creating channel")
+    assert not unexpected
+    assert "Manage Channels" in msg
+    assert "bot is missing required Discord permission" in msg
+
+    # 3. CommandOnCooldown
+    cooldown_err = discord.app_commands.CommandOnCooldown(5.0, 10.0)
+    msg, unexpected = translate_error(cooldown_err, "syncing commands")
+    assert not unexpected
+    assert "cooldown" in msg
+
+    # 4. Generic CheckFailure
+    check_err = discord.app_commands.CheckFailure()
+    msg, unexpected = translate_error(check_err, "executing command")
+    assert not unexpected
+    assert "do not have permission" in msg
+
+    # 5. CommandInvokeError unwraps original error
+    mock_cmd = MagicMock()
+    mock_cmd.name = "test_cmd"
+    invoke_err = discord.app_commands.CommandInvokeError(mock_cmd, ValueError("Validation problem"))
+    msg, unexpected = translate_error(invoke_err, "executing test_cmd")
+    assert not unexpected
+    assert "Validation problem" in msg
+
+
+@pytest.mark.asyncio
+async def test_cog_app_command_error_handles_missing_permissions(services, caplog):
+    """Verify PmCog.cog_app_command_error catches MissingPermissions and responds ephemerally."""
+    bot = MagicMock(spec=discord.Client)
+    pm_cog = PmCog(
+        bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.command = MagicMock()
+    interaction.command.qualified_name = "pm project create"
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+
+    missing_err = discord.app_commands.MissingPermissions(["manage_guild"])
+
+    with caplog.at_level(logging.WARNING):
+        await pm_cog.cog_app_command_error(interaction, missing_err)
+
+    interaction.response.send_message.assert_awaited_once()
+    sent_msg = interaction.response.send_message.call_args[0][0]
+    assert "Manage Server" in sent_msg
+    assert interaction.response.send_message.call_args[1].get("ephemeral") is True
+    assert "App command check failure while executing '/pm project create'" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
+    """Verify DggPmBot.on_tree_error catches unhandled command tree errors and responds ephemerally."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        task_service=services["task"],
+        project_service=services["project"],
+        squad_service=services["squad"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.command = MagicMock()
+    interaction.command.qualified_name = "pm squad create"
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+
+    missing_err = discord.app_commands.MissingPermissions(["manage_guild"])
+
+    with caplog.at_level(logging.WARNING):
+        await bot.on_tree_error(interaction, missing_err)
+
+    interaction.response.send_message.assert_awaited_once()
+    sent_msg = interaction.response.send_message.call_args[0][0]
+    assert "Manage Server" in sent_msg
+    assert interaction.response.send_message.call_args[1].get("ephemeral") is True
+    assert "App command check failure while executing '/pm squad create'" in caplog.text

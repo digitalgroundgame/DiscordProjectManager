@@ -1959,3 +1959,181 @@ async def test_task_status_blocked_guard_with_force_unauthorized(services):
 
     task_in_db = await task_srv.get_by_id(blocked_task.id)
     assert task_in_db.status == TaskStatus.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_admin_lead_role_command_metadata():
+    """Verify that PmCog defines admin_group with lead-role command and manage_guild check."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    cmd = next((c for c in PmCog.admin_group.commands if c.name == "lead-role"), None)
+    assert cmd is not None
+    params = [p.name for p in cmd.parameters]
+    assert "action" in params
+    assert "role" in params
+
+
+@pytest.mark.asyncio
+async def test_admin_lead_role_execution(services, repos):
+    """Verify /pm admin lead-role can add, list, and remove authorized Team Lead roles."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+    from src.services.auth_service import AuthService
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_repo)
+
+    mock_bot = MagicMock()
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=services["task"],
+        auth_service=auth_srv,
+    )
+
+    guild_id = 9988776655
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    mock_role = MagicMock(spec=discord.Role, id=11223344, name="Lead Engineer")
+
+    # 1. Add lead role
+    await cog.admin_lead_role.callback(cog, interaction, action="add", role=mock_role)
+    interaction.followup.send.assert_awaited()
+    assert "Added" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_roles(guild_id) == {11223344}
+
+    # 2. List lead roles
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead_role.callback(cog, interaction, action="list")
+    interaction.followup.send.assert_awaited()
+    embed = interaction.followup.send.call_args[1].get("embed")
+    assert embed is not None
+    assert "11223344" in embed.description
+
+    # 3. Remove lead role
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead_role.callback(cog, interaction, action="remove", role=mock_role)
+    interaction.followup.send.assert_awaited()
+    assert "Removed" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_roles(guild_id) == set()
+
+    # 4. Add without specifying role fails gracefully
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead_role.callback(cog, interaction, action="add", role=None)
+    interaction.followup.send.assert_awaited()
+    assert "Please specify a Discord role" in interaction.followup.send.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_project_and_squad_create_by_team_lead_role(services, repos):
+    """Verify that users holding authorized Team Lead roles can create projects and squads without manage_guild."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+    from src.services.auth_service import AuthService
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_repo)
+
+    mock_bot = MagicMock()
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=services["task"],
+        auth_service=auth_srv,
+    )
+
+    guild_id = 7766554433
+    team_lead_role_id = 88889999
+    other_role_id = 11112222
+
+    # Register team lead role in guild
+    await auth_srv.add_guild_lead_role(guild_id, team_lead_role_id)
+
+    # 1. Team lead member (has team_lead_role_id, manage_guild=False)
+    team_lead_role = MagicMock(spec=discord.Role, id=team_lead_role_id, name="Lead")
+    squad_role = MagicMock(spec=discord.Role, id=44445555, name="Devs")
+    team_lead_user = MagicMock(
+        spec=discord.Member,
+        id=2001,
+        roles=[team_lead_role],
+        guild_permissions=discord.Permissions(manage_guild=False, administrator=False),
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = team_lead_user
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    # Team Lead creates project
+    await cog.project_create.callback(
+        cog,
+        interaction,
+        name="Team Lead Project",
+        prefix="TLP",
+        role=squad_role,
+    )
+    interaction.followup.send.assert_awaited()
+    embed = interaction.followup.send.call_args[1].get("embed")
+    assert embed is not None
+    assert "Team Lead Project" in embed.title
+
+    # Team Lead creates squad
+    interaction.followup.send.reset_mock()
+    await cog.squad_create.callback(
+        cog,
+        interaction,
+        role=squad_role,
+        squad_name="Dev Squad",
+    )
+    interaction.followup.send.assert_awaited()
+    embed = interaction.followup.send.call_args[1].get("embed")
+    assert embed is not None
+    assert "Dev Squad" in embed.title
+
+    # 2. Regular user (does NOT have team_lead_role_id, manage_guild=False)
+    other_role = MagicMock(spec=discord.Role, id=other_role_id, name="Member")
+    regular_user = MagicMock(
+        spec=discord.Member,
+        id=3001,
+        roles=[other_role],
+        guild_permissions=discord.Permissions(manage_guild=False, administrator=False),
+    )
+    interaction.user = regular_user
+    interaction.followup.send.reset_mock()
+
+    # Regular user fails creating project
+    await cog.project_create.callback(
+        cog,
+        interaction,
+        name="Unauthorized Project",
+        prefix="UAP",
+        role=squad_role,
+    )
+    interaction.followup.send.assert_awaited()
+    sent_msg = interaction.followup.send.call_args[0][0]
+    assert "You do not have permission" in sent_msg
+
+    # Regular user fails creating squad
+    interaction.followup.send.reset_mock()
+    await cog.squad_create.callback(
+        cog,
+        interaction,
+        role=squad_role,
+        squad_name="Unauthorized Squad",
+    )
+    interaction.followup.send.assert_awaited()
+    sent_msg = interaction.followup.send.call_args[0][0]
+    assert "You do not have permission" in sent_msg

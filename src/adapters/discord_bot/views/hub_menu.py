@@ -307,7 +307,20 @@ class PmHubView(BaseView):
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self.auth_service = auth_service or AuthService(project_service, squad_service)
+        if auth_service is not None:
+            self.auth_service = auth_service
+        else:
+            lead_repo = None
+            uow = getattr(task_service, "uow", None)
+            sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
+            if sf:
+                try:
+                    from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+
+                    lead_repo = PostgresGuildLeadRoleRepository(sf)
+                except Exception as e:
+                    logger.debug("Could not auto-create lead_role_repo for hub: %s", e)
+            self.auth_service = AuthService(project_service, squad_service, guild_lead_role_repo=lead_repo)
 
     async def _refresh_hub_message(
         self,
@@ -587,13 +600,77 @@ class PmHubView(BaseView):
 
         await self._refresh_hub_message(interaction)
         await menu_manager.register_menu(interaction)
+        can_manage = (
+            await self.auth_service.can_manage_projects(
+                interaction.user,
+                guild_id=interaction.guild.id,
+                guild=interaction.guild,
+            )
+            if (self.auth_service and interaction.guild)
+            else False
+        )
         view = ProjectMenuView(
             self.project_service,
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
+            is_server_manager=can_manage,
+            auth_service=self.auth_service,
         )
         embed = build_project_menu_embed(view.is_server_manager)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(
+        label="Create Project",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+        custom_id="pm_hub:create_project",
+    )
+    async def create_project_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
+            return
+
+        can_manage = (
+            await self.auth_service.can_manage_projects(
+                interaction.user,
+                guild_id=interaction.guild.id,
+                guild=interaction.guild,
+            )
+            if self.auth_service
+            else False
+        )
+        if not can_manage:
+            await interaction.response.send_message(
+                "❌ You do not have permission to create projects. "
+                "Contact a Server Manager or hold an authorized Team Lead role.",
+                ephemeral=True,
+            )
+            return
+
+        from src.adapters.discord_bot.menu_manager import menu_manager
+
+        await menu_manager.register_menu(interaction)
+
+        from src.adapters.discord_bot.views.project_menu import ProjectChannelSelectView
+
+        view = ProjectChannelSelectView(
+            self.project_service,
+            self.squad_service,
+            self.task_service,
+            initial_interaction=interaction,
+            user_service=self.user_service,
+            return_to="hub",
+        )
+        embed = discord.Embed(
+            title="Create Project: Select Forum Channel",
+            description=(
+                "Choose a **Forum Channel** to bind as the project's task board.\n\n"
+                "Tasks become organized forum post cards with native Discord tag filtering "
+                "and an interactive pinned Control Hub."
+            ),
+            color=discord.Color.blue(),
+        )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(

@@ -547,7 +547,7 @@ async def test_pm_hub_navigation(services):
     hub_view = PmHubView(proj_srv, squad_srv, task_srv, user_service=user_srv)
     welcome_embed = build_hub_welcome_embed()
     assert "Control Hub" in welcome_embed.title
-    assert len(hub_view.children) == 5  # New Task, Task Board, Projects, Tech Tree, Overdue
+    assert len(hub_view.children) == 6  # New Task, Task Board, Projects, Tech Tree, Overdue, Create Project
 
     mock_interaction = MagicMock(spec=discord.Interaction)
     mock_interaction.guild = MagicMock()
@@ -1498,6 +1498,118 @@ async def test_pm_dashboard_view_and_embed(services):
     inter.response.edit_message.assert_awaited_once()
     guides_view = inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(guides_view, PmDashboardOverviewView)
+
+
+@pytest.mark.asyncio
+async def test_lead_roles_admin_menu_lifecycle(services, repos):
+    """Verify that PmDashboardView has a Lead Roles button for Server Managers,
+    and LeadRolesAdminView allows viewing, assigning, and removing team lead roles.
+    """
+    from src.adapters.discord_bot.views.admin_menu import (
+        LeadRolesAdminView,
+        PmDashboardView,
+    )
+    from src.services.auth_service import AuthService
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    lead_role_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_role_repo)
+
+    guild_id = 123456789
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+    mock_guild.name = "Test Guild"
+
+    admin_user = MagicMock(spec=discord.Member)
+    admin_user.id = 9991
+    admin_user.guild_permissions = discord.Permissions(manage_guild=True)
+
+    reg_user = MagicMock(spec=discord.Member)
+    reg_user.id = 9992
+    reg_user.guild_permissions = discord.Permissions(manage_guild=False)
+
+    # 1. Admin dashboard view shows Lead Roles button for Server Manager
+    admin_dash = PmDashboardView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+        user=admin_user,
+    )
+    assert admin_dash.is_server_manager is True
+    assert hasattr(admin_dash, "lead_roles_btn")
+    assert admin_dash.lead_roles_btn is not None
+    assert admin_dash.lead_roles_btn.label == "Lead Roles"
+
+    # Regular user dashboard view hides Lead Roles button
+    reg_dash = PmDashboardView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+        user=reg_user,
+    )
+    assert reg_dash.is_server_manager is False
+    assert getattr(reg_dash, "lead_roles_btn", None) is None
+
+    # 2. Clicking Lead Roles button opens LeadRolesAdminView
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild = mock_guild
+    inter.user = admin_user
+    inter.response = MagicMock()
+    inter.response.edit_message = AsyncMock()
+
+    await admin_dash._on_lead_roles_clicked(inter)
+    inter.response.edit_message.assert_awaited_once()
+    lead_view = inter.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(lead_view, LeadRolesAdminView)
+    lead_embed = inter.response.edit_message.call_args.kwargs["embed"]
+    assert "Authorized Team Lead Roles" in lead_embed.title
+
+    # 3. Assign role via LeadRolesAdminView
+    mock_role = MagicMock(spec=discord.Role)
+    mock_role.id = 555444333
+    mock_role.name = "Engineering Lead"
+    mock_guild.get_role.return_value = mock_role
+
+    lead_view.role_select._values = [str(mock_role.id)]
+    assign_inter = MagicMock(spec=discord.Interaction)
+    assign_inter.guild = mock_guild
+    assign_inter.user = admin_user
+    assign_inter.response = MagicMock()
+    assign_inter.response.edit_message = AsyncMock()
+
+    await lead_view._on_assign_clicked(assign_inter)
+    assigned_roles = await auth_srv.list_guild_lead_roles(guild_id)
+    assert mock_role.id in assigned_roles
+
+    # 4. Remove role via LeadRolesAdminView
+    remove_inter = MagicMock(spec=discord.Interaction)
+    remove_inter.guild = mock_guild
+    remove_inter.user = admin_user
+    remove_inter.response = MagicMock()
+    remove_inter.response.edit_message = AsyncMock()
+
+    await lead_view._on_remove_clicked(remove_inter)
+    assigned_roles_after = await auth_srv.list_guild_lead_roles(guild_id)
+    assert mock_role.id not in assigned_roles_after
+
+    # 5. Back button returns to PmDashboardView
+    back_inter = MagicMock(spec=discord.Interaction)
+    back_inter.guild = mock_guild
+    back_inter.user = admin_user
+    back_inter.response = MagicMock()
+    back_inter.response.edit_message = AsyncMock()
+
+    await lead_view._on_back_clicked(back_inter)
+    back_inter.response.edit_message.assert_awaited_once()
+    back_view = back_inter.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(back_view, PmDashboardView)
 
 
 def test_build_hub_welcome_embed_squad_roles():

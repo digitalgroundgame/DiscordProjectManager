@@ -38,6 +38,7 @@ def build_pm_dashboard_embed(
     active_tasks_count: int = 0,
     current_pref: NotificationPreference = NotificationPreference.DM,
     is_server_manager: bool = False,
+    is_server_admin: bool | None = None,
 ) -> discord.Embed:
     """Builds the main Project Management & Administration Workspace embed for /pm menu."""
     guild_name = guild.name if guild else "Server"
@@ -51,7 +52,13 @@ def build_pm_dashboard_embed(
     }
     pref_str = pref_labels.get(current_pref, current_pref.value)
 
-    role_badge = "Server Administrator / Manager" if is_server_manager else "Project Contributor"
+    effective_admin = is_server_admin if is_server_admin is not None else is_server_manager
+    if effective_admin:
+        role_badge = "Server Administrator / Manager"
+    elif is_server_manager:
+        role_badge = "Team Lead / Project Manager"
+    else:
+        role_badge = "Project Contributor"
 
     embed = discord.Embed(
         title="Project Management Control Center",
@@ -80,14 +87,21 @@ def build_pm_dashboard_embed(
     )
 
     if is_server_manager:
+        actions = [
+            "• **`Create Project`**: Launch the multi-step project creation wizard.",
+            "• **`Projects`**: Manage channels, assign squad roles, set leads, archive.",
+        ]
+        if effective_admin:
+            actions.append("• **`Lead Roles`**: Assign or view authorized Team Lead Discord roles.")
+        actions.extend(
+            [
+                "• **`Server Overview`**: Server-wide project status & completion metrics.",
+                "• **`Settings`**: Configure personal notification preferences.",
+            ]
+        )
         embed.add_field(
             name="Management Actions",
-            value=(
-                "• **`New Project`**: Launch the multi-step project creation wizard.\n"
-                "• **`Projects`**: Manage channels, assign squad roles, set leads, archive.\n"
-                "• **`Server Overview`**: Server-wide project status & completion metrics.\n"
-                "• **`Settings`**: Configure personal notification preferences."
-            ),
+            value="\n".join(actions),
             inline=False,
         )
     else:
@@ -160,6 +174,205 @@ class PmDashboardOverviewView(BaseView):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
+class LeadRolesAdminView(BaseView):
+    """View allowing Server Managers to assign, view, and remove Team Lead roles for the guild."""
+
+    def __init__(
+        self,
+        project_service: ProjectService,
+        squad_service: SquadService | None = None,
+        task_service: TaskService | None = None,
+        user_service: UserService | None = None,
+        auth_service: AuthService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+    ):
+        super().__init__(timeout=180)
+        self.project_service = project_service
+        self.squad_service = squad_service
+        self.task_service = task_service
+        self.user_service = user_service
+        self.auth_service = auth_service
+        self._initial_interaction = initial_interaction
+        self.selected_role_id: int | None = None
+        self._rebuild_items()
+
+    def _rebuild_items(self) -> None:
+        self.clear_items()
+
+        # Row 0: Select Discord Role
+        self.role_select = discord.ui.RoleSelect(
+            placeholder="Select a Discord role to assign or remove...",
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.role_select.callback = self._on_role_selected
+        self.add_item(self.role_select)
+
+        # Row 1: Action buttons
+        self.assign_btn = discord.ui.Button(
+            label="Assign Role",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        self.assign_btn.callback = self._on_assign_clicked
+        self.add_item(self.assign_btn)
+
+        self.remove_btn = discord.ui.Button(
+            label="Remove Role",
+            style=discord.ButtonStyle.danger,
+            row=1,
+        )
+        self.remove_btn.callback = self._on_remove_clicked
+        self.add_item(self.remove_btn)
+
+        self.back_btn = discord.ui.Button(
+            label="Back to Dashboard",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.back_btn.callback = self._on_back_clicked
+        self.add_item(self.back_btn)
+
+    async def _on_role_selected(self, interaction: discord.Interaction) -> None:
+        selected_values = getattr(self.role_select, "values", []) or getattr(self.role_select, "_values", [])
+        if selected_values:
+            val = selected_values[0]
+            self.selected_role_id = int(val.id) if hasattr(val, "id") else int(val)
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def build_embed(self, guild: discord.Guild | None) -> discord.Embed:
+        guild_id = guild.id if guild else None
+        role_ids: set[int] = set()
+        if self.auth_service and guild_id:
+            role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
+
+        embed = discord.Embed(
+            title="👥 Authorized Team Lead Roles",
+            description=(
+                "Members holding any of the configured roles can create and manage "
+                "projects and squads without requiring server-wide `Manage Server` permissions.\n\n"
+            ),
+            color=discord.Color.blue(),
+        )
+
+        if role_ids:
+            role_lines = []
+            for rid in sorted(role_ids):
+                role = guild.get_role(rid) if guild else None
+                if role:
+                    role_lines.append(f"• **@{role.name}** (`{rid}`)")
+                else:
+                    role_lines.append(f"• <@&{rid}> (`{rid}`)")
+            embed.add_field(
+                name=f"Configured Roles ({len(role_ids)})",
+                value="\n".join(role_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Configured Roles (0)",
+                value="*No team lead roles configured yet. Use the picker below to assign one.*",
+                inline=False,
+            )
+
+        if self.selected_role_id:
+            role = guild.get_role(self.selected_role_id) if guild else None
+            role_name = f"@{role.name}" if role else f"<@&{self.selected_role_id}>"
+            status = "Already Configured" if self.selected_role_id in role_ids else "Not Configured"
+            embed.add_field(
+                name="Selected Role",
+                value=f"**{role_name}** (`{self.selected_role_id}`) — *{status}*",
+                inline=False,
+            )
+
+        embed.set_footer(text="dgg-pm • Team Lead Role Administration")
+        return embed
+
+    async def _on_assign_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            return
+
+        if not AuthService.is_server_manager(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Discord Server Managers can configure team lead roles.", ephemeral=True
+            )
+            return
+
+        selected_values = getattr(self.role_select, "values", []) or getattr(self.role_select, "_values", [])
+        if selected_values and not self.selected_role_id:
+            val = selected_values[0]
+            self.selected_role_id = int(val.id) if hasattr(val, "id") else int(val)
+
+        if not self.selected_role_id:
+            await interaction.response.send_message("⚠️ Please select a role from the dropdown first.", ephemeral=True)
+            return
+
+        if self.auth_service:
+            await self.auth_service.add_guild_lead_role(interaction.guild.id, self.selected_role_id)
+
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_remove_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            return
+
+        if not AuthService.is_server_manager(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Discord Server Managers can configure team lead roles.", ephemeral=True
+            )
+            return
+
+        selected_values = getattr(self.role_select, "values", []) or getattr(self.role_select, "_values", [])
+        if selected_values and not self.selected_role_id:
+            val = selected_values[0]
+            self.selected_role_id = int(val.id) if hasattr(val, "id") else int(val)
+
+        if not self.selected_role_id:
+            await interaction.response.send_message("⚠️ Please select a role from the dropdown first.", ephemeral=True)
+            return
+
+        if self.auth_service:
+            await self.auth_service.remove_guild_lead_role(interaction.guild.id, self.selected_role_id)
+
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+        projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
+        _, count = await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
+        current_pref = (
+            await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
+            if self.user_service
+            else NotificationPreference.DM
+        )
+
+        view = PmDashboardView(
+            project_service=self.project_service,
+            squad_service=self.squad_service,
+            task_service=self.task_service,
+            user_service=self.user_service,
+            auth_service=self.auth_service,
+            initial_interaction=interaction,
+            user=interaction.user,
+        )
+        embed = build_pm_dashboard_embed(
+            guild=interaction.guild,
+            user=interaction.user,
+            active_projects=projects,
+            active_tasks_count=count,
+            current_pref=current_pref,
+            is_server_manager=view.is_server_manager,
+        )
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
+
+
 class PmDashboardView(BaseView):
     """Interactive administration and project management dashboard view for /pm menu."""
 
@@ -172,12 +385,15 @@ class PmDashboardView(BaseView):
         initial_interaction: discord.Interaction | None = None,
         user: discord.Member | discord.User | None = None,
         is_server_manager: bool | None = None,
+        is_server_admin: bool | None = None,
+        auth_service: AuthService | None = None,
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
+        self.auth_service = auth_service
         self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)
@@ -188,6 +404,13 @@ class PmDashboardView(BaseView):
         else:
             self.is_server_manager = True
 
+        if is_server_admin is not None:
+            self.is_server_admin = is_server_admin
+        elif effective_user is not None:
+            self.is_server_admin = AuthService.is_server_manager(effective_user)
+        else:
+            self.is_server_admin = self.is_server_manager
+
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -196,12 +419,25 @@ class PmDashboardView(BaseView):
         # Row 0: Core Management Buttons
         if self.is_server_manager:
             self.new_proj_btn = discord.ui.Button(
-                label="New Project",
+                label="Create Project",
                 style=discord.ButtonStyle.success,
                 row=0,
             )
             self.new_proj_btn.callback = self._on_new_project_clicked
             self.add_item(self.new_proj_btn)
+        else:
+            self.new_proj_btn = None
+
+        if self.is_server_admin:
+            self.lead_roles_btn = discord.ui.Button(
+                label="Lead Roles",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+            )
+            self.lead_roles_btn.callback = self._on_lead_roles_clicked
+            self.add_item(self.lead_roles_btn)
+        else:
+            self.lead_roles_btn = None
 
         self.projects_btn = discord.ui.Button(
             label="Projects",
@@ -274,6 +510,22 @@ class PmDashboardView(BaseView):
         )
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
+    async def _on_lead_roles_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
+            return
+
+        view = LeadRolesAdminView(
+            project_service=self.project_service,
+            squad_service=self.squad_service,
+            task_service=self.task_service,
+            user_service=self.user_service,
+            auth_service=self.auth_service,
+            initial_interaction=interaction,
+        )
+        embed = await view.build_embed(interaction.guild)
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
+
     async def _on_projects_clicked(self, interaction: discord.Interaction) -> None:
         view = ProjectMenuView(
             self.project_service,
@@ -282,6 +534,8 @@ class PmDashboardView(BaseView):
             initial_interaction=interaction,
             user_service=self.user_service,
             return_to="dashboard",
+            is_server_manager=self.is_server_manager,
+            auth_service=self.auth_service,
         )
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)

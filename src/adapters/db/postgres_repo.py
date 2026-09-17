@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from src.adapters.db.tables import (
+    GuildLeadRoleTable,
     OutboxEventTable,
     ProjectSquadTable,
     ProjectTable,
@@ -42,6 +43,7 @@ from src.domain.models import (
     UserPreference,
 )
 from src.ports.repositories import (
+    IGuildLeadRoleRepository,
     IOutboxRepo,
     IProjectRepo,
     ISquadRepo,
@@ -1281,3 +1283,40 @@ class PostgresUserPreferenceRepo(BasePostgresRepo, IUserPreferenceRepo):
                 except ValueError:
                     result[r.user_discord_id] = NotificationPreference.DM
             return result
+
+
+class PostgresGuildLeadRoleRepository(BasePostgresRepo, IGuildLeadRoleRepository):
+    async def add_lead_role(self, guild_id: int, discord_role_id: int) -> None:
+        async with self._get_session() as session:
+            stmt = select(GuildLeadRoleTable).where(
+                GuildLeadRoleTable.guild_id == guild_id,
+                GuildLeadRoleTable.discord_role_id == discord_role_id,
+            )
+            res = await session.execute(stmt)
+            if res.scalar_one_or_none() is not None:
+                return
+            row = GuildLeadRoleTable(guild_id=guild_id, discord_role_id=discord_role_id)
+            session.add(row)
+            if self._should_commit(None):
+                await session.commit()
+            else:
+                await session.flush()
+
+    async def remove_lead_role(self, guild_id: int, discord_role_id: int) -> bool:
+        async with self._get_session() as session:
+            stmt = delete(GuildLeadRoleTable).where(
+                GuildLeadRoleTable.guild_id == guild_id,
+                GuildLeadRoleTable.discord_role_id == discord_role_id,
+            )
+            res = await session.execute(stmt)
+            if self._should_commit(None):
+                await session.commit()
+            else:
+                await session.flush()
+            return bool(res.rowcount and res.rowcount > 0)
+
+    async def list_lead_role_ids(self, guild_id: int) -> set[int]:
+        async with self._get_session() as session:
+            stmt = select(GuildLeadRoleTable.discord_role_id).where(GuildLeadRoleTable.guild_id == guild_id)
+            res = await session.execute(stmt)
+            return set(res.scalars().all())

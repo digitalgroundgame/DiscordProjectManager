@@ -67,17 +67,21 @@ async def db_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
 
 @pytest_asyncio.fixture(scope="function")
 async def repos(db_session: AsyncSession):
+    from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+
     task_repo = PostgresTaskRepo(db_session)
     project_repo = PostgresProjectRepo(db_session)
     squad_repo = PostgresSquadRepo(db_session)
     outbox_repo = PostgresOutboxRepo(db_session)
     user_repo = PostgresUserPreferenceRepo(db_session)
+    guild_lead_role_repo = PostgresGuildLeadRoleRepository(db_session)
     return {
         "task": task_repo,
         "project": project_repo,
         "squad": squad_repo,
         "outbox": outbox_repo,
         "user": user_repo,
+        "guild_lead_role": guild_lead_role_repo,
     }
 
 

@@ -24,10 +24,12 @@ In Discord Forum Channels, users cannot type slash commands at the forum root le
 To make forum channels completely self-sufficient:
 - When projects are linked to a forum channel, the bot automatically creates and **pins** a permanent thread post: **`📌 📊 [Channel Name / Project] • Control Hub`**.
 - The post contains persistent interactive buttons:
-  - **`➕ New Task`**: Opens the interactive Task Creation Builder (in multi-project channels, first prompts with a project selection menu).
-  - **`👤 My Tasks`**: Launches a private personal dashboard showing assigned tasks, deadlines, and status.
-  - **`📁 Projects Hub`**: Launches a private project directory workspace.
-  - **`🌲 Visual Graph`**: Renders the interactive visual dependency DAG diagram (with project selector if multiple projects are bound).
+  - **`➕ New Task`** (Row 0): Opens the interactive Task Creation Builder (in multi-project channels, first prompts with a project selection menu).
+  - **`👤 My Tasks`** (Row 0): Launches a private personal dashboard showing assigned tasks, deadlines, and status.
+  - **`📁 Projects Hub`** (Row 0): Launches a private project management workspace with container administration tools for authorized Team Leads and Server Managers.
+  - **`🌲 Visual Graph`** (Row 0): Renders the interactive visual dependency DAG diagram (with project selector if multiple projects are bound).
+  - **`⏰ Overdue`** (Row 0): Directly opens the task board filtered to incomplete tasks past their due date.
+  - **`📁 Create Project`** (Row 1): Allows authorized Team Leads and Server Managers to initialize and bind a new project forum channel directly from the control hub.
 
 ### Single-Project vs. Multi-Project Forums
 
@@ -53,8 +55,9 @@ To make forum channels completely self-sufficient:
 │  📌 📊 Mobile App • Control Hub (Public / Pinned)        │
 │  Interactive management dashboard for Mobile App.        │
 │                                                          │
-│  [ ➕ New Task ] [ 👤 My Tasks ]                         │
-│  [ 📁 Projects Hub ] [ 🌲 Visual Graph ]                 │
+│  [ ➕ New Task ] [ 👤 My Tasks ] [ 📁 Projects Hub ]      │
+│  [ 🌲 Visual Graph ] [ ⏰ Overdue ]                       │
+│  [ 📁 Create Project ]                                   │
 └──────────────────────────┬───────────────────────────────┘
                            │ (Alice clicks [ ➕ New Task ])
                            ▼
