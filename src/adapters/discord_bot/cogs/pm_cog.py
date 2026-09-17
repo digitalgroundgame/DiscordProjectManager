@@ -1980,3 +1980,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await send_interaction_error(
                 interaction, e, f"rendering tech tree for '{project_name}'", logger, ephemeral=True
             )
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors raised during app command check evaluation or execution within PmCog."""
+        cmd_name = interaction.command.qualified_name if interaction.command else "command"
+        await send_interaction_error(
+            interaction,
+            error,
+            f"executing '/{cmd_name}'",
+            logger,
+            ephemeral=True,
+        )

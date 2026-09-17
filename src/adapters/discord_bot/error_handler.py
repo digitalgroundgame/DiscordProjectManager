@@ -21,6 +21,9 @@ def translate_error(error: Exception, action_description: str) -> tuple[str, boo
     Returns:
         tuple[str, bool]: (message_text, is_unexpected_error)
     """
+    if isinstance(error, discord.app_commands.CommandInvokeError) and error.original:
+        error = error.original
+
     if isinstance(error, StaleVersionError):
         return (
             "⚠️ This task was already modified by another user. Please refresh the card and try again.",
@@ -28,6 +31,16 @@ def translate_error(error: Exception, action_description: str) -> tuple[str, boo
         )
     if isinstance(error, (DggPmError, ValueError)):
         return (f"❌ {error}", False)
+    if isinstance(error, discord.app_commands.MissingPermissions):
+        perms = ", ".join(p.replace("_", " ").title().replace("Guild", "Server") for p in error.missing_permissions)
+        return (f"❌ You are missing required Discord permission(s) to run this command: **{perms}**.", False)
+    if isinstance(error, discord.app_commands.BotMissingPermissions):
+        perms = ", ".join(p.replace("_", " ").title().replace("Guild", "Server") for p in error.missing_permissions)
+        return (f"❌ The bot is missing required Discord permission(s) to run this command: **{perms}**.", False)
+    if isinstance(error, discord.app_commands.CommandOnCooldown):
+        return (f"⏳ This command is on cooldown. Please try again in {error.retry_after:.1f}s.", False)
+    if isinstance(error, discord.app_commands.CheckFailure):
+        return ("❌ You do not have permission or meet the requirements to run this command.", False)
     if isinstance(error, discord.Forbidden):
         return (
             "❌ The bot lacks required Discord permissions in this channel or server "
@@ -68,6 +81,8 @@ async def send_interaction_error(
         log.exception("Unexpected error while %s: %s", action_description, error)
     elif isinstance(error, (discord.Forbidden, discord.HTTPException)):
         log.warning("Discord API error while %s: %s", action_description, error)
+    elif isinstance(error, discord.app_commands.CheckFailure):
+        log.warning("App command check failure while %s: %s", action_description, error)
     else:
         log.debug("Known business error while %s: %s", action_description, error)
 

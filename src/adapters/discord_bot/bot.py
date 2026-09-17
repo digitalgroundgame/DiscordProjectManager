@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
+from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 from src.adapters.discord_bot.views.hub_menu import PmHubView
@@ -83,6 +84,21 @@ class DggPmBot(commands.Bot):
             )
         else:
             self.project_workspace = None
+
+        self.tree.on_error = self.on_tree_error
+
+    async def on_tree_error(
+        self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
+    ) -> None:
+        """Global fallback error handler for slash commands outside cogs or tree-level errors."""
+        cmd_name = interaction.command.qualified_name if interaction.command else "command"
+        await send_interaction_error(
+            interaction,
+            error,
+            f"executing '/{cmd_name}'",
+            logger,
+            ephemeral=True,
+        )
 
     async def setup_hook(self) -> None:
         """Invoked when bot is starting up before login."""
