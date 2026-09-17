@@ -13,6 +13,7 @@ from src.domain.exceptions import PermissionDeniedError
 from src.domain.models import Project, Task
 
 if TYPE_CHECKING:
+    from src.ports.repositories import IGuildLeadRoleRepository
     from src.services.project_service import ProjectService
     from src.services.squad_service import SquadService
 
@@ -26,9 +27,67 @@ class AuthService:
         self,
         project_service: ProjectService,
         squad_service: SquadService | None = None,
+        guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
     ):
         self.project_service = project_service
         self.squad_service = squad_service
+        self.guild_lead_role_repo = guild_lead_role_repo
+
+    async def add_guild_lead_role(self, guild_id: int, discord_role_id: int) -> None:
+        """Registers a Discord role as an authorized Team Lead role for the guild."""
+        if self.guild_lead_role_repo:
+            await self.guild_lead_role_repo.add_lead_role(guild_id, discord_role_id)
+
+    async def remove_guild_lead_role(self, guild_id: int, discord_role_id: int) -> bool:
+        """Removes a Discord role from authorized Team Lead roles for the guild."""
+        if self.guild_lead_role_repo:
+            return await self.guild_lead_role_repo.remove_lead_role(guild_id, discord_role_id)
+        return False
+
+    async def list_guild_lead_roles(self, guild_id: int) -> set[int]:
+        """Returns all authorized Team Lead role IDs for the guild."""
+        if self.guild_lead_role_repo:
+            return await self.guild_lead_role_repo.list_lead_role_ids(guild_id)
+        return set()
+
+    async def can_manage_projects(self, user: discord.Member | discord.User, guild_id: int | None = None) -> bool:
+        """Checks if user has authority to create and manage projects and squads:
+        1. Discord Server Manager (manage_guild or administrator).
+        2. Holds any authorized Team Lead role configured for the guild.
+        3. Active Squad Lead in the guild.
+        """
+        if self.is_server_manager(user):
+            return True
+
+        if not guild_id or not hasattr(user, "roles"):
+            return False
+
+        # 2. Check configured Team Lead roles
+        if self.guild_lead_role_repo:
+            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(guild_id)
+            if lead_role_ids:
+                user_role_ids = {r.id for r in getattr(user, "roles", []) if hasattr(r, "id")}
+                if any(rid in user_role_ids for rid in lead_role_ids):
+                    return True
+
+        # 3. Check if active Squad Lead in this guild
+        if self.squad_service and getattr(user, "id", None):
+            squads = await self.squad_service.list_squads(guild_id)
+            for s in squads:
+                if await self.squad_service.is_squad_lead(s.id, user.id):
+                    return True
+
+        return False
+
+    async def require_project_management(
+        self, user: discord.Member | discord.User, guild_id: int | None = None
+    ) -> None:
+        """Raises PermissionDeniedError if the user cannot create or manage projects and squads."""
+        if not await self.can_manage_projects(user, guild_id):
+            raise PermissionDeniedError(
+                "You do not have permission to manage projects or squads. "
+                "You must be a Discord Server Manager or hold an authorized Team Lead role."
+            )
 
     @staticmethod
     def is_server_manager(user: discord.Member | discord.User) -> bool:

@@ -152,3 +152,9 @@ class UserPreference(DomainModel):
     notify_preference: NotificationPreference = NotificationPreference.DM
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class GuildLeadRole(DomainModel):
+    guild_id: int
+    discord_role_id: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

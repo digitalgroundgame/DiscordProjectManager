@@ -80,7 +80,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         self.squad_service = squad_service
         self.task_service = task_service
         self.auth_service = auth_service or (
-            AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
+            AuthService(project_service, self.squad_service) if project_service else None
         )
         self.user_service = user_service
         self.outbox_service = outbox_service or getattr(bot, "outbox_service", None)
@@ -329,7 +329,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         description="Post and pin an interactive Project Management Control Hub in a forum or text channel.",
     )
     @app_commands.describe(channel="Target channel to post and pin the PM Hub")
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def post_hub(
         self,
         interaction: discord.Interaction,
@@ -348,6 +347,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             _ok, msg = await ensure_pinned_hub_post(
                 channel=target_channel,
                 project_service=self.project_service,
@@ -485,6 +486,83 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 f"❌ **Outbox Reclaim Failed**: {exc}",
                 ephemeral=True,
             )
+
+    @admin_group.command(
+        name="lead-role",
+        description="Authorize or revoke an existing Discord Team Lead role to create and manage projects",
+    )
+    @app_commands.describe(
+        action="Action to perform (add, remove, or list authorized Team Lead roles)",
+        role="Discord role to authorize or revoke (required for add/remove)",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Add Team Lead Role", value="add"),
+            app_commands.Choice(name="Remove Team Lead Role", value="remove"),
+            app_commands.Choice(name="List Team Lead Roles", value="list"),
+        ]
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_lead_role(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        role: discord.Role | None = None,
+    ) -> None:
+        """Authorize or revoke an existing Discord role to create/manage projects and squads."""
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            guild_id = interaction.guild.id
+            if action == "add":
+                if not role:
+                    await interaction.followup.send("❌ Please specify a Discord role to add.", ephemeral=True)
+                    return
+                await self.auth_service.add_guild_lead_role(guild_id, role.id)
+                await interaction.followup.send(
+                    f"⭐ **Added Team Lead Role**: <@&{role.id}>\n"
+                    f"Members holding this role are now authorized to create and manage projects and squads.",
+                    ephemeral=True,
+                )
+            elif action == "remove":
+                if not role:
+                    await interaction.followup.send("❌ Please specify a Discord role to remove.", ephemeral=True)
+                    return
+                removed = await self.auth_service.remove_guild_lead_role(guild_id, role.id)
+                if removed:
+                    await interaction.followup.send(
+                        f"✅ **Removed Team Lead Role**: <@&{role.id}> is no longer authorized to manage projects.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"ℹ️ <@&{role.id}> was not registered as an authorized Team Lead role.",
+                        ephemeral=True,
+                    )
+            elif action == "list":
+                role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
+                if not role_ids:
+                    await interaction.followup.send(
+                        "ℹ️ **No Team Lead Roles Configured**\n"
+                        "Only Discord Server Managers (users with `Manage Server` or `Administrator`) "
+                        "can create and manage projects.",
+                        ephemeral=True,
+                    )
+                else:
+                    mentions = "\n".join(f"• <@&{rid}> (`{rid}`)" for rid in sorted(role_ids))
+                    embed = discord.Embed(
+                        title="👥 Authorized Team Lead Roles",
+                        description=(
+                            "Members holding any of the following Discord roles can create and manage "
+                            "projects and squads without requiring server-wide `Manage Server` permissions:\n\n"
+                            + mentions
+                        ),
+                        color=discord.Color.blue(),
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "managing team lead roles", logger, ephemeral=True)
 
     # ==========================================
     # Task Subgroup: /pm task <cmd>
@@ -1242,7 +1320,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         description="Optional markdown project overview",
         category="Optional organizational category",
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_create(
         self,
         interaction: discord.Interaction,
@@ -1264,6 +1341,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             roles = [r for r in [role, role_2, role_3] if r is not None]
             ref = await self.project_workspace.provision_project(
                 ProjectProvisionSpec(
@@ -1387,12 +1466,13 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @project_group.command(name="archive", description="Archive a project container.")
     @app_commands.describe(project_name="Name of the project to archive")
     @app_commands.autocomplete(project_name=project_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_archive(self, interaction: discord.Interaction, project_name: str) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
@@ -1435,12 +1515,13 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     @project_group.command(name="unarchive", description="Restore an archived project container.")
     @app_commands.describe(project_name="Name of the project to restore")
     @app_commands.autocomplete(project_name=project_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_unarchive(self, interaction: discord.Interaction, project_name: str) -> None:
         if not interaction.guild:
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
@@ -1493,7 +1574,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         ]
     )
     @app_commands.autocomplete(project_name=project_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_role(
         self,
         interaction: discord.Interaction,
@@ -1505,6 +1585,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
@@ -1619,7 +1701,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         ]
     )
     @app_commands.autocomplete(project_name=project_autocomplete, squad_name=squad_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_squad(
         self,
         interaction: discord.Interaction,
@@ -1631,6 +1712,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
                 await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
@@ -1662,7 +1745,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         description="Automatically configure standard project management tags on a Forum Channel.",
     )
     @app_commands.describe(forum="The Discord Forum Channel to configure with PM tags")
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_setup_forum(
         self,
         interaction: discord.Interaction,
@@ -1674,6 +1756,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
 
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             tags_added, total_tags, err = await setup_forum_tags(forum)
             if err:
                 await interaction.followup.send(f"❌ Failed to configure tags in <#{forum.id}>: {err}", ephemeral=True)
@@ -1710,7 +1794,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         forum="Optional target Forum Channel to rebind to (auto-creates if omitted and missing)",
     )
     @app_commands.autocomplete(project_name=project_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def project_rebuild(
         self,
         interaction: discord.Interaction,
@@ -1721,55 +1804,60 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
             return
 
-        project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-        if not project:
-            # Check if archived
-            projects = await self.project_service.list_projects(interaction.guild.id, include_archived=True)
-            project = next((p for p in projects if p.name.lower() == project_name.lower()), None)
+        try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
+            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.response.send_message(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
+                # Check if archived
+                projects = await self.project_service.list_projects(interaction.guild.id, include_archived=True)
+                project = next((p for p in projects if p.name.lower() == project_name.lower()), None)
+                if not project:
+                    await interaction.response.send_message(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                    return
 
-        # Fetch task count for preview
-        task_count = 0
-        if self.task_service:
-            _, task_count = await self.task_service.list_tasks(
-                guild_id=interaction.guild.id, project_id=project.id, include_archived=True
+            # Fetch task count for preview
+            task_count = 0
+            if self.task_service:
+                _, task_count = await self.task_service.list_tasks(
+                    guild_id=interaction.guild.id, project_id=project.id, include_archived=True
+                )
+
+            channel_status = (
+                f"Rebind to <#{forum.id}>"
+                if forum
+                else (
+                    f"Existing: <#{project.discord_channel_id}>"
+                    if project.discord_channel_id and interaction.guild.get_channel(project.discord_channel_id)
+                    else "Auto-create new ForumChannel"
+                )
             )
 
-        channel_status = (
-            f"Rebind to <#{forum.id}>"
-            if forum
-            else (
-                f"Existing: <#{project.discord_channel_id}>"
-                if project.discord_channel_id and interaction.guild.get_channel(project.discord_channel_id)
-                else "Auto-create new ForumChannel"
+            embed = discord.Embed(
+                title=f"⚠️ Confirm Workspace Rebuild: [{project.prefix}] {project.name}",
+                description=(
+                    f"Are you sure you want to rebuild the Discord workspace for **{project.name}**?\n\n"
+                    f"**Planned Actions:**\n"
+                    f"• **Channel Target:** {channel_status}\n"
+                    f"• **Forum Tags:** Configure standard status, priority, and project tags\n"
+                    f"• **Control Hub:** Mount and pin interactive Control Hub post\n"
+                    f"• **Task Threads:** Reconcile **{task_count}** tasks "
+                    "(recreate missing threads and enforce Archive Invariant)\n"
+                    f"• **Project Status:** {'Unarchive and restore' if project.is_archived else 'Active'}\n\n"
+                    "⚠️ *This will pace Discord API calls to respect rate limits.*"
+                ),
+                color=discord.Color.orange(),
             )
-        )
-
-        embed = discord.Embed(
-            title=f"⚠️ Confirm Workspace Rebuild: [{project.prefix}] {project.name}",
-            description=(
-                f"Are you sure you want to rebuild the Discord workspace for **{project.name}**?\n\n"
-                f"**Planned Actions:**\n"
-                f"• **Channel Target:** {channel_status}\n"
-                f"• **Forum Tags:** Configure standard status, priority, and project tags\n"
-                f"• **Control Hub:** Mount and pin interactive Control Hub post\n"
-                f"• **Task Threads:** Reconcile **{task_count}** tasks "
-                "(recreate missing threads and enforce Archive Invariant)\n"
-                f"• **Project Status:** {'Unarchive and restore' if project.is_archived else 'Active'}\n\n"
-                "⚠️ *This will pace Discord API calls to respect rate limits.*"
-            ),
-            color=discord.Color.orange(),
-        )
-        view = RebuildConfirmView(
-            project_workspace=self.project_workspace,
-            project=project,
-            target_channel=forum,
-            interaction=interaction,
-            task_count=task_count,
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            view = RebuildConfirmView(
+                project_workspace=self.project_workspace,
+                project=project,
+                target_channel=forum,
+                interaction=interaction,
+                task_count=task_count,
+            )
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "initiating project rebuild", logger, ephemeral=True)
 
     # ==========================================
     # Squad Subgroup: /pm squad <cmd>
@@ -1779,7 +1867,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         role="Discord server role representing the squad",
         squad_name="Optional custom squad name",
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def squad_create(
         self,
         interaction: discord.Interaction,
@@ -1790,6 +1877,8 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             return
         await interaction.response.defer(ephemeral=True)
         try:
+            if self.auth_service:
+                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             name = squad_name.strip() if squad_name else role.name
             squad = await self.squad_service.create_squad(
                 guild_id=interaction.guild.id,

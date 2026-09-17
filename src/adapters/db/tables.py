@@ -192,3 +192,11 @@ class UserPreferenceTable(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class GuildLeadRoleTable(Base):
+    __tablename__ = "guild_lead_roles"
+
+    guild_id = Column(BigInteger, primary_key=True)
+    discord_role_id = Column(BigInteger, primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))

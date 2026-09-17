@@ -299,3 +299,17 @@ class IUserPreferenceRepo(ABC):
         user_ids: list[int],
     ) -> dict[int, NotificationPreference]:
         """Fetches preferences for multiple users in a guild."""
+
+
+class IGuildLeadRoleRepository(ABC):
+    @abstractmethod
+    async def add_lead_role(self, guild_id: int, discord_role_id: int) -> None:
+        """Registers a Discord role ID as an authorized Team Lead role for the guild."""
+
+    @abstractmethod
+    async def remove_lead_role(self, guild_id: int, discord_role_id: int) -> bool:
+        """Removes an authorized Team Lead role from the guild. Returns True if removed, False if not found."""
+
+    @abstractmethod
+    async def list_lead_role_ids(self, guild_id: int) -> set[int]:
+        """Lists all authorized Team Lead Discord role IDs for the guild."""

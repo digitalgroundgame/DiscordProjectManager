@@ -1367,3 +1367,52 @@ async def test_auth_service_dependency_bypass_permissions(services):
     assert await auth_srv.can_bypass_dependencies(unauthorized_member, task) is False
     with pytest.raises(PermissionDeniedError, match="do not have permission"):
         await auth_srv.require_dependency_bypass(unauthorized_member, task)
+
+
+@pytest.mark.asyncio
+async def test_auth_service_can_manage_projects_lifecycle(services, repos):
+    """Verify AuthService.can_manage_projects allows Server Managers, Team Lead roles, and Squad Leads."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_role_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_role_repo)
+
+    guild_id = 444333222
+
+    admin_member = _make_mock_member(1000, manage_guild=True)
+    team_lead_member = _make_mock_member(2000, role_ids=[777888])
+    squad_lead_member = _make_mock_member(3000, role_ids=[555666])
+    regular_member = _make_mock_member(4000, role_ids=[999111])
+
+    # 1. Server Manager can manage projects
+    assert await auth_srv.can_manage_projects(admin_member, guild_id) is True
+    await auth_srv.require_project_management(admin_member, guild_id)
+
+    # 2. Team lead without configured lead role cannot yet manage projects
+    assert await auth_srv.can_manage_projects(team_lead_member, guild_id) is False
+    with pytest.raises(PermissionDeniedError, match="do not have permission"):
+        await auth_srv.require_project_management(team_lead_member, guild_id)
+
+    # 3. Add 777888 as authorized Team Lead role for guild
+    await auth_srv.add_guild_lead_role(guild_id, 777888)
+    assert await auth_srv.list_guild_lead_roles(guild_id) == {777888}
+
+    # Now team_lead_member is authorized!
+    assert await auth_srv.can_manage_projects(team_lead_member, guild_id) is True
+    await auth_srv.require_project_management(team_lead_member, guild_id)
+
+    # 4. Regular member still denied
+    assert await auth_srv.can_manage_projects(regular_member, guild_id) is False
+    with pytest.raises(PermissionDeniedError):
+        await auth_srv.require_project_management(regular_member, guild_id)
+
+    # 5. Active Squad Lead in guild is also authorized
+    squad = await squad_srv.create_squad(guild_id=guild_id, name="Core Squad", discord_role_id=555666)
+    await squad_srv.add_squad_lead(squad.id, squad_lead_member.id)
+    assert await auth_srv.can_manage_projects(squad_lead_member, guild_id) is True
+    await auth_srv.require_project_management(squad_lead_member, guild_id)
+
+    # 6. Remove the lead role
+    assert await auth_srv.remove_guild_lead_role(guild_id, 777888) is True
+    assert await auth_srv.list_guild_lead_roles(guild_id) == set()
+    assert await auth_srv.can_manage_projects(team_lead_member, guild_id) is False

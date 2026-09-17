@@ -17,6 +17,7 @@ from src.adapters.discord_bot.workspace_protocol import (
 )
 from src.config import settings
 from src.domain.models import Task
+from src.ports.repositories import IGuildLeadRoleRepository
 from src.services.auth_service import AuthService
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
@@ -37,6 +38,8 @@ class DggPmBot(commands.Bot):
         outbox_service: OutboxService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
+        guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
+        auth_service: AuthService | None = None,
     ):
         intents = discord.Intents.default()
         intents.guilds = True
@@ -55,10 +58,16 @@ class DggPmBot(commands.Bot):
         self.outbox_service = outbox_service or (
             getattr(task_service, "outbox_service", None) if task_service else None
         )
+        self.guild_lead_role_repo = guild_lead_role_repo
         self._background_tasks: set[asyncio.Task] = set()
-        self.auth_service = (
-            AuthService(project_service, self.squad_service) if project_service and self.squad_service else None
-        )
+        if auth_service is not None:
+            self.auth_service = auth_service
+        elif project_service and self.squad_service:
+            self.auth_service = AuthService(
+                project_service, self.squad_service, guild_lead_role_repo=guild_lead_role_repo
+            )
+        else:
+            self.auth_service = None
         if workspace is not None:
             self.workspace = workspace
         elif task_service and project_service:

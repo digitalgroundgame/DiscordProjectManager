@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.adapters.db.postgres_repo import (
+    PostgresGuildLeadRoleRepository,
     PostgresOutboxRepo,
     PostgresProjectRepo,
     PostgresSquadRepo,
@@ -13,6 +14,7 @@ from src.adapters.db.postgres_repo import (
     PostgresUserPreferenceRepo,
 )
 from src.ports.repositories import (
+    IGuildLeadRoleRepository,
     IOutboxRepo,
     IProjectRepo,
     ISquadRepo,
@@ -35,6 +37,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.squads: ISquadRepo = None  # type: ignore[assignment]
         self.outbox: IOutboxRepo = None  # type: ignore[assignment]
         self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
+        self.guild_lead_roles: IGuildLeadRoleRepository = None  # type: ignore[assignment]
 
     async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
@@ -43,6 +46,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.squads = PostgresSquadRepo(self._session)
         self.outbox = PostgresOutboxRepo(self._session)
         self.user_prefs = PostgresUserPreferenceRepo(self._session)
+        self.guild_lead_roles = PostgresGuildLeadRoleRepository(self._session)
         return self
 
     async def __aexit__(
