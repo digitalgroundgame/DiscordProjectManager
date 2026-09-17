@@ -587,11 +587,18 @@ class PmHubView(BaseView):
 
         await self._refresh_hub_message(interaction)
         await menu_manager.register_menu(interaction)
+        can_manage = (
+            await self.auth_service.can_manage_projects(interaction.user, interaction.guild.id)
+            if (self.auth_service and interaction.guild)
+            else False
+        )
         view = ProjectMenuView(
             self.project_service,
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
+            is_server_manager=can_manage,
+            auth_service=self.auth_service,
         )
         embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)

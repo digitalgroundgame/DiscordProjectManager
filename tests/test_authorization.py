@@ -1416,3 +1416,57 @@ async def test_auth_service_can_manage_projects_lifecycle(services, repos):
     assert await auth_srv.remove_guild_lead_role(guild_id, 777888) is True
     assert await auth_srv.list_guild_lead_roles(guild_id) == set()
     assert await auth_srv.can_manage_projects(team_lead_member, guild_id) is False
+
+
+@pytest.mark.asyncio
+async def test_pm_hub_projects_tab_authorizes_lead_role_to_create_projects(services, repos):
+    """Verify that clicking Projects Hub on PmHubView shows 'New Project' for Team Lead roles."""
+    from src.adapters.discord_bot.views.hub_menu import PmHubView
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    lead_role_repo = repos["guild_lead_role"]
+    auth_srv = AuthService(proj_srv, squad_srv, guild_lead_role_repo=lead_role_repo)
+
+    guild_id = 999111
+    lead_role_id = 777888
+    await lead_role_repo.add_lead_role(guild_id, lead_role_id)
+
+    lead_member = _make_mock_member(4001, role_ids=[lead_role_id], manage_guild=False)
+    regular_member = _make_mock_member(4002, role_ids=[], manage_guild=False)
+
+    hub_view = PmHubView(proj_srv, squad_srv, task_srv, auth_service=auth_srv)
+
+    # 1. Lead role member clicks Projects Hub
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.user = lead_member
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await hub_view.projects_tab.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.call_args.kwargs
+    view = kwargs["view"]
+    embed = kwargs["embed"]
+
+    assert view.is_server_manager is True
+    assert view.new_project_btn is not None
+    assert "New Project" in embed.description
+
+    # 2. Regular member clicks Projects Hub
+    interaction.response.send_message.reset_mock()
+    interaction.user = regular_member
+
+    await hub_view.projects_tab.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.call_args.kwargs
+    reg_view = kwargs["view"]
+    reg_embed = kwargs["embed"]
+
+    assert reg_view.is_server_manager is False
+    assert reg_view.new_project_btn is None
+    assert "New Project" not in reg_embed.description

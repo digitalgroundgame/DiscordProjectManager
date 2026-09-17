@@ -24,6 +24,7 @@ from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
 
 if TYPE_CHECKING:
+    from src.services.auth_service import AuthService
     from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.views.project_menu")
@@ -2509,6 +2510,39 @@ class ProjectLeadSelectView(BaseView):
 class ProjectMenuView(BaseView):
     """Control Center View for Project Operations."""
 
+    @classmethod
+    async def create(
+        cls,
+        project_service: ProjectService,
+        squad_service: SquadService | None = None,
+        task_service: TaskService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        user: discord.Member | discord.User | None = None,
+        is_server_manager: bool | None = None,
+        user_service: UserService | None = None,
+        return_to: str = "dashboard",
+        auth_service: AuthService | None = None,
+    ) -> ProjectMenuView:
+        effective_user = user or (initial_interaction.user if initial_interaction else None)
+        guild_id = None
+        if initial_interaction and initial_interaction.guild:
+            guild_id = initial_interaction.guild.id
+        elif hasattr(effective_user, "guild") and getattr(effective_user, "guild", None):
+            guild_id = getattr(effective_user.guild, "id", None)
+        if is_server_manager is None and auth_service and effective_user and guild_id:
+            is_server_manager = await auth_service.can_manage_projects(effective_user, guild_id)
+        return cls(
+            project_service=project_service,
+            squad_service=squad_service,
+            task_service=task_service,
+            initial_interaction=initial_interaction,
+            user=user,
+            is_server_manager=is_server_manager,
+            user_service=user_service,
+            return_to=return_to,
+            auth_service=auth_service,
+        )
+
     def __init__(
         self,
         project_service: ProjectService,
@@ -2519,6 +2553,7 @@ class ProjectMenuView(BaseView):
         is_server_manager: bool | None = None,
         user_service: UserService | None = None,
         return_to: str = "dashboard",
+        auth_service: AuthService | None = None,
     ):
         super().__init__(timeout=180)
         self.project_service = project_service
@@ -2526,6 +2561,7 @@ class ProjectMenuView(BaseView):
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
+        self.auth_service = auth_service
         self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)

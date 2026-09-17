@@ -192,6 +192,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
+                auth_service=self.auth_service,
                 initial_interaction=interaction,
             )
             embed = build_pm_dashboard_embed(
