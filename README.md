@@ -1,8 +1,8 @@
 # dgg-pm: Discord-Native Task Management Platform
 
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
-[![Architecture: Hexagonal](https://img.shields.io/badge/architecture-hexagonal-green.svg)](#architecture)
-[![Schema: RFC 5545 & MS Graph](https://img.shields.io/badge/schema-RFC%205545%20%2F%20MS%20Graph-orange.svg)](#data-standardization)
+[![Architecture: Hexagonal](https://img.shields.io/badge/architecture-hexagonal-green.svg)](docs/wiki/Architecture.md)
+[![Schema: RFC 5545 & MS Graph](https://img.shields.io/badge/schema-RFC%205545%20%2F%20MS%20Graph-orange.svg)](docs/wiki/Architecture.md#data-standardization-rfc-5545--microsoft-graph)
 
 A self-hosted, zero-signup Discord-native project management platform built to eliminate context-switching by embedding task workflows directly into Discord text channels, threads, and direct messages.
 
@@ -10,242 +10,67 @@ A self-hosted, zero-signup Discord-native project management platform built to e
 
 ## 📚 Documentation & Wiki
 
-Detailed guides, command references, and architecture documents are available in the **[DGG-PM Wiki](docs/wiki/Home.md)**:
-- 🚀 **[Workflow & Quickstart Guide](docs/wiki/Workflow-Guide.md)**: End-to-end setup and zero-command daily workflows.
-- ⌨️ **[Slash Commands Reference (`/pm`)](docs/wiki/Slash-Commands-Reference.md)**: Complete parameter and permission breakdown.
-- 👥 **[Teams & Authorization Matrix](docs/wiki/Teams-and-Authorization.md)**: Discord-native role rosters and self-healing leads.
-- 📌 **[Forum Channels & Interactive Hubs](docs/wiki/Forum-Channels-and-Hubs.md)**: Tag auto-provisioning and pinned control centers.
-- 🗄️ **[Database Migrations Manual (Alembic)](docs/migrations.md)**: Complete development and production migration runbook.
+All comprehensive documentation, guides, and technical references are organized in the **[DGG-PM Wiki](docs/wiki/Home.md)**:
+
+| Guide | Description |
+| :--- | :--- |
+| 🚀 **[Workflow & Quickstart Guide](docs/wiki/Workflow-Guide.md)** | End-to-end setup and zero-command daily workflows |
+| ⌨️ **[Slash Commands Reference (`/pm`)](docs/wiki/Slash-Commands-Reference.md)** | Complete parameter and permission breakdown |
+| 🏛️ **[System Architecture](docs/wiki/Architecture.md)** | Hexagonal ports & adapters, concurrency (CAS), and outbox pattern |
+| 👥 **[Squads & Authorization Matrix](docs/wiki/Teams-and-Authorization.md)** | Native role rosters, configurable lead roles, and self-healing |
+| 📌 **[Forum Channels & Interactive Hubs](docs/wiki/Forum-Channels-and-Hubs.md)** | Automatic PM tag provisioning and pinned Control Hubs |
+| 💻 **[Local Development & Seeding](docs/wiki/Local-Development.md)** | `uv`, NixOS/devenv, Makefile reference, and declarative seeder |
+| 🚀 **[Deployment & Coolify](docs/wiki/Deployment.md)** | Coolify hosting, branch strategy, and Docker Compose stack |
+| 🗄️ **[Database Migrations Manual](docs/migrations.md)** | Development and production migration runbook (Alembic) |
 
 ---
 
-## Key Features
+## ✨ Key Features
 
-- **Unified `/pm` Slash Command Group**: Single isolated namespace eliminating server command clutter and bot collisions.
-- **Pinned Forum Control Hubs**: Permanent interactive dashboards (`📌 📊 Control Hub`) pinned in project forums for zero-command task creation and management.
-- **Discord-Native Squad Rosters**: Functional teams are mapped directly to live Discord server roles with automatic self-healing for orphaned leads.
-- **Dedicated Task Channels & Threads**: Tasks automatically spawn dedicated discussion threads with real-time interactive Action Cards (`[ ⏳ To Do ]`, `[ 🟡 In Progress ]`, `[ 🟢 Complete ]`, `[ ⚡ Priority ]`, `[ 👤 Reassign ]`).
-- **Human-Friendly Short IDs & Autocomplete**: Sequential project-prefixed IDs (e.g. `INF-1`, `PRJ-42`) with atomic SQL counter generation and channel-scoped autocomplete.
-- **Audit History & Optimistic Concurrency Control (CAS)**: Complete lifecycle history in `task_history` table and version-checked updates preventing lost update races.
-- **Postgres-Native Transactional Outbox**: At-least-once reminder and notification dispatch with `FOR UPDATE SKIP LOCKED`, unique `idempotency_key` deduplication, and dynamic Discord 429 `Retry-After` backoff.
-- **RFC 5545 & Microsoft Graph Schema Portability**: Native mapping to `VTODO` and `todoTask` data standards from Day 1 for future calendar integration.
+- **Unified `/pm` Namespace**: Single isolated command tree eliminating server clutter and bot collisions.
+- **Zero-Command Workflows**: Pinned Forum **Control Hubs** and thread **Action Cards** allow creating, assigning, and progressing tasks without typing CLI commands.
+- **100% Discord-Native Squads**: Live Discord server roles serve as the single source of truth for squad rosters with 3-tier self-healing lead protection.
+- **Dedicated Task Threads**: Automatic forum post and thread provisioning with optimistic concurrency control (CAS) preventing lost update races.
+- **Human-Friendly Short IDs**: Sequential project-prefixed IDs (e.g. `INF-1`, `PRJ-42`) with channel-scoped autocomplete.
+- **Transactional Outbox**: Guaranteed notification delivery with rate-limit-aware backoff and `FOR UPDATE SKIP LOCKED` background workers.
 
 ---
 
-## System Architecture
+## ⚡ Quickstart
 
-```
-+-----------------------------------------------------------------------------------+
-|                                DRIVING ADAPTERS                                   |
-|                                                                                   |
-|   +------------------------------------+   +----------------------------------+   |
-|   |       Discord Bot Adapter          |   |        FastAPI Service Engine    |   |
-|   |  (discord.py: Slash / UI / Modals) |   |    (/healthz, /metrics, schemas) |   |
-|   +-----------------+------------------+   +----------------+-----------------+   |
-+---------------------|---------------------------------------|---------------------+
-                      |                                       |
-                      v                                       v
-+-----------------------------------------------------------------------------------+
-|                            APPLICATION / USE CASE LAYER                           |
-|                                                                                   |
-|   - TaskService: CreateTask, UpdateStatus (CAS), AddNote, FilterTasks, Autocomplete|
-|   - ProjectService: CreateProject, BindChannel, GenerateShortId, Archive/Restore   |
-|   - TeamService: CreateTeam, SyncDiscordRoles                                     |
-|   - OutboxService: EnqueueEvent, ScheduleTieredReminders, CancelTaskReminders     |
-+-------------------------------------+---------------------------------------------+
-                                      |
-                                      v
-+-----------------------------------------------------------------------------------+
-|                              DOMAIN MODEL (CORE)                                  |
-|                                                                                   |
-|   - Entities: Task, TaskHistory, Project, Team, OutboxEvent                       |
-|   - Value Objects: TaskStatus, PriorityLevel, ShortTaskId, IsoTimestamp            |
-|   - State Machine: notStarted -> inProgress -> completed (with CAS validation)    |
-|   - Schema Standard Mappings: RFC 5545 (VTODO) / MS Graph (todoTask)              |
-+-------------------------------------+---------------------------------------------+
-                                      |
-                                      v
-+-----------------------------------------------------------------------------------+
-|                                DRIVEN ADAPTERS                                    |
-|                                                                                   |
-|   +------------------------------------+   +----------------------------------+   |
-|   |    PostgreSQL Relational Repo      |   |  Transactional Outbox Dispatcher |   |
-|   |   (SQLAlchemy Async + Alembic)     |   |   (Async Worker SKIP LOCKED)     |   |
-|   +------------------------------------+   +----------------------------------+   |
-+-----------------------------------------------------------------------------------+
-```
+### 1. Bot Invite
+Install the bot to your server using the official OAuth2 install link:
+> 🔗 **[Invite Bot to Discord Server](https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot)**
 
----
+*(Ensure **Server Members Intent** is enabled under the Bot tab in the [Discord Developer Portal](https://discord.com/developers/applications)).*
 
-## Discord Slash Commands (`/pm`)
-
-All bot operations are isolated under the unified `/pm` slash command namespace:
-
-| Slash Command | Required Permission | Description |
-| :--- | :--- | :--- |
-| **`/pm menu`** | Standard Member | Open the master interactive Control Hub |
-| **`/pm help`** | Standard Member | Display operational command guide and wiki links |
-| **`/pm settings`** | Standard Member | Configure personal notification delivery (`dm`, `channel`, `both`, `silent`) |
-| **`/pm setup-hub`** | `Manage Server` | Post and pin an interactive Control Center in a Forum or Text Channel |
-| **`/pm tree`** | Standard Member | Render the visual tech tree DAG dependency graph |
-| **`/pm task create`** | Squad Member / Manager | Create a project task, provision thread workspace & action card |
-| **`/pm task status`** | Assignee / Lead / Manager | Update execution status (CAS optimistic concurrency control) |
-| **`/pm task assign`** | Squad Member / Manager | Assign or unassign a member from a task |
-| **`/pm task depend`** | Squad Member / Manager | Link prerequisite dependency (`task` requires `depends_on`) |
-| **`/pm task list`** | Standard Member | Filter and browse active tasks with interactive pagination |
-| **`/pm task history`** | Standard Member | View full chronological audit trail of a task |
-| **`/pm project create`**| `Manage Server` | Instantiate project container, map Squad role, provision forum |
-| **`/pm project list`**  | Standard Member | List all active project containers and bound channels |
-| **`/pm project role`**  | `Manage Server` / Lead | Map or unmap Discord native roles to a project container |
-| **`/pm project lead`**  | `Manage Server` / Lead | Designate or remove a Squad Lead for a project's squads |
-
-*For complete parameters, options, and permission breakdowns, see the [Slash Commands Reference](docs/wiki/Slash-Commands-Reference.md).*
-
----
-
-## Quickstart & Setup
-
-### 1. Prerequisites
-- Python 3.13+
-- PostgreSQL 16+ (or Docker)
-- Discord Bot Application Token ([Discord Developer Portal](https://discord.com/developers/applications))
-
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and fill in your Discord Bot credentials:
+### 2. Run Locally (`uv` & Docker)
 ```bash
+# 1. Configure environment
 cp .env.example .env
-```
-Edit `.env`:
-```env
-DISCORD_BOT_TOKEN=your_token_here
-DISCORD_CLIENT_ID=your_client_id_here
-DISCORD_GUILD_ID=your_test_guild_id   # Optional: faster command syncing in dev
-DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@localhost:5432/dgg_pm
-```
+# Edit .env with your DISCORD_BOT_TOKEN and credentials
 
-### 3. Discord Developer Portal Configuration & Bot Invite
-When configuring your application in the [Discord Developer Portal](https://discord.com/developers/applications) and inviting the bot:
-- **Bot Invite Link**: Install the bot to your server using the official OAuth2 install link:
-  - [Invite Bot to Discord Server](https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot)
-  ```text
-  https://discord.com/oauth2/authorize?client_id=1548482366245175297&permissions=395405814864&integration_type=0&scope=bot
-  ```
-- **Privileged Gateway Intents**: Ensure **Server Members Intent** (`GuildMembers`) is enabled under the **Bot** tab. *(Note: `Message Content` is explicitly **NOT** required).*
-- **Bot Permissions**: The invite link configures all necessary permissions:
-  - `Manage Roles`
-  - `Manage Channels` (for auto-tagging Forum channels)
-  - `Manage Threads`
-  - `View Channels`
-  - `Send Messages`
-  - `Send Messages in Threads`
-  - `Create Public Threads`
-  - `Manage Messages`
-  - `Embed Links`
-  - `Read Message History`
-  - `Attach Files`
+# 2. Install dependencies & start PostgreSQL container
+make install && make db-up
 
-
-### 4. Local Development (Standard Python / uv)
-
-DGG-PM uses [`uv`](https://docs.astral.sh/uv/) for ultra-fast, cross-platform Python package management and `docker compose` for services.
-
-```bash
-# 1. Install dependencies & initialize virtual environment
-make install     # or: uv sync --all-extras
-
-# 2. Start PostgreSQL container in the background
-make db-up       # or: docker compose up -d postgres
-
-# 3. Run the test suite (uses in-memory SQLite; does not even require Postgres)
-make test        # or: uv run pytest -v tests/
+# 3. Run test suite (uses in-memory SQLite; does not require Postgres)
+make test
 
 # 4. Start the application
-make run         # or: uv run python -m src.main
+make run
 ```
 
-#### Handy `Makefile` Shortcuts:
+---
+
+## 📋 Common Commands
+
 ```bash
 make help        # List all available targets and descriptions
+make check       # Run full quality gate (lint, format check, and tests)
 make test        # Run pytest test suite
-make test-cov    # Run tests with coverage report
-make lint        # Check code with ruff
-make format      # Autoformat with ruff
-make check       # Run lint, format check, and tests
-make db-up       # Start Postgres container
-make db-down     # Stop Postgres container
+make seed        # Declarative sync (non-destructive; preserves channels/threads)
+make db-reset    # Destructive reset (wipes DB tables and re-provisions cleanly)
 make db-migrate  # Apply pending Alembic migrations
-make db-check    # Check migration status
-make seed        # Declarative sync (non-destructive; preserves Discord channels & threads)
-make db-reset    # Hard wipe tables & Discord category and re-seed from scratch
-make db-shell    # Open interactive psql shell
 ```
 
-#### Declarative Seeding:
-DGG-PM features a declarative seeding engine powered by YAML manifests (`seeds/base/manifest.yaml`):
-```bash
-# Non-destructive seed (preserves channels, reuses existing task threads, syncs DB & tags)
-make seed
-
-# Destructive reset (drops tables, deletes PM Discord category, and re-provisions cleanly)
-make db-reset
-
-# Fast database-only seed (no Discord API calls required, ideal for offline/CI test DBs)
-uv run python scripts/seed.py --no-discord
-```
-
-
-### 5. NixOS / Devenv Development
-
-If you are developing on **NixOS** or using **devenv**:
-
-```bash
-# Enter the development shell (provides Python 3.13, uv, postgresql client, gnumake, docker, and C libraries)
-devenv shell
-
-# Or with direnv (recommended):
-direnv allow
-```
-
-Once inside the devenv shell, all standard `make` and `uv` commands work directly without additional configuration.
-
-### 6. Running with Docker Compose (Full Stack)
-To run both the application and PostgreSQL in containers:
-```bash
-docker compose up -d --build
-```
-
-### 7. Deploying to Coolify
-
-DGG-PM is pre-configured for seamless hosting on [Coolify](https://coolify.io).
-
-#### Recommended Branch Strategy
-* **`develop`**: Active development and integration branch. Day-to-day work, features, and fixes happen here.
-* **`main`**: Stable production branch that Coolify tracks for automated builds.
-* **Promoting releases to production**:
-  ```bash
-  # Fast-forward main to current develop:
-  git push origin develop:main
-  ```
-  *(Alternatively, open and merge a Pull Request from `develop` into `main` on GitHub.)*
-
-#### Option A: Docker Compose Stack (Recommended)
-1. In Coolify, create a new resource ➔ **Docker Compose**.
-2. Point Coolify to this repository (Branch: **`main`**).
-3. Configure your environment variables in Coolify:
-   - `DISCORD_BOT_TOKEN`: Your Discord bot token
-   - `DISCORD_CLIENT_ID`: Your Discord bot application ID
-   - `DISCORD_GUILD_ID`: *(Optional)* Guild ID for instant slash command registration
-4. Click **Deploy**. Migrations run automatically on startup and the container healthcheck monitors `/healthz`.
-
-#### Option B: Standalone Application + Coolify PostgreSQL
-1. Create a PostgreSQL 18 database service in Coolify.
-2. Create a new **Application** pointing to this repository (Build Pack: **Dockerfile**, Branch: **`main`**).
-3. Configure environment variables in the Coolify Application settings:
-   - `DATABASE_URL`: Your Coolify PostgreSQL connection string (standard `postgres://` and `postgresql://` are auto-normalized to asyncpg)
-   - `AUTO_RUN_MIGRATIONS`: `true`
-   - `DISCORD_BOT_TOKEN`: Your Discord bot token
-   - `DISCORD_CLIENT_ID`: Your Discord bot application ID
-   - `DISCORD_GUILD_ID`: *(Optional)*
-4. In Coolify Application Settings, set:
-   - **Port**: `8000`
-   - **Health Check Path**: `/healthz`
+For NixOS (`devenv`), offline seeding (`--no-discord`), and complete Coolify deployment runbooks, see the **[Wiki](docs/wiki/Home.md)**.

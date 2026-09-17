@@ -29,7 +29,22 @@ Welcome to the **DGG-PM** GitHub Wiki!
    - Automated pinned control center post creation with direct Project & Task creation.
    - Dynamic Task Action Cards & thread workspaces.
 
-5. **[Database Migrations Manual (Alembic)](../migrations.md)**
+5. **[System Architecture](Architecture.md)**
+   - Hexagonal architecture layer breakdown (Ports & Adapters).
+   - Concurrency guarantees: Optimistic Concurrency Control (CAS) & Transactional Outbox.
+   - Data standardization with RFC 5545 (`VTODO`) and Microsoft Graph (`todoTask`).
+
+6. **[Local Development & Seeding](Local-Development.md)**
+   - Local setup with `uv`, Docker, and NixOS/devenv.
+   - Common `Makefile` target cheat sheet.
+   - Declarative seeding engine (`make seed`, `make db-reset`, `--no-discord`).
+
+7. **[Deployment & Coolify](Deployment.md)**
+   - Turnkey deployment to Coolify (Docker Compose & Standalone).
+   - Recommended Git branch strategy (`develop` ➔ `main`).
+   - Self-hosted Docker Compose deployment runbook.
+
+8. **[Database Migrations Manual (Alembic)](../migrations.md)**
    - Migration management with Alembic for development and production.
    - Revision creation, testing, rollback runbooks, and zero-downtime rules.
 
