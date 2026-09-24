@@ -237,14 +237,14 @@ async def test_task_action_view_and_modals(services):
         task_service=task_srv,
     )
 
-    # Check children: action buttons, note, edit, deps, controls (no inline dropdown clutter)
+    # Check children: action buttons, note, edit, deps (no separate controls button or inline dropdown clutter)
     custom_ids = [item.custom_id for item in view.children if hasattr(item, "custom_id")]
     assert f"task:start:{task.id}" in custom_ids
     assert f"task:complete:{task.id}" in custom_ids
     assert f"task:note:{task.id}" in custom_ids
     assert f"task:edit:{task.id}" in custom_ids
     assert f"task:deps:{task.id}" in custom_ids
-    assert f"task:controls:{task.id}" in custom_ids
+    assert f"task:controls:{task.id}" not in custom_ids
     assert f"task:priority:{task.id}" not in custom_ids
     assert f"task:assignee:{task.id}" not in custom_ids
     assert f"task:due:{task.id}" not in custom_ids
@@ -833,7 +833,7 @@ async def test_task_quick_controls_view_callbacks(services):
     from src.adapters.discord_bot.views.task_buttons import TaskQuickControlsView, build_task_controls_embed
 
     ctrl_embed = build_task_controls_embed(task)
-    assert "Quick Controls" in ctrl_embed.title
+    assert "Edit Draft" in ctrl_embed.title
     assert "Priority**: Low" in ctrl_embed.description
 
     mock_bot = MagicMock()

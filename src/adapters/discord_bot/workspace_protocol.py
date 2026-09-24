@@ -141,6 +141,9 @@ class TaskWorkspacePort(Protocol):
         due_at: Any = _UNSET,
         clear_due_at: bool = False,
         watchers: list[int] | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        clear_body: bool = False,
     ) -> Task | None:
         """Applies staged task control adjustments atomically, syncing thread tags and action card."""
         ...
