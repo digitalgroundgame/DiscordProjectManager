@@ -17,7 +17,7 @@ from src.adapters.discord_bot.workspace_protocol import (
 )
 from src.config import settings
 from src.domain.models import Task
-from src.ports.repositories import IGuildLeadRoleRepository
+from src.ports.repositories import IGuildLeadRoleRepository, IGuildLeadUserRepository
 from src.services.auth_service import AuthService
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
@@ -39,6 +39,7 @@ class DggPmBot(commands.Bot):
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
         guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
+        guild_lead_user_repo: IGuildLeadUserRepository | None = None,
         auth_service: AuthService | None = None,
     ):
         intents = discord.Intents.default()
@@ -59,12 +60,16 @@ class DggPmBot(commands.Bot):
             getattr(task_service, "outbox_service", None) if task_service else None
         )
         self.guild_lead_role_repo = guild_lead_role_repo
+        self.guild_lead_user_repo = guild_lead_user_repo
         self._background_tasks: set[asyncio.Task] = set()
         if auth_service is not None:
             self.auth_service = auth_service
         elif project_service and self.squad_service:
             self.auth_service = AuthService(
-                project_service, self.squad_service, guild_lead_role_repo=guild_lead_role_repo
+                project_service,
+                self.squad_service,
+                guild_lead_role_repo=guild_lead_role_repo,
+                guild_lead_user_repo=guild_lead_user_repo,
             )
         else:
             self.auth_service = None
@@ -284,22 +289,33 @@ class DggPmBot(commands.Bot):
                 logger.warning("Error auto-pruning squad lead on member update for user %s: %s", after.id, e)
 
     async def on_member_remove(self, member: discord.Member) -> None:
-        """Auto-prune squad lead records across all squads in the guild if a member leaves the server."""
-        if not self.squad_service:
-            return
+        """Auto-prune squad lead and individual team lead records across the guild if a member leaves the server."""
+        if self.squad_service:
+            try:
+                squads = await self.squad_service.list_squads(member.guild.id)
+                for squad in squads:
+                    if await self.squad_service.is_squad_lead(squad.id, member.id):
+                        await self.squad_service.remove_squad_lead(squad.id, member.id)
+                        logger.info(
+                            "Auto-pruned squad lead record for user %s from squad '%s' because member left the server",
+                            member.id,
+                            squad.name,
+                        )
+            except Exception as e:
+                logger.warning("Error auto-pruning squad leads on member remove for user %s: %s", member.id, e)
 
-        try:
-            squads = await self.squad_service.list_squads(member.guild.id)
-            for squad in squads:
-                if await self.squad_service.is_squad_lead(squad.id, member.id):
-                    await self.squad_service.remove_squad_lead(squad.id, member.id)
+        if self.auth_service:
+            try:
+                removed = await self.auth_service.remove_guild_lead_user(member.guild.id, member.id)
+                if removed:
                     logger.info(
-                        "Auto-pruned squad lead record for user %s from squad '%s' because member left the server",
+                        "Auto-pruned individual team lead record for user %s from guild %s "
+                        "because member left the server",
                         member.id,
-                        squad.name,
+                        member.guild.id,
                     )
-        except Exception as e:
-            logger.warning("Error auto-pruning squad leads on member remove for user %s: %s", member.id, e)
+            except Exception as e:
+                logger.warning("Error auto-pruning individual team lead on member remove for user %s: %s", member.id, e)
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         """Global interaction dispatcher handling dynamic persistent task buttons across restarts."""

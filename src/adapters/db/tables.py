@@ -200,3 +200,11 @@ class GuildLeadRoleTable(Base):
     guild_id = Column(BigInteger, primary_key=True)
     discord_role_id = Column(BigInteger, primary_key=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+
+
+class GuildLeadUserTable(Base):
+    __tablename__ = "guild_lead_users"
+
+    guild_id = Column(BigInteger, primary_key=True)
+    user_discord_id = Column(BigInteger, primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))

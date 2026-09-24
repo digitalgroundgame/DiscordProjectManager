@@ -174,8 +174,8 @@ class PmDashboardOverviewView(BaseView):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
 
-class LeadRolesAdminView(BaseView):
-    """View allowing Server Managers to assign, view, and remove Team Lead roles for the guild."""
+class TeamLeadsAdminView(BaseView):
+    """View allowing Server Managers to assign, view, and remove Team Leads (roles and members) for the guild."""
 
     def __init__(
         self,
@@ -194,6 +194,7 @@ class LeadRolesAdminView(BaseView):
         self.auth_service = auth_service
         self._initial_interaction = initial_interaction
         self.selected_role_id: int | None = None
+        self.selected_user_id: int | None = None
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -209,7 +210,7 @@ class LeadRolesAdminView(BaseView):
         self.role_select.callback = self._on_role_selected
         self.add_item(self.role_select)
 
-        # Row 1: Action buttons
+        # Row 1: Role Action buttons
         self.assign_btn = discord.ui.Button(
             label="Assign Role",
             style=discord.ButtonStyle.success,
@@ -217,6 +218,7 @@ class LeadRolesAdminView(BaseView):
         )
         self.assign_btn.callback = self._on_assign_clicked
         self.add_item(self.assign_btn)
+        self.assign_role_btn = self.assign_btn
 
         self.remove_btn = discord.ui.Button(
             label="Remove Role",
@@ -225,11 +227,40 @@ class LeadRolesAdminView(BaseView):
         )
         self.remove_btn.callback = self._on_remove_clicked
         self.add_item(self.remove_btn)
+        self.remove_role_btn = self.remove_btn
 
+        # Row 2: Select Discord User
+        self.user_select = discord.ui.UserSelect(
+            placeholder="Select a Discord member to assign or remove...",
+            min_values=1,
+            max_values=1,
+            row=2,
+        )
+        self.user_select.callback = self._on_user_selected
+        self.add_item(self.user_select)
+
+        # Row 3: User Action buttons
+        self.assign_user_btn = discord.ui.Button(
+            label="Assign Member",
+            style=discord.ButtonStyle.success,
+            row=3,
+        )
+        self.assign_user_btn.callback = self._on_assign_user_clicked
+        self.add_item(self.assign_user_btn)
+
+        self.remove_user_btn = discord.ui.Button(
+            label="Remove Member",
+            style=discord.ButtonStyle.danger,
+            row=3,
+        )
+        self.remove_user_btn.callback = self._on_remove_user_clicked
+        self.add_item(self.remove_user_btn)
+
+        # Row 4: Navigation
         self.back_btn = discord.ui.Button(
             label="Back to Dashboard",
             style=discord.ButtonStyle.secondary,
-            row=1,
+            row=4,
         )
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
@@ -242,16 +273,26 @@ class LeadRolesAdminView(BaseView):
         embed = await self.build_embed(interaction.guild)
         await interaction.response.edit_message(embed=embed, view=self)
 
+    async def _on_user_selected(self, interaction: discord.Interaction) -> None:
+        selected_values = getattr(self.user_select, "values", []) or getattr(self.user_select, "_values", [])
+        if selected_values:
+            val = selected_values[0]
+            self.selected_user_id = int(val.id) if hasattr(val, "id") else int(val)
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
     async def build_embed(self, guild: discord.Guild | None) -> discord.Embed:
         guild_id = guild.id if guild else None
         role_ids: set[int] = set()
+        user_ids: set[int] = set()
         if self.auth_service and guild_id:
             role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
+            user_ids = await self.auth_service.list_guild_lead_users(guild_id)
 
         embed = discord.Embed(
-            title="👥 Authorized Team Lead Roles",
+            title="👥 Authorized Team Leads",
             description=(
-                "Members holding any of the configured roles can create and manage "
+                "Members holding any of the configured roles or designated individually can create and manage "
                 "projects and squads without requiring server-wide `Manage Server` permissions.\n\n"
             ),
             color=discord.Color.blue(),
@@ -273,7 +314,27 @@ class LeadRolesAdminView(BaseView):
         else:
             embed.add_field(
                 name="Configured Roles (0)",
-                value="*No team lead roles configured yet. Use the picker below to assign one.*",
+                value="*No team lead roles configured yet. Use the role picker to assign one.*",
+                inline=False,
+            )
+
+        if user_ids:
+            user_lines = []
+            for uid in sorted(user_ids):
+                member = guild.get_member(uid) if guild else None
+                if member:
+                    user_lines.append(f"• **@{member.display_name}** (`{uid}`)")
+                else:
+                    user_lines.append(f"• <@{uid}> (`{uid}`)")
+            embed.add_field(
+                name=f"Configured Members ({len(user_ids)})",
+                value="\n".join(user_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Configured Members (0)",
+                value="*No individual team lead members configured yet. Use the member picker to assign one.*",
                 inline=False,
             )
 
@@ -287,7 +348,17 @@ class LeadRolesAdminView(BaseView):
                 inline=False,
             )
 
-        embed.set_footer(text="dgg-pm • Team Lead Role Administration")
+        if self.selected_user_id:
+            member = guild.get_member(self.selected_user_id) if guild else None
+            user_name = f"@{member.display_name}" if member else f"<@{self.selected_user_id}>"
+            status = "Already Configured" if self.selected_user_id in user_ids else "Not Configured"
+            embed.add_field(
+                name="Selected Member",
+                value=f"**{user_name}** (`{self.selected_user_id}`) — *{status}*",
+                inline=False,
+            )
+
+        embed.set_footer(text="dgg-pm • Team Lead Administration")
         return embed
 
     async def _on_assign_clicked(self, interaction: discord.Interaction) -> None:
@@ -297,7 +368,7 @@ class LeadRolesAdminView(BaseView):
 
         if not AuthService.is_server_manager(interaction.user):
             await interaction.response.send_message(
-                "❌ Only Discord Server Managers can configure team lead roles.", ephemeral=True
+                "❌ Only Discord Server Managers can configure team leads.", ephemeral=True
             )
             return
 
@@ -323,7 +394,7 @@ class LeadRolesAdminView(BaseView):
 
         if not AuthService.is_server_manager(interaction.user):
             await interaction.response.send_message(
-                "❌ Only Discord Server Managers can configure team lead roles.", ephemeral=True
+                "❌ Only Discord Server Managers can configure team leads.", ephemeral=True
             )
             return
 
@@ -338,6 +409,58 @@ class LeadRolesAdminView(BaseView):
 
         if self.auth_service:
             await self.auth_service.remove_guild_lead_role(interaction.guild.id, self.selected_role_id)
+
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_assign_user_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            return
+
+        if not AuthService.is_server_manager(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Discord Server Managers can configure team leads.", ephemeral=True
+            )
+            return
+
+        selected_values = getattr(self.user_select, "values", []) or getattr(self.user_select, "_values", [])
+        if selected_values and not self.selected_user_id:
+            val = selected_values[0]
+            self.selected_user_id = int(val.id) if hasattr(val, "id") else int(val)
+
+        if not self.selected_user_id:
+            await interaction.response.send_message("⚠️ Please select a member from the dropdown first.", ephemeral=True)
+            return
+
+        if self.auth_service:
+            await self.auth_service.add_guild_lead_user(interaction.guild.id, self.selected_user_id)
+
+        embed = await self.build_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_remove_user_clicked(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            return
+
+        if not AuthService.is_server_manager(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Discord Server Managers can configure team leads.", ephemeral=True
+            )
+            return
+
+        selected_values = getattr(self.user_select, "values", []) or getattr(self.user_select, "_values", [])
+        if selected_values and not self.selected_user_id:
+            val = selected_values[0]
+            self.selected_user_id = int(val.id) if hasattr(val, "id") else int(val)
+
+        if not self.selected_user_id:
+            await interaction.response.send_message("⚠️ Please select a member from the dropdown first.", ephemeral=True)
+            return
+
+        if self.auth_service:
+            await self.auth_service.remove_guild_lead_user(interaction.guild.id, self.selected_user_id)
 
         embed = await self.build_embed(interaction.guild)
         await interaction.response.edit_message(embed=embed, view=self)
@@ -371,6 +494,9 @@ class LeadRolesAdminView(BaseView):
             is_server_manager=view.is_server_manager,
         )
         await interaction.response.edit_message(content=None, embed=embed, view=view)
+
+
+LeadRolesAdminView = TeamLeadsAdminView
 
 
 class PmDashboardView(BaseView):
@@ -430,7 +556,7 @@ class PmDashboardView(BaseView):
 
         if self.is_server_admin:
             self.lead_roles_btn = discord.ui.Button(
-                label="Lead Roles",
+                label="Team Leads",
                 style=discord.ButtonStyle.secondary,
                 row=0,
             )
@@ -515,7 +641,7 @@ class PmDashboardView(BaseView):
             await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
             return
 
-        view = LeadRolesAdminView(
+        view = TeamLeadsAdminView(
             project_service=self.project_service,
             squad_service=self.squad_service,
             task_service=self.task_service,

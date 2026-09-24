@@ -1543,7 +1543,7 @@ async def test_lead_roles_admin_menu_lifecycle(services, repos):
     assert admin_dash.is_server_manager is True
     assert hasattr(admin_dash, "lead_roles_btn")
     assert admin_dash.lead_roles_btn is not None
-    assert admin_dash.lead_roles_btn.label == "Lead Roles"
+    assert admin_dash.lead_roles_btn.label in ("Team Leads", "Lead Roles")
 
     # Regular user dashboard view hides Lead Roles button
     reg_dash = PmDashboardView(
@@ -1569,7 +1569,7 @@ async def test_lead_roles_admin_menu_lifecycle(services, repos):
     lead_view = inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(lead_view, LeadRolesAdminView)
     lead_embed = inter.response.edit_message.call_args.kwargs["embed"]
-    assert "Authorized Team Lead Roles" in lead_embed.title
+    assert "Authorized Team Lead" in lead_embed.title
 
     # 3. Assign role via LeadRolesAdminView
     mock_role = MagicMock(spec=discord.Role)
@@ -1610,6 +1610,96 @@ async def test_lead_roles_admin_menu_lifecycle(services, repos):
     back_inter.response.edit_message.assert_awaited_once()
     back_view = back_inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(back_view, PmDashboardView)
+
+
+@pytest.mark.asyncio
+async def test_team_leads_admin_view_lifecycle(services, repos):
+    """Verify TeamLeadsAdminView allows managing both roles and individual users via RoleSelect and UserSelect."""
+    from src.adapters.discord_bot.views.admin_menu import (
+        PmDashboardView,
+        TeamLeadsAdminView,
+    )
+    from src.services.auth_service import AuthService
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    lead_role_repo = repos["guild_lead_role"]
+    lead_user_repo = repos["guild_lead_user"]
+    auth_srv = AuthService(
+        proj_srv,
+        squad_srv,
+        guild_lead_role_repo=lead_role_repo,
+        guild_lead_user_repo=lead_user_repo,
+    )
+
+    guild_id = 987654321
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
+    mock_guild.name = "Test Guild"
+
+    admin_user = MagicMock(spec=discord.Member)
+    admin_user.id = 9991
+    admin_user.guild_permissions = discord.Permissions(manage_guild=True)
+
+    # 1. PmDashboardView shows Team Leads button
+    dash = PmDashboardView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+        user=admin_user,
+    )
+    assert dash.lead_roles_btn is not None
+    assert dash.lead_roles_btn.label == "Team Leads"
+
+    # 2. TeamLeadsAdminView has both RoleSelect and UserSelect
+    team_view = TeamLeadsAdminView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+    )
+    assert hasattr(team_view, "role_select")
+    assert hasattr(team_view, "user_select")
+    assert hasattr(team_view, "assign_user_btn")
+    assert hasattr(team_view, "remove_user_btn")
+
+    # 3. Assign an individual user
+    mock_target_user = MagicMock(spec=discord.Member)
+    mock_target_user.id = 770011
+    mock_target_user.display_name = "Alice"
+    mock_guild.get_member.return_value = mock_target_user
+
+    team_view.user_select._values = [str(mock_target_user.id)]
+    assign_inter = MagicMock(spec=discord.Interaction)
+    assign_inter.guild = mock_guild
+    assign_inter.user = admin_user
+    assign_inter.response = MagicMock()
+    assign_inter.response.edit_message = AsyncMock()
+
+    await team_view._on_assign_user_clicked(assign_inter)
+    assert await auth_srv.list_guild_lead_users(guild_id) == {mock_target_user.id}
+
+    # 4. Verify embed renders both roles and users
+    embed = await team_view.build_embed(mock_guild)
+    assert "Authorized Team Leads" in embed.title
+    field_names = [f.name for f in embed.fields]
+    assert any("Roles" in name for name in field_names)
+    assert any("Members" in name for name in field_names)
+
+    # 5. Remove individual user
+    remove_inter = MagicMock(spec=discord.Interaction)
+    remove_inter.guild = mock_guild
+    remove_inter.user = admin_user
+    remove_inter.response = MagicMock()
+    remove_inter.response.edit_message = AsyncMock()
+
+    await team_view._on_remove_user_clicked(remove_inter)
+    assert await auth_srv.list_guild_lead_users(guild_id) == set()
 
 
 def test_build_hub_welcome_embed_squad_roles():
