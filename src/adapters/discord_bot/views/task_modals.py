@@ -265,8 +265,11 @@ class TaskQuickEditTitleModal(BaseModal):
             return
 
         body = self.desc_input.value.strip() or None
-        self.target_view.staged_title = title
-        self.target_view.staged_body = body
-        self.target_view._rebuild_items()
-        embed = self.target_view._build_embed()
-        await interaction.response.edit_message(embed=embed, view=self.target_view)
+        if hasattr(self.target_view, "update_text_content"):
+            await self.target_view.update_text_content(interaction, title=title, body=body)
+        else:
+            self.target_view.staged_title = title
+            self.target_view.staged_body = body
+            self.target_view._rebuild_items()
+            embed = self.target_view._build_embed()
+            await interaction.response.edit_message(embed=embed, view=self.target_view)

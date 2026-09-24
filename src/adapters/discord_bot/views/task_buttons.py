@@ -72,7 +72,7 @@ def build_task_controls_embed(
     body_section = f"\n• **Description**: {actual_body[:200]}" if actual_body else ""
 
     embed = discord.Embed(
-        title=f"Edit Draft: [{task.short_id}] {actual_title[:70]}",
+        title=f"Edit Draft: [{task.short_id}] {actual_title[:100]}",
         description=(
             f"{prefix}"
             f"• **Priority**: {prio_str}\n"
@@ -168,14 +168,6 @@ class TaskQuickControlsView(BaseView):
         save_btn.callback = self._on_save_clicked
         self.add_item(save_btn)
 
-        edit_text_btn = discord.ui.Button(
-            label="Edit Title / Body",
-            style=discord.ButtonStyle.secondary,
-            row=0,
-        )
-        edit_text_btn.callback = self._on_edit_text_clicked
-        self.add_item(edit_text_btn)
-
         discard_btn = discord.ui.Button(
             label="Discard Changes",
             style=discord.ButtonStyle.danger,
@@ -183,6 +175,14 @@ class TaskQuickControlsView(BaseView):
         )
         discard_btn.callback = self._on_cancel_clicked
         self.add_item(discard_btn)
+
+        edit_text_btn = discord.ui.Button(
+            label="Edit Title / Body",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+        )
+        edit_text_btn.callback = self._on_edit_text_clicked
+        self.add_item(edit_text_btn)
 
         if self.staged_assignee_id:
             unassign_btn = discord.ui.Button(
@@ -269,6 +269,21 @@ class TaskQuickControlsView(BaseView):
         modal = TaskQuickEditTitleModal(self)
         await interaction.response.send_modal(modal)
 
+    async def update_text_content(
+        self,
+        interaction: discord.Interaction,
+        *,
+        title: str,
+        body: str | None,
+    ) -> None:
+        """Update staged title and description and refresh the draft embed."""
+        self.staged_title = title
+        self.staged_body = body
+        self.error_message = None
+        self._rebuild_items()
+        embed = self._build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
     async def _on_priority_selected(self, interaction: discord.Interaction) -> None:
         prio_map = {
             "high": PriorityLevel.HIGH,
@@ -340,6 +355,7 @@ class TaskQuickControlsView(BaseView):
     async def _on_save_clicked(self, interaction: discord.Interaction) -> None:
         ws = self.effective_workspace
         if ws:
+            clear_body = self.staged_body is None and bool(self.task.body)
             updated_task = await ws.save_task_controls(
                 interaction,
                 task=self.task,
@@ -350,6 +366,7 @@ class TaskQuickControlsView(BaseView):
                 watchers=self.staged_watchers,
                 title=self.staged_title,
                 body=self.staged_body,
+                clear_body=clear_body,
             )
             if updated_task:
                 self.task = updated_task

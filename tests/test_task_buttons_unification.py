@@ -176,6 +176,7 @@ async def test_unified_controls_view_saves_all_staged_fields_atomically():
         watchers=[1122, 3344],
         title="New Atomically Saved Title",
         body="New Atomically Saved Body",
+        clear_body=False,
     )
 
 
@@ -232,13 +233,101 @@ async def test_workspace_adapter_save_task_controls_persists_title_and_body(serv
     )
 
 
+@pytest.mark.asyncio
+async def test_workspace_adapter_save_task_controls_clears_body(services):
+    """Verify that save_task_controls with clear_body=True removes the description from the database."""
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 999111222
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Infra Ops", prefix="INF")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Task With Description",
+        body="Initial description to be cleared",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+
+    bot = MagicMock()
+    workspace = DiscordTaskWorkspaceAdapter(bot=bot, task_service=task_srv, project_service=proj_srv)
+    workspace.sync_workspace = AsyncMock()
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(id=1001)
+    interaction.channel = None
+
+    updated_task = await workspace.save_task_controls(
+        interaction=interaction,
+        task=task,
+        clear_body=True,
+    )
+
+    assert updated_task is not None
+    assert updated_task.body is None
+
+    # Verify in DB
+    db_task = await task_srv.get_by_id(task.id)
+    assert db_task.body is None
+
+
+@pytest.mark.asyncio
+async def test_unified_controls_view_clearing_body_passes_clear_body_flag():
+    """Verify that when a user clears an existing body, save_task_controls receives clear_body=True."""
+    mock_workspace = MagicMock()
+    mock_workspace.save_task_controls = AsyncMock()
+
+    task_srv = MagicMock()
+    mock_task = MagicMock(spec=Task)
+    mock_task.id = uuid4()
+    mock_task.short_id = "PRJ-205"
+    mock_task.title = "Task Title"
+    mock_task.body = "Existing description"
+    mock_task.priority = PriorityLevel.NORMAL
+    mock_task.assignee_discord_id = None
+    mock_task.due_at = None
+    mock_task.watchers = []
+    mock_task.version = 1
+
+    view = TaskQuickControlsView(task=mock_task, task_service=task_srv, workspace=mock_workspace)
+
+    # Simulate clearing body
+    view.staged_body = None
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock(id=1001)
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.edit_message = AsyncMock()
+
+    updated_mock_task = MagicMock(spec=Task)
+    updated_mock_task.short_id = "PRJ-205"
+    mock_workspace.save_task_controls.return_value = updated_mock_task
+
+    await view._on_save_clicked(interaction)
+
+    mock_workspace.save_task_controls.assert_awaited_once_with(
+        interaction,
+        task=mock_task,
+        priority=PriorityLevel.NORMAL,
+        assignee_id=None,
+        due_at=None,
+        clear_due_at=False,
+        watchers=[],
+        title="Task Title",
+        body=None,
+        clear_body=True,
+    )
+
+
 def test_unified_controls_view_displays_clear_draft_indicators():
-    """Verify TaskQuickControlsView clearly signals that it is an unsaved draft view."""
+    """Verify TaskQuickControlsView clearly signals that it is an unsaved draft view and orders buttons properly."""
     task_srv = MagicMock()
     mock_task = MagicMock(spec=Task)
     mock_task.id = uuid4()
     mock_task.short_id = "PRJ-303"
-    mock_task.title = "Draft UX Task"
+    # Long 90-character title to test truncation threshold
+    mock_task.title = "Draft UX Task with a very long title that should not be truncated prematurely at 70 chars"
     mock_task.body = "Testing draft indications"
     mock_task.priority = PriorityLevel.NORMAL
     mock_task.assignee_discord_id = None
@@ -248,9 +337,9 @@ def test_unified_controls_view_displays_clear_draft_indicators():
     view = TaskQuickControlsView(task=mock_task, task_service=task_srv)
     embed = view._build_embed()
 
-    # 1. Embed title signals draft cleanly without alert emoji
+    # 1. Embed title signals draft cleanly without alert emoji and preserves titles up to 100 chars
     assert embed.title.startswith("Edit Draft:")
-    assert "[PRJ-303] Draft UX Task" in embed.title
+    assert f"[PRJ-303] {mock_task.title}" in embed.title
     assert "⚠️" not in embed.title
 
     # 2. Embed color is amber/gold
@@ -262,8 +351,10 @@ def test_unified_controls_view_displays_clear_draft_indicators():
     # 4. Footer displays the single clear unsaved draft warning with alert emoji
     assert "⚠️ Unsaved Draft" in embed.footer.text
 
-    # 5. Row 0 has "Discard Changes" with danger style
+    # 5. Row 0 has "Discard Changes" with danger style immediately adjacent to "Save Changes"
     row0_buttons = [item for item in view.children if isinstance(item, discord.ui.Button) and item.row == 0]
+    button_labels = [b.label for b in row0_buttons]
+    assert button_labels[:3] == ["Save Changes", "Discard Changes", "Edit Title / Body"]
     discard_btn = next((b for b in row0_buttons if b.label == "Discard Changes"), None)
     assert discard_btn is not None
     assert discard_btn.style == discord.ButtonStyle.danger
