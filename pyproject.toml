@@ -1,6 +1,6 @@
 [project]
 name = "dgg-pm"
-version = "0.2.0"
+version = "0.2.1"
 description = "Discord-Native Task Management Platform with Hexagonal Architecture and RFC 5545 Portability"
 readme = "README.md"
 requires-python = ">=3.13"
