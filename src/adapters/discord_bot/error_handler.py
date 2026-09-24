@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -99,10 +99,13 @@ async def send_interaction_error(
                 ):
                     is_done = True
 
+        dismissal_target: Any = interaction
         if is_done and hasattr(interaction, "followup") and callable(getattr(interaction.followup, "send", None)):
-            res = interaction.followup.send(message, ephemeral=ephemeral)
+            res = interaction.followup.send(message, ephemeral=ephemeral, wait=True)
             if hasattr(res, "__await__"):
-                await res
+                res = await res
+            if res is not None:
+                dismissal_target = res
         elif hasattr(interaction, "response") and callable(getattr(interaction.response, "send_message", None)):
             res = interaction.response.send_message(message, ephemeral=ephemeral)
             if hasattr(res, "__await__"):
@@ -111,7 +114,7 @@ async def send_interaction_error(
         if ephemeral and auto_dismiss:
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=dismiss_delay)
+            menu_manager.schedule_toast_dismissal(dismissal_target, delay=dismiss_delay)
     except Exception as send_err:
         log.exception("Failed to send error response to Discord interaction: %s", send_err)
 
