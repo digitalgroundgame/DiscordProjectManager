@@ -71,9 +71,12 @@ class TaskNoteModal(BaseModal):
             keep_archived = (task.status == TaskStatus.COMPLETED or task.is_archived) if task else False
             async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
                 await interaction.response.send_message(
-                    f"✅ Note added to **{self.short_id}** by <@{interaction.user.id}>:\n> {note_text}",
-                    ephemeral=False,
+                    f"✅ Note added to **{self.short_id}**.",
+                    ephemeral=True,
                 )
+                from src.adapters.discord_bot.menu_manager import menu_manager
+
+                menu_manager.schedule_toast_dismissal(interaction, delay=6.0)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"adding note to task '{self.short_id}'", logger, ephemeral=True

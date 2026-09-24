@@ -466,6 +466,49 @@ async def test_task_note_modal_completed_archived_thread(services):
 
 
 @pytest.mark.asyncio
+async def test_task_note_modal_responds_ephemerally_to_prevent_duplicate_activity(services, monkeypatch):
+    """Verify TaskNoteModal acknowledges ephemerally so thread does not get duplicate public messages."""
+    from src.adapters.discord_bot.menu_manager import menu_manager
+    from src.adapters.discord_bot.views.task_modals import TaskNoteModal
+
+    scheduled = []
+    monkeypatch.setattr(menu_manager, "schedule_toast_dismissal", lambda target, delay=6.0: scheduled.append(target))
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 11224455
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Notes Single Post Test", prefix="NOT2")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Task for Single Note Post",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+
+    modal = TaskNoteModal(
+        task_id=task.id,
+        short_id=task.short_id,
+        task_service=task_srv,
+    )
+    modal.note_input._value = "Checking single activity log."
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.user = MagicMock()
+    interaction.user.id = 1001
+    interaction.channel = MagicMock(spec=discord.Thread)
+    interaction.response = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await modal.on_submit(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.call_args.kwargs.get("ephemeral") is True
+    assert len(scheduled) == 1
+    assert scheduled[0] is interaction
+
+
+@pytest.mark.asyncio
 async def test_task_edit_modal_completed_archived_thread(services):
     """Verify editing details of a completed/archived task unarchives then re-archives thread."""
     from src.adapters.discord_bot.views.task_modals import TaskEditModal
