@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.ports.repositories import (
         IGuildLeadRoleRepository,
+        IGuildLeadUserRepository,
         IOutboxRepo,
         IProjectRepo,
         ISquadRepo,
@@ -23,6 +24,7 @@ class IUnitOfWork(ABC):
     outbox: IOutboxRepo
     user_prefs: IUserPreferenceRepo
     guild_lead_roles: IGuildLeadRoleRepository
+    guild_lead_users: IGuildLeadUserRepository
 
     @abstractmethod
     async def __aenter__(self) -> IUnitOfWork:

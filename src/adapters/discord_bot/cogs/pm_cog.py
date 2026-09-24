@@ -502,6 +502,130 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             )
 
     @admin_group.command(
+        name="lead",
+        description="Authorize, revoke, or list Team Lead roles and individual members",
+    )
+    @app_commands.describe(
+        action="Action to perform (add, remove, or list authorized Team Leads)",
+        role="Discord role to authorize or revoke",
+        user="Discord member to authorize or revoke",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Add Team Lead(s)", value="add"),
+            app_commands.Choice(name="Remove Team Lead(s)", value="remove"),
+            app_commands.Choice(name="List Team Leads", value="list"),
+        ]
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_lead(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        role: discord.Role | None = None,
+        user: discord.Member | None = None,
+    ) -> None:
+        """Authorize or revoke Discord roles and individual members to create/manage projects and squads."""
+        if not interaction.guild:
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            guild_id = interaction.guild.id
+            if action in ("add", "remove"):
+                if not role and not user:
+                    await interaction.followup.send(
+                        "❌ Please specify a role, a member, or both to add/remove.",
+                        ephemeral=True,
+                    )
+                    return
+
+                if user and getattr(user, "bot", False):
+                    await interaction.followup.send(
+                        "❌ Bots cannot be authorized as Team Leads.",
+                        ephemeral=True,
+                    )
+                    return
+
+                messages: list[str] = []
+                if action == "add":
+                    if role:
+                        await self.auth_service.add_guild_lead_role(guild_id, role.id)
+                        messages.append(f"⭐ **Added Team Lead Role**: <@&{role.id}>")
+                    if user:
+                        await self.auth_service.add_guild_lead_user(guild_id, user.id)
+                        messages.append(f"⭐ **Added Team Lead Member**: <@{user.id}>")
+                    messages.append("They are now authorized to create and manage projects and squads.")
+                    await interaction.followup.send("\n".join(messages), ephemeral=True)
+                else:  # remove
+                    if role:
+                        removed_role = await self.auth_service.remove_guild_lead_role(guild_id, role.id)
+                        if removed_role:
+                            messages.append(f"✅ **Removed Team Lead Role**: <@&{role.id}>")
+                        else:
+                            messages.append(f"ℹ️ <@&{role.id}> was not registered as an authorized Team Lead role.")
+                    if user:
+                        removed_user = await self.auth_service.remove_guild_lead_user(guild_id, user.id)
+                        if removed_user:
+                            messages.append(f"✅ **Removed Team Lead Member**: <@{user.id}>")
+                        else:
+                            messages.append(f"ℹ️ <@{user.id}> was not registered as an authorized Team Lead member.")
+                    await interaction.followup.send("\n".join(messages), ephemeral=True)
+
+            elif action == "list":
+                role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
+                user_ids = await self.auth_service.list_guild_lead_users(guild_id)
+
+                if not role_ids and not user_ids:
+                    await interaction.followup.send(
+                        "ℹ️ **No Team Leads Configured**\n"
+                        "Only Discord Server Managers (users with `Manage Server` or `Administrator`) "
+                        "can create and manage projects.",
+                        ephemeral=True,
+                    )
+                    return
+
+                embed = discord.Embed(
+                    title="👥 Authorized Team Leads",
+                    description=(
+                        "The following Discord roles and individual members are authorized to create "
+                        "and manage projects and squads without requiring server-wide `Manage Server` permissions:\n"
+                    ),
+                    color=discord.Color.blue(),
+                )
+
+                if role_ids:
+                    role_lines = [f"• <@&{rid}> (`{rid}`)" for rid in sorted(role_ids)]
+                    embed.add_field(
+                        name=f"Configured Roles ({len(role_ids)})",
+                        value="\n".join(role_lines),
+                        inline=False,
+                    )
+                else:
+                    embed.add_field(
+                        name="Configured Roles (0)",
+                        value="*No roles configured*",
+                        inline=False,
+                    )
+
+                if user_ids:
+                    user_lines = [f"• <@{uid}> (`{uid}`)" for uid in sorted(user_ids)]
+                    embed.add_field(
+                        name=f"Configured Members ({len(user_ids)})",
+                        value="\n".join(user_lines),
+                        inline=False,
+                    )
+                else:
+                    embed.add_field(
+                        name="Configured Members (0)",
+                        value="*No individual members configured*",
+                        inline=False,
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "managing team leads", logger, ephemeral=True)
+
+    @admin_group.command(
         name="lead-role",
         description="Authorize or revoke an existing Discord Team Lead role to create and manage projects",
     )

@@ -600,6 +600,41 @@ async def test_on_member_remove_auto_prunes_squad_lead(services):
 
 
 @pytest.mark.asyncio
+async def test_on_member_remove_auto_prunes_individual_lead(services, repos):
+    """When an authorized individual lead leaves the server, their lead record is pruned."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    lead_user_repo = repos["guild_lead_user"]
+    guild_id = 9990014
+    user_id = 9004
+
+    auth_srv = AuthService(
+        proj_srv,
+        squad_srv,
+        guild_lead_user_repo=lead_user_repo,
+    )
+    bot = DggPmBot(
+        task_service=task_srv,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        auth_service=auth_srv,
+    )
+
+    await auth_srv.add_guild_lead_user(guild_id, user_id)
+    assert await auth_srv.list_guild_lead_users(guild_id) == {user_id}
+
+    mock_guild = MagicMock()
+    mock_guild.id = guild_id
+    leaving_member = _make_mock_member(user_id)
+    leaving_member.guild = mock_guild
+
+    await bot.on_member_remove(leaving_member)
+
+    assert await auth_srv.list_guild_lead_users(guild_id) == set()
+
+
+@pytest.mark.asyncio
 async def test_project_lead_authorization(services):
     """Verify Project Leads have elevated permissions to create, assign, and mutate tasks in their projects."""
     proj_srv = services["project"]
@@ -1423,6 +1458,46 @@ async def test_auth_service_can_manage_projects_lifecycle(services, repos):
 
 
 @pytest.mark.asyncio
+async def test_auth_service_individual_lead_user_lifecycle(services, repos):
+    """Verify AuthService.can_manage_projects allows designated individual Team Lead members."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_role_repo = repos["guild_lead_role"]
+    lead_user_repo = repos["guild_lead_user"]
+    auth_srv = AuthService(
+        proj_srv,
+        squad_srv,
+        guild_lead_role_repo=lead_role_repo,
+        guild_lead_user_repo=lead_user_repo,
+    )
+
+    guild_id = 888777666
+    individual_lead_member = _make_mock_member(5501, role_ids=[123], manage_guild=False)
+    regular_member = _make_mock_member(5502, role_ids=[123], manage_guild=False)
+
+    # 1. Initially, individual member is not authorized
+    assert await auth_srv.can_manage_projects(individual_lead_member, guild_id) is False
+    with pytest.raises(PermissionDeniedError, match="do not have permission"):
+        await auth_srv.require_project_management(individual_lead_member, guild_id)
+
+    # 2. Add individual lead user
+    await auth_srv.add_guild_lead_user(guild_id, individual_lead_member.id)
+    assert await auth_srv.list_guild_lead_users(guild_id) == {individual_lead_member.id}
+
+    # Now individual lead is authorized!
+    assert await auth_srv.can_manage_projects(individual_lead_member, guild_id) is True
+    await auth_srv.require_project_management(individual_lead_member, guild_id)
+
+    # Regular member is still denied
+    assert await auth_srv.can_manage_projects(regular_member, guild_id) is False
+
+    # 3. Remove individual lead user
+    assert await auth_srv.remove_guild_lead_user(guild_id, individual_lead_member.id) is True
+    assert await auth_srv.list_guild_lead_users(guild_id) == set()
+    assert await auth_srv.can_manage_projects(individual_lead_member, guild_id) is False
+
+
+@pytest.mark.asyncio
 async def test_pm_hub_projects_tab_authorizes_lead_role_to_create_projects(services, repos):
     """Verify that clicking Projects Hub on PmHubView shows 'New Project' for Team Lead roles."""
     from src.adapters.discord_bot.views.hub_menu import PmHubView
@@ -1506,8 +1581,8 @@ async def test_can_manage_projects_resolves_member_when_user_is_discord_user(ser
 
 
 @pytest.mark.asyncio
-async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_button(services, repos):
-    """Verify PmHubView auto-wires guild_lead_role_repo if auth_service is omitted, and has Create Project button."""
+async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_button(services, repos, db_session):
+    """Verify PmHubView auto-wires lead repos if auth_service is omitted, and has Create Project button."""
     from src.adapters.discord_bot.views.hub_menu import PmHubView
     from src.adapters.discord_bot.views.project_menu import ProjectChannelSelectView
 
@@ -1515,27 +1590,33 @@ async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_butt
     squad_srv = services["squad"]
     task_srv = services["task"]
     lead_role_repo = repos["guild_lead_role"]
+    lead_user_repo = repos["guild_lead_user"]
 
     guild_id = 777111
     lead_role_id = 888222
+    lead_user_id = 6003
     await lead_role_repo.add_lead_role(guild_id, lead_role_id)
+    await lead_user_repo.add_lead_user(guild_id, lead_user_id)
+    await db_session.commit()
 
-    lead_member = _make_mock_member(6001, role_ids=[lead_role_id], manage_guild=False)
+    lead_role_member = _make_mock_member(6001, role_ids=[lead_role_id], manage_guild=False)
     reg_member = _make_mock_member(6002, role_ids=[], manage_guild=False)
+    lead_user_member = _make_mock_member(lead_user_id, role_ids=[], manage_guild=False)
 
     # Instantiate PmHubView WITHOUT auth_service
     hub_view = PmHubView(proj_srv, squad_srv, task_srv)
     assert hub_view.auth_service.guild_lead_role_repo is not None
+    assert hub_view.auth_service.guild_lead_user_repo is not None
 
     # Verify Create Project button exists on row 1
     assert hasattr(hub_view, "create_project_btn")
     assert hub_view.create_project_btn.label == "Create Project"
 
-    # 1. Lead member clicks Create Project button directly on PmHubView
+    # 1. Lead role member clicks Create Project button directly on PmHubView
     inter = MagicMock(spec=discord.Interaction)
     inter.guild = MagicMock(id=guild_id)
-    inter.guild.get_member.return_value = lead_member
-    inter.user = lead_member
+    inter.guild.get_member.return_value = lead_role_member
+    inter.user = lead_role_member
     inter.response = MagicMock()
     inter.response.send_message = AsyncMock()
 
@@ -1544,7 +1625,17 @@ async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_butt
     kwargs = inter.response.send_message.call_args.kwargs
     assert isinstance(kwargs["view"], ProjectChannelSelectView)
 
-    # 2. Regular member clicks Create Project button -> permission error
+    # 2. Individual lead user clicks Create Project button -> allowed
+    inter.response.send_message.reset_mock()
+    inter.user = lead_user_member
+    inter.guild.get_member.return_value = lead_user_member
+
+    await hub_view.create_project_btn.callback(inter)
+    inter.response.send_message.assert_awaited_once()
+    kwargs = inter.response.send_message.call_args.kwargs
+    assert isinstance(kwargs["view"], ProjectChannelSelectView)
+
+    # 3. Regular member clicks Create Project button -> permission error
     inter.response.send_message.reset_mock()
     inter.user = reg_member
     inter.guild.get_member.return_value = reg_member

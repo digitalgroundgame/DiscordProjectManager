@@ -2033,6 +2033,108 @@ async def test_admin_lead_role_execution(services, repos):
 
 
 @pytest.mark.asyncio
+async def test_admin_lead_command_metadata():
+    """Verify that PmCog defines admin_group with unified 'lead' command and 'lead-role' alias."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    assert hasattr(PmCog, "admin_group")
+    cmd = next((c for c in PmCog.admin_group.commands if c.name == "lead"), None)
+    assert cmd is not None
+    params = [p.name for p in cmd.parameters]
+    assert "action" in params
+    assert "role" in params
+    assert "user" in params
+
+    # Legacy alias still exists
+    legacy_cmd = next((c for c in PmCog.admin_group.commands if c.name == "lead-role"), None)
+    assert legacy_cmd is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_lead_execution(services, repos):
+    """Verify /pm admin lead can add, list, and remove authorized Team Lead roles and users."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+    from src.services.auth_service import AuthService
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    lead_role_repo = repos["guild_lead_role"]
+    lead_user_repo = repos["guild_lead_user"]
+    auth_srv = AuthService(
+        proj_srv,
+        squad_srv,
+        guild_lead_role_repo=lead_role_repo,
+        guild_lead_user_repo=lead_user_repo,
+    )
+
+    mock_bot = MagicMock()
+    cog = PmCog(
+        bot=mock_bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=services["task"],
+        auth_service=auth_srv,
+    )
+
+    guild_id = 8877665544
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock(id=guild_id)
+    interaction.guild.get_role.return_value = None
+    interaction.guild.get_member.return_value = None
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    mock_role = MagicMock(spec=discord.Role, id=223344, name="Lead Role")
+    mock_user = MagicMock(spec=discord.Member, id=998877, name="LeadUser", bot=False)
+    mock_bot_user = MagicMock(spec=discord.Member, id=998899, name="BotUser", bot=True)
+
+    # 1. Add validation error: neither role nor user provided
+    await cog.admin_lead.callback(cog, interaction, action="add", role=None, user=None)
+    interaction.followup.send.assert_awaited()
+    assert "specify a role, a member, or both" in interaction.followup.send.call_args[0][0]
+
+    # 2. Reject bot user
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="add", role=None, user=mock_bot_user)
+    assert "Bots cannot be authorized" in interaction.followup.send.call_args[0][0]
+
+    # 3. Add individual lead user
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="add", role=None, user=mock_user)
+    assert "Added Team Lead" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_users(guild_id) == {998877}
+
+    # 4. Add role as well
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="add", role=mock_role, user=None)
+    assert "Added Team Lead" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_roles(guild_id) == {223344}
+
+    # 5. List leads (both role and user should appear)
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="list")
+    embed = interaction.followup.send.call_args[1].get("embed")
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert any("Roles" in name for name in field_names)
+    assert any("Members" in name for name in field_names)
+
+    # 6. Remove user
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="remove", role=None, user=mock_user)
+    assert "Removed Team Lead" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_users(guild_id) == set()
+
+    # 7. Remove role
+    interaction.followup.send.reset_mock()
+    await cog.admin_lead.callback(cog, interaction, action="remove", role=mock_role, user=None)
+    assert "Removed Team Lead" in interaction.followup.send.call_args[0][0]
+    assert await auth_srv.list_guild_lead_roles(guild_id) == set()
+
+
+@pytest.mark.asyncio
 async def test_project_and_squad_create_by_team_lead_role(services, repos):
     """Verify that users holding authorized Team Lead roles can create projects and squads without manage_guild."""
     from src.adapters.discord_bot.cogs.pm_cog import PmCog

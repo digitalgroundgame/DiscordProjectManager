@@ -417,11 +417,20 @@ async def ensure_pinned_hub_post(
         sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
         if not auth_service and squad_service and sf:
             try:
-                from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+                from src.adapters.db.postgres_repo import (
+                    PostgresGuildLeadRoleRepository,
+                    PostgresGuildLeadUserRepository,
+                )
                 from src.services.auth_service import AuthService
 
-                lead_repo = PostgresGuildLeadRoleRepository(sf)
-                auth_service = AuthService(project_service, squad_service, guild_lead_role_repo=lead_repo)
+                lead_role_repo = PostgresGuildLeadRoleRepository(sf)
+                lead_user_repo = PostgresGuildLeadUserRepository(sf)
+                auth_service = AuthService(
+                    project_service,
+                    squad_service,
+                    guild_lead_role_repo=lead_role_repo,
+                    guild_lead_user_repo=lead_user_repo,
+                )
             except Exception as e:
                 logger.debug("Could not auto-create auth_service for hub: %s", e)
 

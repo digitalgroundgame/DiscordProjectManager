@@ -189,3 +189,36 @@ async def test_guild_lead_role_repo_lifecycle(db_session):
     # Remove non-existent role
     assert await repo.remove_lead_role(guild_id, 999999) is False
     assert await repo.list_lead_role_ids(guild_id) == {333444}
+
+
+@pytest.mark.asyncio
+async def test_guild_lead_user_repo_lifecycle(db_session):
+    """Verify IGuildLeadUserRepository can add, list, and remove authorized lead user IDs."""
+    from src.adapters.db.postgres_repo import PostgresGuildLeadUserRepository
+
+    repo = PostgresGuildLeadUserRepository(db_session)
+    guild_id = 9876543210
+
+    # Initially empty
+    assert await repo.list_lead_user_ids(guild_id) == set()
+
+    # Add users
+    await repo.add_lead_user(guild_id, 100001)
+    await repo.add_lead_user(guild_id, 100002)
+
+    # Adding duplicate is idempotent
+    await repo.add_lead_user(guild_id, 100001)
+
+    lead_users = await repo.list_lead_user_ids(guild_id)
+    assert lead_users == {100001, 100002}
+
+    # Different guild is isolated
+    assert await repo.list_lead_user_ids(555555) == set()
+
+    # Remove existing user
+    assert await repo.remove_lead_user(guild_id, 100001) is True
+    assert await repo.list_lead_user_ids(guild_id) == {100002}
+
+    # Remove non-existent user
+    assert await repo.remove_lead_user(guild_id, 999999) is False
+    assert await repo.list_lead_user_ids(guild_id) == {100002}

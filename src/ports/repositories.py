@@ -313,3 +313,17 @@ class IGuildLeadRoleRepository(ABC):
     @abstractmethod
     async def list_lead_role_ids(self, guild_id: int) -> set[int]:
         """Lists all authorized Team Lead Discord role IDs for the guild."""
+
+
+class IGuildLeadUserRepository(ABC):
+    @abstractmethod
+    async def add_lead_user(self, guild_id: int, user_discord_id: int) -> None:
+        """Registers a Discord user ID as an authorized Team Lead for the guild."""
+
+    @abstractmethod
+    async def remove_lead_user(self, guild_id: int, user_discord_id: int) -> bool:
+        """Removes an authorized Team Lead user from the guild. Returns True if removed, False if not found."""
+
+    @abstractmethod
+    async def list_lead_user_ids(self, guild_id: int) -> set[int]:
+        """Lists all authorized Team Lead Discord user IDs for the guild."""

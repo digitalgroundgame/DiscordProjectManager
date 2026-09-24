@@ -310,17 +310,27 @@ class PmHubView(BaseView):
         if auth_service is not None:
             self.auth_service = auth_service
         else:
-            lead_repo = None
+            lead_role_repo = None
+            lead_user_repo = None
             uow = getattr(task_service, "uow", None)
             sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
             if sf:
                 try:
-                    from src.adapters.db.postgres_repo import PostgresGuildLeadRoleRepository
+                    from src.adapters.db.postgres_repo import (
+                        PostgresGuildLeadRoleRepository,
+                        PostgresGuildLeadUserRepository,
+                    )
 
-                    lead_repo = PostgresGuildLeadRoleRepository(sf)
+                    lead_role_repo = PostgresGuildLeadRoleRepository(sf)
+                    lead_user_repo = PostgresGuildLeadUserRepository(sf)
                 except Exception as e:
-                    logger.debug("Could not auto-create lead_role_repo for hub: %s", e)
-            self.auth_service = AuthService(project_service, squad_service, guild_lead_role_repo=lead_repo)
+                    logger.debug("Could not auto-create lead repos for hub: %s", e)
+            self.auth_service = AuthService(
+                project_service,
+                squad_service,
+                guild_lead_role_repo=lead_role_repo,
+                guild_lead_user_repo=lead_user_repo,
+            )
 
     async def _refresh_hub_message(
         self,
