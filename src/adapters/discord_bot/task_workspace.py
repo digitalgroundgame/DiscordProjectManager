@@ -631,16 +631,17 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             await _maybe_await(interaction.response.send_modal(modal))
             return
 
-        if action == "edit":
-            from src.adapters.discord_bot.views.task_modals import TaskEditModal
-
-            modal = TaskEditModal(
-                task=task,
-                task_service=self.task_service,
-                auth_service=self.auth_service,
-            )
-            await _maybe_await(interaction.response.send_modal(modal))
-            return
+        if action in ("edit", "controls"):
+            try:
+                await self.render_task_controls(
+                    interaction=interaction,
+                    task=task,
+                    panel="quick_controls",
+                )
+                return
+            except Exception as e:
+                await send_interaction_error(interaction, e, "opening task controls", logger, ephemeral=True)
+                return
 
         if action == "deps":
             try:
@@ -664,18 +665,6 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 return
             except Exception as e:
                 await send_interaction_error(interaction, e, "opening task dependencies", logger, ephemeral=True)
-                return
-
-        if action == "controls":
-            try:
-                await self.render_task_controls(
-                    interaction=interaction,
-                    task=task,
-                    panel="quick_controls",
-                )
-                return
-            except Exception as e:
-                await send_interaction_error(interaction, e, "opening task controls", logger, ephemeral=True)
                 return
 
         if action == "claim":
@@ -890,6 +879,9 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         due_at: Any = _UNSET,
         clear_due_at: bool = False,
         watchers: list[int] | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        clear_body: bool = False,
     ) -> Task | None:
         """Applies staged task control adjustments atomically, syncing thread tags and action card."""
         if self.auth_service:
@@ -910,6 +902,7 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
             updated_task = task
             actor_id = getattr(interaction.user, "id", None)
+            title_changed = False
 
             if priority is not None and priority != updated_task.priority:
                 updated_task = await self.task_service.update_priority(
@@ -919,6 +912,13 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 )
 
             details_kwargs: dict[str, Any] = {}
+            if title is not None and title != updated_task.title:
+                details_kwargs["title"] = title
+                title_changed = True
+            if body is not None and body != updated_task.body:
+                details_kwargs["body"] = body
+            if clear_body:
+                details_kwargs["clear_body"] = True
             if due_at is not _UNSET and due_at != updated_task.due_at:
                 details_kwargs["due_at"] = due_at
             if clear_due_at:
@@ -946,7 +946,7 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
 
             await self.sync_workspace(
                 updated_task,
-                sync_title=False,
+                sync_title=title_changed,
                 sync_tags=True,
                 sync_archive=False,
                 sync_starter_card=True,

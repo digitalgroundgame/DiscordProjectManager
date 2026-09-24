@@ -34,6 +34,8 @@ def build_task_controls_embed(
     assignee_id: Any = _UNSET,
     due_at: Any = _UNSET,
     watchers: list[int] | None = None,
+    title: str | None = None,
+    body: Any = _UNSET,
 ) -> discord.Embed:
     """Builds a summary embed for the interactive ephemeral task controls."""
     prio_map = {
@@ -57,26 +59,31 @@ def build_task_controls_embed(
     actual_watchers = task.watchers if watchers is None else watchers
     watchers_str = " ".join(f"<@{uid}>" for uid in actual_watchers) if actual_watchers else "*None*"
 
+    actual_title = title if title is not None else task.title
+    actual_body = task.body if body is _UNSET else body
+
     if error_message:
         color = discord.Color.red()
         prefix = f"{error_message}\n\n"
     else:
-        color = discord.Color.blue()
+        color = discord.Color.gold()
         prefix = ""
 
+    body_section = f"\n• **Description**: {actual_body[:200]}" if actual_body else ""
+
     embed = discord.Embed(
-        title=f"Quick Controls: [{task.short_id}] {task.title[:70]}",
+        title=f"Edit Draft: [{task.short_id}] {actual_title[:70]}",
         description=(
             f"{prefix}"
-            "Adjust fields above, then click 'Save Changes' to apply.\n\n"
             f"• **Priority**: {prio_str}\n"
             f"• **Assignee**: {assignee_str}\n"
             f"• **Due Date**: {due_str}\n"
             f"• **Watchers**: {watchers_str}"
+            f"{body_section}"
         ),
         color=color,
     )
-    embed.set_footer(text="Adjust fields above, then click 'Save Changes' to apply.")
+    embed.set_footer(text="⚠️ Unsaved Draft • Click 'Save Changes' to apply or 'Discard Changes' to cancel.")
     return embed
 
 
@@ -99,6 +106,8 @@ class TaskQuickControlsView(BaseView):
         self.workspace = workspace
 
         # Staged state
+        self.staged_title: str = task.title
+        self.staged_body: str | None = task.body
         self.staged_priority: PriorityLevel = task.priority
         self.staged_assignee_id: int | None = task.assignee_discord_id
         self.staged_due_at: datetime | None = task.due_at
@@ -143,6 +152,8 @@ class TaskQuickControlsView(BaseView):
             assignee_id=self.staged_assignee_id,
             due_at=due,
             watchers=self.staged_watchers,
+            title=self.staged_title,
+            body=self.staged_body,
         )
 
     def _rebuild_items(self) -> None:
@@ -157,13 +168,21 @@ class TaskQuickControlsView(BaseView):
         save_btn.callback = self._on_save_clicked
         self.add_item(save_btn)
 
-        cancel_btn = discord.ui.Button(
-            label="Cancel",
+        edit_text_btn = discord.ui.Button(
+            label="Edit Title / Body",
             style=discord.ButtonStyle.secondary,
             row=0,
         )
-        cancel_btn.callback = self._on_cancel_clicked
-        self.add_item(cancel_btn)
+        edit_text_btn.callback = self._on_edit_text_clicked
+        self.add_item(edit_text_btn)
+
+        discard_btn = discord.ui.Button(
+            label="Discard Changes",
+            style=discord.ButtonStyle.danger,
+            row=0,
+        )
+        discard_btn.callback = self._on_cancel_clicked
+        self.add_item(discard_btn)
 
         if self.staged_assignee_id:
             unassign_btn = discord.ui.Button(
@@ -244,6 +263,12 @@ class TaskQuickControlsView(BaseView):
         self.watchers_select.callback = self._on_watchers_selected
         self.add_item(self.watchers_select)
 
+    async def _on_edit_text_clicked(self, interaction: discord.Interaction) -> None:
+        from src.adapters.discord_bot.views.task_modals import TaskQuickEditTitleModal
+
+        modal = TaskQuickEditTitleModal(self)
+        await interaction.response.send_modal(modal)
+
     async def _on_priority_selected(self, interaction: discord.Interaction) -> None:
         prio_map = {
             "high": PriorityLevel.HIGH,
@@ -323,6 +348,8 @@ class TaskQuickControlsView(BaseView):
                 due_at=self.staged_due_at,
                 clear_due_at=self.staged_clear_due,
                 watchers=self.staged_watchers,
+                title=self.staged_title,
+                body=self.staged_body,
             )
             if updated_task:
                 self.task = updated_task
@@ -351,6 +378,9 @@ class TaskQuickControlsView(BaseView):
         keep_archived = self.task.status == TaskStatus.COMPLETED or self.task.is_archived
         async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
             updated_task = self.task
+            title_changed = self.staged_title != updated_task.title
+            body_changed = self.staged_body != updated_task.body
+
             if self.staged_priority != updated_task.priority:
                 updated_task = await self.task_service.update_priority(
                     task_id=self.task.id,
@@ -359,17 +389,29 @@ class TaskQuickControlsView(BaseView):
                 )
 
             details_changed = (
-                self.staged_due_at != updated_task.due_at
+                title_changed
+                or body_changed
+                or self.staged_due_at != updated_task.due_at
                 or self.staged_clear_due
                 or set(self.staged_watchers) != set(updated_task.watchers)
             )
             if details_changed:
+                details_kwargs: dict[str, Any] = {
+                    "due_at": self.staged_due_at,
+                    "clear_due_at": self.staged_clear_due,
+                    "watchers": self.staged_watchers,
+                }
+                if title_changed:
+                    details_kwargs["title"] = self.staged_title
+                if body_changed:
+                    details_kwargs["body"] = self.staged_body
+                    if not self.staged_body:
+                        details_kwargs["clear_body"] = True
+
                 updated_task = await self.task_service.update_details(
                     task_id=self.task.id,
                     actor_discord_id=interaction.user.id,
-                    due_at=self.staged_due_at,
-                    clear_due_at=self.staged_clear_due,
-                    watchers=self.staged_watchers,
+                    **details_kwargs,
                 )
 
             if self.staged_assignee_id != updated_task.assignee_discord_id:
@@ -392,7 +434,7 @@ class TaskQuickControlsView(BaseView):
             await interaction.response.edit_message(embed=embed, view=None)
             if self.bot and hasattr(self.bot, "sync_root_task_message"):
                 await self.bot.sync_root_task_message(updated_task)
-                await self.bot.sync_task_thread(updated_task, sync_archive=False)
+                await self.bot.sync_task_thread(updated_task, sync_title=title_changed, sync_archive=False)
 
             menu_manager.unregister_menu(interaction)
             menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
@@ -500,9 +542,9 @@ class TaskActionView(BaseView):
         )
         self.add_item(self.note_btn)
 
-        # Row 1: Advanced Actions / Tools (Edit Details in first position)
+        # Row 1: Advanced Actions / Tools (Consolidated Edit Task in first position)
         self.edit_btn = discord.ui.Button(
-            label="Edit Details",
+            label="Edit Task",
             style=discord.ButtonStyle.secondary,
             custom_id=f"task:edit:{task_id}",
             row=1,
@@ -516,14 +558,6 @@ class TaskActionView(BaseView):
             row=1,
         )
         self.add_item(self.deps_btn)
-
-        self.controls_btn = discord.ui.Button(
-            label="Quick Controls",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"task:controls:{task_id}",
-            row=1,
-        )
-        self.add_item(self.controls_btn)
 
 
 class TaskLinkButtonView(BaseView):

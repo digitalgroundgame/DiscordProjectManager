@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import discord
@@ -228,3 +228,45 @@ class TaskEditModal(BaseModal):
             await send_interaction_error(
                 interaction, e, f"updating details for task '{self.short_id}'", logger, ephemeral=True
             )
+
+
+class TaskQuickEditTitleModal(BaseModal):
+    """Modal to edit title and description inside TaskQuickControlsView with staged preview."""
+
+    def __init__(self, target_view: Any):
+        super().__init__(title="Edit Task Details")
+        self.target_view = target_view
+
+        current_title = getattr(target_view, "staged_title", "")
+        current_body = getattr(target_view, "staged_body", "") or ""
+
+        self.title_input = discord.ui.TextInput(
+            label="Task Title",
+            default=current_title,
+            required=True,
+            max_length=100,
+        )
+        self.add_item(self.title_input)
+
+        self.desc_input = discord.ui.TextInput(
+            label="Description / Body (Optional)",
+            style=discord.TextStyle.paragraph,
+            default=current_body,
+            placeholder="Detailed requirements or instructions...",
+            required=False,
+            max_length=1500,
+        )
+        self.add_item(self.desc_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        title = self.title_input.value.strip()
+        if not title:
+            await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
+            return
+
+        body = self.desc_input.value.strip() or None
+        self.target_view.staged_title = title
+        self.target_view.staged_body = body
+        self.target_view._rebuild_items()
+        embed = self.target_view._build_embed()
+        await interaction.response.edit_message(embed=embed, view=self.target_view)
