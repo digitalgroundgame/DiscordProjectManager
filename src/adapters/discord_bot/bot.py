@@ -105,7 +105,13 @@ class DggPmBot(commands.Bot):
         self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
     ) -> None:
         """Global fallback error handler for slash commands outside cogs or tree-level errors."""
-        cmd_name = interaction.command.qualified_name if interaction.command else "command"
+        command = interaction.command
+        if command is not None:
+            has_handlers = getattr(command, "_has_any_error_handlers", None)
+            if callable(has_handlers) and has_handlers():
+                return
+
+        cmd_name = command.qualified_name if command else "command"
         await send_interaction_error(
             interaction,
             error,

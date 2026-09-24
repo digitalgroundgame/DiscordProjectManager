@@ -121,8 +121,33 @@ async def test_send_interaction_error_deferred():
     stale_err = StaleVersionError("Conflict")
     msg = await send_interaction_error(interaction, stale_err, "updating task", ephemeral=True)
 
-    interaction.followup.send.assert_awaited_once_with(msg, ephemeral=True)
+    interaction.followup.send.assert_awaited_once_with(msg, ephemeral=True, wait=True)
     assert "already modified" in msg
+
+
+@pytest.mark.asyncio
+async def test_send_interaction_error_deferred_schedules_followup_dismissal(monkeypatch):
+    """Test send_interaction_error schedules toast dismissal on the followup message, not interaction."""
+    from src.adapters.discord_bot.menu_manager import menu_manager
+
+    scheduled_targets = []
+    monkeypatch.setattr(
+        menu_manager, "schedule_toast_dismissal", lambda target, delay=10.0: scheduled_targets.append(target)
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = True
+    followup_msg = MagicMock(spec=discord.WebhookMessage)
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock(return_value=followup_msg)
+
+    stale_err = StaleVersionError("Conflict")
+    msg = await send_interaction_error(interaction, stale_err, "updating task", ephemeral=True)
+
+    interaction.followup.send.assert_awaited_once_with(msg, ephemeral=True, wait=True)
+    assert len(scheduled_targets) == 1
+    assert scheduled_targets[0] is followup_msg
 
 
 @pytest.mark.asyncio
@@ -324,6 +349,7 @@ async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
     interaction = MagicMock(spec=discord.Interaction)
     interaction.command = MagicMock()
     interaction.command.qualified_name = "pm project create"
+    interaction.command._has_any_error_handlers.return_value = False
     interaction.response = MagicMock()
     interaction.response.is_done.return_value = False
     interaction.response.send_message = AsyncMock()
@@ -338,3 +364,104 @@ async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
     assert "Manage Server" in sent_msg
     assert interaction.response.send_message.call_args[1].get("ephemeral") is True
     assert "App command check failure while executing '/pm project create'" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_bot_on_tree_error_suppresses_when_command_has_error_handler(services):
+    """Verify DggPmBot.on_tree_error does not send duplicate response if command has error handlers."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        task_service=services["task"],
+        project_service=services["project"],
+        squad_service=services["squad"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.command = MagicMock()
+    interaction.command.qualified_name = "pm project create"
+    interaction.command._has_any_error_handlers.return_value = True
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    missing_err = discord.app_commands.MissingPermissions(["manage_guild"])
+
+    await bot.on_tree_error(interaction, missing_err)
+
+    interaction.response.send_message.assert_not_called()
+    interaction.followup.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bot_on_tree_error_sends_followup_for_deferred_interaction_without_handlers(services):
+    """Verify DggPmBot.on_tree_error sends followup if deferred and command has no error handlers."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        task_service=services["task"],
+        project_service=services["project"],
+        squad_service=services["squad"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.command = MagicMock()
+    interaction.command.qualified_name = "pm project create"
+    interaction.command._has_any_error_handlers.return_value = False
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = True
+    followup_msg = MagicMock(spec=discord.WebhookMessage)
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock(return_value=followup_msg)
+
+    missing_err = discord.app_commands.MissingPermissions(["manage_guild"])
+
+    await bot.on_tree_error(interaction, missing_err)
+
+    interaction.response.send_message.assert_not_called()
+    interaction.followup.send.assert_awaited_once()
+    assert interaction.followup.send.call_args[1].get("wait") is True
+
+
+@pytest.mark.asyncio
+async def test_command_check_failure_pipeline_dispatches_single_error_response(services):
+    """End-to-end test simulating discord.py tree dispatch: cog handler responds and tree handler suppresses."""
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    bot = DggPmBot(
+        task_service=services["task"],
+        project_service=services["project"],
+        squad_service=services["squad"],
+    )
+    pm_cog = PmCog(
+        bot,
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.command = MagicMock()
+    interaction.command.qualified_name = "pm project create"
+    # Command in cog has error handlers
+    interaction.command._has_any_error_handlers.return_value = True
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.send_message = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    missing_err = discord.app_commands.MissingPermissions(["manage_guild"])
+
+    # Step 1: discord.py invokes command error handler (in cog)
+    await pm_cog.cog_app_command_error(interaction, missing_err)
+    interaction.response.is_done.return_value = True
+
+    # Step 2: discord.py invokes tree on_error fallback
+    await bot.on_tree_error(interaction, missing_err)
+
+    # Verification: only a single response was sent, tree fallback suppressed duplicate
+    interaction.response.send_message.assert_awaited_once()
+    interaction.followup.send.assert_not_called()
