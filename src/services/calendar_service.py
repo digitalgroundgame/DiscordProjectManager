@@ -91,10 +91,13 @@ class CalendarService:
         else:
             webcal_base = f"webcal://{raw_base}"
         webcal_url = f"{webcal_base}{feed_path}"
+        subscribe_url = f"{raw_base}/calendar/{token}/subscribe"
 
         return {
             "https_url": http_url,
             "webcal_url": webcal_url,
+            "subscribe_url": subscribe_url,
             "todo_https_url": f"{http_url}?format=todo",
             "todo_webcal_url": f"{webcal_url}?format=todo",
+            "todo_subscribe_url": f"{subscribe_url}?format=todo",
         }

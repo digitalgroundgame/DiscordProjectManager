@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,3 +110,22 @@ async def get_calendar_feed(
             "Cache-Control": "no-cache, no-store, must-revalidate",
         },
     )
+
+
+@api_app.get("/calendar/{token}/subscribe")
+async def subscribe_calendar_redirect(
+    token: str,
+    format: str = Query(default="event"),
+    session: AsyncSession = Depends(get_db_session),
+) -> RedirectResponse:
+    """Redirects https:// requests to webcal:// for 1-click subscription from clients like Discord."""
+    clean_token = token[:-4] if token.endswith(".ics") else token
+    token_repo = PostgresUserCalendarTokenRepo(session)
+    calendar_service = CalendarService(token_repo, PostgresTaskRepo(session))
+    user_id = await calendar_service.get_user_id_by_token(clean_token)
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="Invalid or expired calendar subscription token.")
+
+    urls = calendar_service.build_feed_urls(clean_token)
+    target = urls["todo_webcal_url"] if format.lower().strip() == "todo" else urls["webcal_url"]
+    return RedirectResponse(url=target, status_code=307)

@@ -144,13 +144,16 @@ def test_calendar_service_build_feed_urls():
     urls = CalendarService.build_feed_urls(token, base_url="http://localhost:8000")
     assert urls["https_url"] == "http://localhost:8000/calendar/xyz123_abc456.ics"
     assert urls["webcal_url"] == "webcal://localhost:8000/calendar/xyz123_abc456.ics"
+    assert urls["subscribe_url"] == "http://localhost:8000/calendar/xyz123_abc456/subscribe"
     assert urls["todo_https_url"] == "http://localhost:8000/calendar/xyz123_abc456.ics?format=todo"
     assert urls["todo_webcal_url"] == "webcal://localhost:8000/calendar/xyz123_abc456.ics?format=todo"
+    assert urls["todo_subscribe_url"] == "http://localhost:8000/calendar/xyz123_abc456/subscribe?format=todo"
 
     # Production https URL
     urls_prod = CalendarService.build_feed_urls(token, base_url="https://pm.example.com")
     assert urls_prod["https_url"] == "https://pm.example.com/calendar/xyz123_abc456.ics"
     assert urls_prod["webcal_url"] == "webcal://pm.example.com/calendar/xyz123_abc456.ics"
+    assert urls_prod["subscribe_url"] == "https://pm.example.com/calendar/xyz123_abc456/subscribe"
 
 
 @pytest.mark.asyncio
@@ -201,7 +204,23 @@ async def test_fastapi_calendar_endpoint(services, db_session):
             assert res_todo.status_code == 200
             assert "BEGIN:VTODO" in res_todo.text
 
-            # 4. Invalid token returns 404
+            # 4. Subscribe redirect endpoint (for Discord 1-click button compatibility)
+            res_sub = await client.get(f"/calendar/{token}/subscribe", follow_redirects=False)
+            assert res_sub.status_code == 307
+            assert res_sub.headers["location"].startswith("webcal://")
+            assert f"/calendar/{token}.ics" in res_sub.headers["location"]
+
+            # 5. Subscribe redirect endpoint with ?format=todo
+            res_sub_todo = await client.get(f"/calendar/{token}/subscribe?format=todo", follow_redirects=False)
+            assert res_sub_todo.status_code == 307
+            assert res_sub_todo.headers["location"].startswith("webcal://")
+            assert "format=todo" in res_sub_todo.headers["location"]
+
+            # 6. Subscribe redirect with invalid token returns 404
+            res_sub_invalid = await client.get("/calendar/unknown-nonexistent-token/subscribe")
+            assert res_sub_invalid.status_code == 404
+
+            # 7. Invalid token returns 404
             res_invalid = await client.get("/calendar/unknown-nonexistent-token.ics")
             assert res_invalid.status_code == 404
             assert "Invalid or expired" in res_invalid.json()["detail"]
@@ -239,6 +258,11 @@ async def test_discord_pm_calendar_command_and_view(services):
     view = kwargs.get("view")
     assert isinstance(view, CalendarFeedView)
     assert len(view.children) == 2  # Subscribe link button + Regenerate button
+
+    # Button URL must use HTTP/HTTPS scheme so Discord API doesn't reject it (webcal is not allowed by Discord)
+    sub_button = view.children[0]
+    assert sub_button.url.startswith(("http://", "https://"))
+    assert "/subscribe" in sub_button.url
 
     # Test clicking regenerate button
     regen_interaction = MagicMock(spec=discord.Interaction)

@@ -19,7 +19,7 @@ def build_calendar_feed_embed(
     urls: dict[str, str],
 ) -> discord.Embed:
     """Builds an informative embed displaying the user's private calendar subscription feed links."""
-    webcal_url = urls["webcal_url"]
+    subscribe_url = urls["subscribe_url"]
     https_url = urls["https_url"]
     todo_https_url = urls["todo_https_url"]
 
@@ -29,8 +29,8 @@ def build_calendar_feed_embed(
             "Synchronize your assigned tasks and due dates directly with your personal calendar "
             "applications (Google Calendar, Apple Calendar, Microsoft Outlook, OmniFocus).\n\n"
             "### 📲 One-Click Subscription (macOS, iOS, Windows)\n"
-            f"Click the **Subscribe in Calendar** button below or open this link:\n"
-            f"> [👉 **One-Click Calendar Subscription**]({webcal_url})\n\n"
+            "Click the **Subscribe in Calendar** button below or open this link:\n"
+            f"> [👉 **One-Click Calendar Subscription**]({subscribe_url})\n\n"
             "### 🌐 Web Calendar Setup (Google Calendar & Outlook Web)\n"
             "To subscribe manually via Google Calendar or Outlook on the web:\n"
             "1. Copy this HTTPS calendar URL:\n"
@@ -38,7 +38,7 @@ def build_calendar_feed_embed(
             "2. In Google Calendar: click **Other calendars (+)** ➔ **From URL** and paste the link.\n"
             "3. In Outlook: click **Add calendar** ➔ **Subscribe from web** and paste the link.\n\n"
             "### 📝 Dedicated Task / To-Do Clients (Apple Reminders, OmniFocus)\n"
-            f"For RFC 5545 `VTODO` format, use:\n"
+            "For RFC 5545 `VTODO` format, use:\n"
             f"```{todo_https_url}```\n\n"
             "> 🔒 **Security Notice**: This feed contains a private, cryptographically secure token. "
             "Do not share this link. If compromised, you can revoke and regenerate it below at any time."
@@ -85,11 +85,11 @@ class CalendarFeedView(BaseView):
         self.clear_items()
         urls = self.calendar_service.build_feed_urls(self.token)
 
-        # One-click subscription button (webcal://)
+        # One-click subscription button (routes through https subscribe endpoint to trigger webcal://)
         sub_button = discord.ui.Button(
             label="Subscribe in Calendar",
             style=discord.ButtonStyle.link,
-            url=urls["webcal_url"],
+            url=urls["subscribe_url"],
             emoji="📅",
         )
         self.add_item(sub_button)
