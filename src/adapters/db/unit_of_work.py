@@ -12,6 +12,7 @@ from src.adapters.db.postgres_repo import (
     PostgresProjectRepo,
     PostgresSquadRepo,
     PostgresTaskRepo,
+    PostgresUserCalendarTokenRepo,
     PostgresUserPreferenceRepo,
 )
 from src.ports.repositories import (
@@ -21,6 +22,7 @@ from src.ports.repositories import (
     IProjectRepo,
     ISquadRepo,
     ITaskRepo,
+    IUserCalendarTokenRepo,
     IUserPreferenceRepo,
 )
 from src.ports.unit_of_work import IUnitOfWork
@@ -41,6 +43,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
         self.guild_lead_roles: IGuildLeadRoleRepository = None  # type: ignore[assignment]
         self.guild_lead_users: IGuildLeadUserRepository = None  # type: ignore[assignment]
+        self.calendar_tokens: IUserCalendarTokenRepo = None  # type: ignore[assignment]
 
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
@@ -55,6 +58,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         self.user_prefs = PostgresUserPreferenceRepo(self._session)
         self.guild_lead_roles = PostgresGuildLeadRoleRepository(self._session)
         self.guild_lead_users = PostgresGuildLeadUserRepository(self._session)
+        self.calendar_tokens = PostgresUserCalendarTokenRepo(self._session)
         return self
 
     async def __aexit__(

@@ -20,6 +20,7 @@ from src.adapters.db.postgres_repo import (  # noqa: E402
     PostgresProjectRepo,
     PostgresSquadRepo,
     PostgresTaskRepo,
+    PostgresUserCalendarTokenRepo,
     PostgresUserPreferenceRepo,
 )
 from src.adapters.db.session import async_session_factory, close_db, init_db  # noqa: E402
@@ -29,6 +30,7 @@ from src.adapters.discord_bot.discord_notifier import DiscordNotifier  # noqa: E
 from src.adapters.discord_bot.gateway_supervisor import start_bot_with_retry  # noqa: E402
 from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.config import settings  # noqa: E402
+from src.services.calendar_service import CalendarService  # noqa: E402
 from src.services.outbox_service import OutboxService  # noqa: E402
 from src.services.project_service import ProjectService  # noqa: E402
 from src.services.squad_service import SquadService  # noqa: E402
@@ -58,6 +60,7 @@ async def run_app() -> None:
     user_pref_repo = PostgresUserPreferenceRepo(async_session_factory)
     guild_lead_role_repo = PostgresGuildLeadRoleRepository(async_session_factory)
     guild_lead_user_repo = PostgresGuildLeadUserRepository(async_session_factory)
+    calendar_token_repo = PostgresUserCalendarTokenRepo(async_session_factory)
 
     uow = SqlAlchemyUnitOfWork(async_session_factory)
     project_service = ProjectService(project_repo)
@@ -65,6 +68,7 @@ async def run_app() -> None:
     outbox_service = OutboxService(outbox_repo)
     task_service = TaskService(task_repo, project_service, outbox_service, uow=uow)
     user_service = UserService(user_pref_repo)
+    calendar_service = CalendarService(calendar_token_repo, task_repo)
 
     # 3. Wire Discord Bot & Notifier
     bot = DggPmBot(
@@ -72,6 +76,7 @@ async def run_app() -> None:
         project_service=project_service,
         squad_service=squad_service,
         user_service=user_service,
+        calendar_service=calendar_service,
         outbox_service=outbox_service,
         guild_lead_role_repo=guild_lead_role_repo,
         guild_lead_user_repo=guild_lead_user_repo,

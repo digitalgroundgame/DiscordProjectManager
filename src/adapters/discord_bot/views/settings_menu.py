@@ -10,6 +10,7 @@ from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import NotificationPreference
 
 if TYPE_CHECKING:
+    from src.services.calendar_service import CalendarService
     from src.services.project_service import ProjectService
     from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
@@ -57,6 +58,7 @@ class UserSettingsView(BaseView):
         project_service: ProjectService | None = None,
         squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
+        calendar_service: CalendarService | None = None,
         initial_interaction: discord.Interaction | None = None,
         return_to: str = "dashboard",
     ):
@@ -66,6 +68,7 @@ class UserSettingsView(BaseView):
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
+        self.calendar_service = calendar_service
         self.return_to = return_to
         self._initial_interaction = initial_interaction
 
@@ -129,7 +132,7 @@ class UserSettingsView(BaseView):
         none_btn.callback = lambda i: self._on_pref_clicked(i, NotificationPreference.NONE)
         self.add_item(none_btn)
 
-        # Row 1: Test & Back to Hub
+        # Row 1: Test, Calendar Feed & Back to Hub
         test_btn = discord.ui.Button(
             label="Test Notification",
             style=discord.ButtonStyle.primary,
@@ -137,6 +140,16 @@ class UserSettingsView(BaseView):
         )
         test_btn.callback = self._on_test_clicked
         self.add_item(test_btn)
+
+        if self.calendar_service:
+            cal_btn = discord.ui.Button(
+                label="Calendar Feed",
+                style=discord.ButtonStyle.secondary,
+                emoji="📅",
+                row=1,
+            )
+            cal_btn.callback = self._on_calendar_clicked
+            self.add_item(cal_btn)
 
         if self.project_service and self.squad_service and self.task_service:
             back_btn = discord.ui.Button(
@@ -146,6 +159,27 @@ class UserSettingsView(BaseView):
             )
             back_btn.callback = self._on_hub_clicked
             self.add_item(back_btn)
+
+    async def _on_calendar_clicked(self, interaction: discord.Interaction) -> None:
+        if not self.calendar_service:
+            await interaction.response.send_message("❌ Calendar service is not available.", ephemeral=True)
+            return
+
+        from src.adapters.discord_bot.views.calendar_feed_view import CalendarFeedView, build_calendar_feed_embed
+
+        try:
+            token = await self.calendar_service.get_or_create_token(interaction.user.id)
+            urls = self.calendar_service.build_feed_urls(token)
+            embed = build_calendar_feed_embed(interaction.user, urls)
+            view = CalendarFeedView(
+                calendar_service=self.calendar_service,
+                user_discord_id=interaction.user.id,
+                token=token,
+                initial_interaction=interaction,
+            )
+            await interaction.response.edit_message(content=None, embed=embed, view=view)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "retrieving calendar feed", logger, ephemeral=True)
 
     async def _on_test_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:

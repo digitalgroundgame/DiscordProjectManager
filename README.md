@@ -33,6 +33,7 @@ All comprehensive documentation, guides, and technical references are organized 
 - **100% Discord-Native Squads**: Live Discord server roles serve as the single source of truth for squad rosters with 3-tier self-healing lead protection.
 - **Dedicated Task Threads**: Automatic forum post and thread provisioning with optimistic concurrency control (CAS) preventing lost update races.
 - **Human-Friendly Short IDs**: Sequential project-prefixed IDs (e.g. `INF-1`, `PRJ-42`) with channel-scoped autocomplete.
+- **RFC 5545 Calendar Feeds**: Live personalized subscription feeds (`.ics` / `webcal://`) syncing assigned tasks directly to Google Calendar, Apple Calendar, and Outlook.
 - **Transactional Outbox**: Guaranteed notification delivery with rate-limit-aware backoff and `FOR UPDATE SKIP LOCKED` background workers.
 
 ---

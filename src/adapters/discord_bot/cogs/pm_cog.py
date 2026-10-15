@@ -11,6 +11,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.views.calendar_feed_view import (
+    CalendarFeedView,
+    build_calendar_feed_embed,
+)
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
 from src.adapters.discord_bot.views.hub_menu import build_hub_welcome_embed
 from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
@@ -32,6 +36,7 @@ from src.adapters.discord_bot.workspace_protocol import (
 from src.domain.enums import NotificationPreference, PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.services.auth_service import AuthService
+from src.services.calendar_service import CalendarService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
 from src.services.task_service import TaskService, parse_prerequisite_short_ids
@@ -70,6 +75,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         task_service: TaskService | None = None,
         auth_service: AuthService | None = None,
         user_service: UserService | None = None,
+        calendar_service: CalendarService | None = None,
         outbox_service: OutboxService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
@@ -82,6 +88,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             AuthService(project_service, self.squad_service) if project_service else None
         )
         self.user_service = user_service
+        self.calendar_service = calendar_service or getattr(bot, "calendar_service", None)
         self.outbox_service = outbox_service or getattr(bot, "outbox_service", None)
         from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
         from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
@@ -263,6 +270,9 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 "**Core Slash Commands (`/pm`):**\n"
                 "• `/pm menu`: Open the Project Management Control Center\n"
                 "• `/pm settings` or `/pm notifications`: Configure personal notification delivery\n"
+                "• `/pm menu`: Open the Project Management Control Center\n"
+                "• `/pm settings` or `/pm notifications`: Configure personal notification delivery\n"
+                "• `/pm calendar`: Get personal RFC 5545 calendar feed URL (Google, Apple, Outlook)\n"
                 "• `/pm task create [project] [title] [depends_on]`: Create a task & thread\n"
                 "• `/pm task list [project] [user] [status]`: View paginated active tasks\n"
                 "• `/pm task assign [task] [assignee]`: Assign a task to a member\n"
@@ -313,6 +323,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     project_service=self.project_service,
                     squad_service=self.squad_service,
                     task_service=self.task_service,
+                    calendar_service=self.calendar_service,
                 )
                 embed = build_settings_embed(interaction.user, current_pref)
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -367,6 +378,32 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
     )
     async def notification(self, interaction: discord.Interaction, notify_preference: str | None = None) -> None:
         await self._handle_settings(interaction, notify_preference=notify_preference)
+
+    @app_commands.command(
+        name="calendar",
+        description="Get your private RFC 5545 calendar subscription feed URL for Google Calendar, Apple, Outlook.",
+    )
+    async def calendar(self, interaction: discord.Interaction) -> None:
+        """Personal iCalendar subscription feed link generator & management."""
+        if not self.calendar_service:
+            await interaction.response.send_message(
+                "❌ Calendar subscription service is currently unavailable.", ephemeral=True
+            )
+            return
+
+        try:
+            token = await self.calendar_service.get_or_create_token(interaction.user.id)
+            urls = self.calendar_service.build_feed_urls(token)
+            embed = build_calendar_feed_embed(interaction.user, urls)
+            view = CalendarFeedView(
+                calendar_service=self.calendar_service,
+                user_discord_id=interaction.user.id,
+                token=token,
+                initial_interaction=interaction,
+            )
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "retrieving calendar feed", logger, ephemeral=True)
 
     @app_commands.command(
         name="post-hub",

@@ -1,19 +1,30 @@
-from fastapi import Depends, FastAPI, HTTPException
+from collections.abc import AsyncGenerator
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import __version__
+from src.adapters.db.postgres_repo import PostgresTaskRepo, PostgresUserCalendarTokenRepo
 from src.adapters.db.session import get_session
 from src.adapters.db.tables import OutboxEventTable, ProjectTable, TaskTable
 from src.config import settings
+from src.services.calendar_service import CalendarService
 
 api_app = FastAPI(
     title="dgg-pm Service API",
-    description="Health and metrics service for Discord-Native Task Management Platform",
+    description="Health, metrics, and calendar subscription feeds for Discord-Native Task Management Platform",
     version=__version__,
 )
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def get_db_session() -> AsyncGenerator[AsyncSession]:
+    """Dependency yielding an active database session."""
+    async with get_session() as session:
+        yield session
 
 
 def require_metrics_permission(
@@ -64,3 +75,37 @@ async def metrics() -> dict:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@api_app.get("/calendar/{token}.ics")
+@api_app.get("/calendar/{token}")
+async def get_calendar_feed(
+    token: str,
+    format: str = Query(default="event"),
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Personalized RFC 5545 iCalendar subscription feed for assigned tasks."""
+    format_lower = format.lower().strip()
+    if format_lower not in ("event", "todo", "both"):
+        format_lower = "event"
+
+    token_repo = PostgresUserCalendarTokenRepo(session)
+    task_repo = PostgresTaskRepo(session)
+    calendar_service = CalendarService(token_repo, task_repo)
+
+    clean_token = token[:-4] if token.endswith(".ics") else token
+    ics_content = await calendar_service.get_calendar_feed(clean_token, format_type=format_lower)
+    if ics_content is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Invalid or expired calendar subscription token.",
+        )
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": 'inline; filename="tasks.ics"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )

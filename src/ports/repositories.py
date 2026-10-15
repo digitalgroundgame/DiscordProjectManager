@@ -12,6 +12,7 @@ from src.domain.models import (
     SquadMember,
     Task,
     TaskHistory,
+    UserCalendarToken,
     UserPreference,
 )
 
@@ -84,6 +85,13 @@ class ITaskRepo(ABC):
         offset: int = 0,
     ) -> tuple[list[Task], int]:
         """Lists tasks with filters. Returns (tasks, total_count)."""
+
+    @abstractmethod
+    async def list_user_calendar_tasks(
+        self,
+        user_discord_id: int,
+    ) -> list[Task]:
+        """Fetches active, non-archived tasks assigned to user across all non-archived projects."""
 
     @abstractmethod
     async def search_for_autocomplete(
@@ -327,3 +335,21 @@ class IGuildLeadUserRepository(ABC):
     @abstractmethod
     async def list_lead_user_ids(self, guild_id: int) -> set[int]:
         """Lists all authorized Team Lead Discord user IDs for the guild."""
+
+
+class IUserCalendarTokenRepo(ABC):
+    @abstractmethod
+    async def get_by_user_id(self, user_discord_id: int) -> UserCalendarToken | None:
+        """Fetches calendar token record for a user."""
+
+    @abstractmethod
+    async def get_by_token(self, token: str) -> UserCalendarToken | None:
+        """Fetches calendar token record by token string."""
+
+    @abstractmethod
+    async def create_or_regenerate_token(self, user_discord_id: int, token: str) -> UserCalendarToken:
+        """Creates or regenerates a calendar token for a user."""
+
+    @abstractmethod
+    async def revoke_token(self, user_discord_id: int) -> bool:
+        """Revokes (deletes) a calendar token for a user. Returns True if revoked, False if not found."""

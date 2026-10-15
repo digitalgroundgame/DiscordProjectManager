@@ -70,6 +70,7 @@ async def repos(db_session: AsyncSession):
     from src.adapters.db.postgres_repo import (
         PostgresGuildLeadRoleRepository,
         PostgresGuildLeadUserRepository,
+        PostgresUserCalendarTokenRepo,
     )
 
     task_repo = PostgresTaskRepo(db_session)
@@ -79,6 +80,7 @@ async def repos(db_session: AsyncSession):
     user_repo = PostgresUserPreferenceRepo(db_session)
     guild_lead_role_repo = PostgresGuildLeadRoleRepository(db_session)
     guild_lead_user_repo = PostgresGuildLeadUserRepository(db_session)
+    calendar_token_repo = PostgresUserCalendarTokenRepo(db_session)
     return {
         "task": task_repo,
         "project": project_repo,
@@ -87,11 +89,14 @@ async def repos(db_session: AsyncSession):
         "user": user_repo,
         "guild_lead_role": guild_lead_role_repo,
         "guild_lead_user": guild_lead_user_repo,
+        "calendar_token": calendar_token_repo,
     }
 
 
 @pytest_asyncio.fixture(scope="function")
 async def services(repos, async_engine: AsyncEngine):
+    from src.services.calendar_service import CalendarService
+
     session_factory = async_sessionmaker(
         bind=async_engine,
         class_=AsyncSession,
@@ -103,11 +108,13 @@ async def services(repos, async_engine: AsyncEngine):
     outbox_service = OutboxService(repos["outbox"])
     task_service = TaskService(repos["task"], project_service, outbox_service, uow=uow)
     user_service = UserService(repos["user"])
+    calendar_service = CalendarService(repos["calendar_token"], repos["task"])
     return {
         "project": project_service,
         "squad": squad_service,
         "outbox": outbox_service,
         "task": task_service,
         "user": user_service,
+        "calendar": calendar_service,
         "uow": uow,
     }

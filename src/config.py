@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     DEBUG: bool = False
 
+    # Public Base URL for calendar feeds, webhooks, and reverse-proxy setups
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+
     # If set, /metrics requires `Authorization: Bearer <API_METRICS_TOKEN>`.
     # When empty, /metrics is left open for local/dev use.
     API_METRICS_TOKEN: str = ""

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         IProjectRepo,
         ISquadRepo,
         ITaskRepo,
+        IUserCalendarTokenRepo,
         IUserPreferenceRepo,
     )
 
@@ -25,6 +26,7 @@ class IUnitOfWork(ABC):
     user_prefs: IUserPreferenceRepo
     guild_lead_roles: IGuildLeadRoleRepository
     guild_lead_users: IGuildLeadUserRepository
+    calendar_tokens: IUserCalendarTokenRepo
 
     @abstractmethod
     async def __aenter__(self) -> IUnitOfWork:

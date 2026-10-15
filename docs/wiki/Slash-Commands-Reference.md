@@ -10,6 +10,7 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 | :--- | :--- | :--- | :--- |
 | **`/pm menu`** | None | Opens the interactive Master Project Management Control Hub. | `@everyone` |
 | **`/pm help`** | None | Displays the command guide and documentation overview. | `@everyone` |
+| **`/pm calendar`** | None | Generates and manages your private RFC 5545 calendar subscription feed URL for Google Calendar, Apple Calendar, and Outlook. | `@everyone` |
 | **`/pm settings`** | `notify_preference` (optional: `dm`, `channel`, `both`, `silent`) | Configures personal notification delivery preferences. | `@everyone` |
 | **`/pm setup-hub`** | `channel` (optional) | Posts and pins an interactive PM Control Center in a Forum or Text Channel. | `Manage Server` |
 | **`/pm tree`** | `project_name` (required)<br>`orientation` (optional: `lr`, `tb`) | Renders the visual Civ-style tech tree dependency DAG graph. | `@everyone` |

@@ -158,3 +158,10 @@ class GuildLeadRole(DomainModel):
     guild_id: int
     discord_role_id: int
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class UserCalendarToken(DomainModel):
+    user_discord_id: int
+    token: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

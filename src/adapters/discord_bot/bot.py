@@ -20,6 +20,7 @@ from src.config import settings
 from src.domain.models import Task
 from src.ports.repositories import IGuildLeadRoleRepository, IGuildLeadUserRepository
 from src.services.auth_service import AuthService
+from src.services.calendar_service import CalendarService
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -42,6 +43,7 @@ class DggPmBot(commands.Bot):
         guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
         guild_lead_user_repo: IGuildLeadUserRepository | None = None,
         auth_service: AuthService | None = None,
+        calendar_service: CalendarService | None = None,
     ):
         intents = discord.Intents.default()
         intents.guilds = True
@@ -57,6 +59,7 @@ class DggPmBot(commands.Bot):
         self.project_service = project_service
         self.squad_service = squad_service
         self.user_service = user_service
+        self.calendar_service = calendar_service
         self.outbox_service = outbox_service or (
             getattr(task_service, "outbox_service", None) if task_service else None
         )
@@ -133,6 +136,7 @@ class DggPmBot(commands.Bot):
                 task_service=self.task_service,
                 auth_service=self.auth_service,
                 user_service=self.user_service,
+                calendar_service=self.calendar_service,
                 outbox_service=self.outbox_service,
                 workspace=self.workspace,
                 project_workspace=self.project_workspace,
