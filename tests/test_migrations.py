@@ -10,9 +10,10 @@ from src.adapters.db.tables import Base
 
 
 def test_alembic_configuration_validity():
-    """Validates that alembic.ini is discovered and loads the migration directory."""
+    """Validates that alembic.ini is discovered and loads the migration directory without hijacking root logger."""
     cfg = get_alembic_config()
     assert Path(cfg.config_file_name).is_file()
+    assert cfg.attributes.get("configure_logger") is False
 
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()

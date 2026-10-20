@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,9 +14,14 @@ from src.config import settings
 # access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Interpret the config file for Python logging only when running standalone (CLI)
+# and when root logging hasn't already been configured by the application.
+if (
+    config.config_file_name is not None
+    and config.attributes.get("configure_logger", True)
+    and not logging.getLogger().handlers
+):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Model metadata for autogenerate support
 target_metadata = Base.metadata

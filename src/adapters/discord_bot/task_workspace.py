@@ -54,6 +54,14 @@ async def _maybe_await(res: Any) -> Any:
     return res
 
 
+def _is_thread_archived_error(exc: Exception) -> bool:
+    """Returns True if the exception is Discord HTTP 400 error code 50083 (Thread is archived)."""
+    if getattr(exc, "code", None) == 50083:
+        return True
+    msg = str(exc)
+    return "50083" in msg or "Thread is archived" in msg
+
+
 class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
     """Deep implementation adapter managing Task Discord presence and thread lifecycles."""
 
@@ -254,6 +262,10 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             except Exception:
                 pass
 
+        was_archived = bool(getattr(thread, "archived", False))
+        is_done = task.status == TaskStatus.COMPLETED or task.is_archived
+        target_archived = is_done if sync_archive else was_archived
+
         # 1. Sync Starter Message Embed / Card
         if sync_starter_card and task.discord_message_id:
             try:
@@ -275,15 +287,30 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                         current_assignee_id=task.assignee_discord_id,
                         current_watchers=task.watchers,
                     )
-                    keep_archived = task.status == TaskStatus.COMPLETED or task.is_archived
-                    async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
-                        if isinstance(thread.parent, discord.ForumChannel):
-                            thread_content = build_thread_workspace_content(task)
-                            await _maybe_await(
-                                root_msg.edit(content=thread_content, embed=fresh_embed, view=fresh_view)
-                            )
-                        else:
-                            await _maybe_await(root_msg.edit(embed=fresh_embed, view=fresh_view))
+                    # Unarchive if needed, but defer re-archiving until Step 2 finishes
+                    # so we don't re-archive right before editing thread tags or title.
+                    async with unarchive_thread_if_needed(thread, keep_archived=False):
+                        try:
+                            if isinstance(thread.parent, discord.ForumChannel):
+                                thread_content = build_thread_workspace_content(task)
+                                await _maybe_await(
+                                    root_msg.edit(content=thread_content, embed=fresh_embed, view=fresh_view)
+                                )
+                            else:
+                                await _maybe_await(root_msg.edit(embed=fresh_embed, view=fresh_view))
+                        except Exception as edit_err:
+                            if _is_thread_archived_error(edit_err) and hasattr(thread, "edit"):
+                                await _maybe_await(thread.edit(archived=False))
+                                thread.archived = False
+                                if isinstance(thread.parent, discord.ForumChannel):
+                                    thread_content = build_thread_workspace_content(task)
+                                    await _maybe_await(
+                                        root_msg.edit(content=thread_content, embed=fresh_embed, view=fresh_view)
+                                    )
+                                else:
+                                    await _maybe_await(root_msg.edit(embed=fresh_embed, view=fresh_view))
+                            else:
+                                raise
             except Exception as e:
                 logger.debug("Failed to sync starter embed for task %s: %s", task.short_id, e)
 
@@ -294,13 +321,18 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
         cooldown_remaining = 0.0
 
         if sync_tags and isinstance(thread.parent, discord.ForumChannel):
+            raw_existing = getattr(thread, "applied_tags", None)
+            existing_tags = list(raw_existing) if isinstance(raw_existing, (list, tuple)) else None
             tags_to_apply = resolve_forum_tags(
                 thread.parent,
                 task=task,
                 project_name=resolved_proj_name,
-                existing_tags=getattr(thread, "applied_tags", None),
+                existing_tags=existing_tags,
             )
-            edit_kwargs["applied_tags"] = tags_to_apply
+            existing_ids = [getattr(t, "id", t) for t in existing_tags] if existing_tags is not None else None
+            target_ids = [getattr(t, "id", t) for t in tags_to_apply]
+            if existing_ids != target_ids:
+                edit_kwargs["applied_tags"] = tags_to_apply
 
         expected_name = None
         if sync_title:
@@ -316,46 +348,100 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                     title_deferred = rename_res.deferred
                     cooldown_remaining = rename_res.cooldown_remaining_seconds
 
-        if sync_archive:
-            is_done = task.status == TaskStatus.COMPLETED or task.is_archived
-            if is_done and not getattr(thread, "archived", False):
-                edit_kwargs["archived"] = True
-            elif not is_done and getattr(thread, "archived", False):
-                edit_kwargs["archived"] = False
+        currently_archived = bool(getattr(thread, "archived", False))
+        has_non_archive_edits = bool(edit_kwargs)
+
+        if target_archived and currently_archived and has_non_archive_edits and hasattr(thread, "edit"):
+            # Discord forbids modifying tags or name on an archived thread (error 50083).
+            # Unarchive first so the subsequent edit can apply tags/name and re-archive.
+            try:
+                await _maybe_await(thread.edit(archived=False))
+                thread.archived = False
+                currently_archived = False
+            except Exception as unarch_err:
+                logger.debug("Failed to unarchive thread %s before state edit: %s", thread.id, unarch_err)
+
+        if target_archived and not currently_archived:
+            edit_kwargs["archived"] = True
+        elif not target_archived and currently_archived:
+            edit_kwargs["archived"] = False
 
         if edit_kwargs and hasattr(thread, "edit"):
             try:
                 await _maybe_await(thread.edit(**edit_kwargs))
+                if "archived" in edit_kwargs:
+                    thread.archived = bool(edit_kwargs["archived"])
+                if "applied_tags" in edit_kwargs:
+                    try:
+                        thread.applied_tags = edit_kwargs["applied_tags"]
+                    except Exception:
+                        pass
                 if "name" in edit_kwargs:
                     self.rename_limiter.record_rename(thread.id)
                     title_renamed = True
             except Exception as e:
-                status = getattr(e, "status", None)
-                retry_after = getattr(e, "retry_after", None)
-                if "name" in edit_kwargs and (status == 429 or retry_after is not None):
-                    backoff = float(retry_after) if retry_after else 600.0
-                    self.rename_limiter.record_rate_limit(thread.id, backoff)
-                    rename_res = await self.rename_limiter.request_rename(thread, edit_kwargs["name"])
-                    title_deferred = rename_res.deferred
-                    cooldown_remaining = rename_res.cooldown_remaining_seconds
-
-                    remaining_kwargs = {k: v for k, v in edit_kwargs.items() if k != "name"}
-                    if remaining_kwargs:
+                if _is_thread_archived_error(e):
+                    # Thread was already archived on Discord despite local cache state.
+                    if list(edit_kwargs.keys()) == ["archived"] and edit_kwargs.get("archived") is True:
+                        thread.archived = True
+                    else:
                         try:
-                            await _maybe_await(thread.edit(**remaining_kwargs))
-                        except Exception as rem_err:
+                            await _maybe_await(thread.edit(archived=False))
+                            thread.archived = False
+                            if target_archived:
+                                edit_kwargs["archived"] = True
+                            await _maybe_await(thread.edit(**edit_kwargs))
+                            if "archived" in edit_kwargs:
+                                thread.archived = bool(edit_kwargs["archived"])
+                            if "applied_tags" in edit_kwargs:
+                                try:
+                                    thread.applied_tags = edit_kwargs["applied_tags"]
+                                except Exception:
+                                    pass
+                            if "name" in edit_kwargs:
+                                self.rename_limiter.record_rename(thread.id)
+                                title_renamed = True
+                        except Exception as retry_err:
                             logger.warning(
-                                "Failed to edit thread attributes without name for task %s: %s",
+                                "Failed to edit thread state after unarchiving for task %s (%s): %s",
                                 task.short_id,
-                                rem_err,
+                                task.discord_thread_id,
+                                retry_err,
                             )
                 else:
-                    logger.warning(
-                        "Failed to edit thread state for task %s (%s): %s",
-                        task.short_id,
-                        task.discord_thread_id,
-                        e,
-                    )
+                    status = getattr(e, "status", None)
+                    retry_after = getattr(e, "retry_after", None)
+                    if "name" in edit_kwargs and (status == 429 or retry_after is not None):
+                        backoff = float(retry_after) if retry_after else 600.0
+                        self.rename_limiter.record_rate_limit(thread.id, backoff)
+                        rename_res = await self.rename_limiter.request_rename(thread, edit_kwargs["name"])
+                        title_deferred = rename_res.deferred
+                        cooldown_remaining = rename_res.cooldown_remaining_seconds
+
+                        remaining_kwargs = {k: v for k, v in edit_kwargs.items() if k != "name"}
+                        if remaining_kwargs:
+                            try:
+                                await _maybe_await(thread.edit(**remaining_kwargs))
+                                if "archived" in remaining_kwargs:
+                                    thread.archived = bool(remaining_kwargs["archived"])
+                                if "applied_tags" in remaining_kwargs:
+                                    try:
+                                        thread.applied_tags = remaining_kwargs["applied_tags"]
+                                    except Exception:
+                                        pass
+                            except Exception as rem_err:
+                                logger.warning(
+                                    "Failed to edit thread attributes without name for task %s: %s",
+                                    task.short_id,
+                                    rem_err,
+                                )
+                    else:
+                        logger.warning(
+                            "Failed to edit thread state for task %s (%s): %s",
+                            task.short_id,
+                            task.discord_thread_id,
+                            e,
+                        )
 
         return SyncWorkspaceResult(
             success=True,
@@ -455,6 +541,7 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             ):
                 try:
                     await _maybe_await(thread.edit(archived=True))
+                    thread.archived = True
                 except Exception:
                     pass
             return msg

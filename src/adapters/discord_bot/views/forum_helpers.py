@@ -45,7 +45,7 @@ async def unarchive_thread_if_needed(
     try:
         yield
     finally:
-        if was_archived and keep_archived:
+        if was_archived and keep_archived and not getattr(thread, "archived", False):
             try:
                 if hasattr(thread, "edit"):
                     edit_res = thread.edit(archived=True)

@@ -42,6 +42,7 @@ def get_alembic_config() -> Config:
     ini_path = project_root / "alembic.ini"
     cfg = Config(str(ini_path))
     cfg.set_main_option("script_location", str(project_root / "src" / "adapters" / "db" / "migrations"))
+    cfg.attributes["configure_logger"] = False
     return cfg
 
 

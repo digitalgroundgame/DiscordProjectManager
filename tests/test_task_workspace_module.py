@@ -554,3 +554,106 @@ async def test_save_task_controls_batched(services):
     assert updated.due_at is not None
     assert updated.due_at.replace(tzinfo=UTC) == due
     assert updated.watchers == [4004, 5005]
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_already_archived_thread_defers_rearchive_and_skips_unchanged_tags(services):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 11111
+    tag_done = _create_mock_forum_tag(30, "Completed")
+    mock_forum.available_tags = [tag_done]
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 888999
+    mock_thread.name = "[AUD-10] Completed Audit"
+    mock_thread.parent = mock_forum
+    mock_thread.archived = True
+    mock_thread.applied_tags = []
+    mock_thread.edit = AsyncMock()
+
+    mock_starter_msg = MagicMock(spec=discord.Message)
+    mock_starter_msg.edit = AsyncMock()
+    mock_thread.starter_message = mock_starter_msg
+
+    bot.get_channel = MagicMock(return_value=mock_thread)
+
+    task = Task(
+        id=uuid4(),
+        guild_id=999,
+        short_id="AUD-10",
+        title="Completed Audit",
+        status=TaskStatus.COMPLETED,
+        priority=PriorityLevel.LOW,
+        creator_discord_id=1001,
+        discord_thread_id=888999,
+        discord_message_id=777111,
+    )
+
+    # 1. Syncing an already-archived thread with starter card + tag update:
+    # Should unarchive once, edit starter message, then apply tags + archived=True in a single final edit.
+    res = await adapter.sync_workspace(task, sync_tags=True, sync_archive=True, sync_starter_card=True)
+    assert res.success is True
+    assert mock_thread.edit.await_count == 2
+    assert mock_thread.edit.await_args_list[0].kwargs == {"archived": False}
+    assert mock_thread.edit.await_args_list[1].kwargs == {"applied_tags": [tag_done], "archived": True}
+    assert mock_thread.archived is True
+    assert mock_thread.applied_tags == [tag_done]
+
+    # 2. Subsequent sync with sync_starter_card=False when tags and archive state already match:
+    # Should make zero redundant PATCH calls.
+    mock_thread.edit.reset_mock()
+    res2 = await adapter.sync_workspace(task, sync_tags=True, sync_archive=True, sync_starter_card=False)
+    assert res2.success is True
+    mock_thread.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_recovers_from_50083_thread_is_archived_stale_cache(services, caplog):
+    proj_srv = services["project"]
+    task_srv = services["task"]
+
+    bot = MagicMock(spec=discord.Client)
+    adapter = DiscordTaskWorkspaceAdapter(bot, task_service=task_srv, project_service=proj_srv)
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 11111
+    tag_done = _create_mock_forum_tag(30, "Completed")
+    mock_forum.available_tags = [tag_done]
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 888999
+    mock_thread.name = "[AUD-12] Stale Cache Task"
+    mock_thread.parent = mock_forum
+    # Local cache says archived=False, but Discord actually has it archived
+    mock_thread.archived = False
+    mock_thread.applied_tags = []
+
+    archived_err = Exception("400 Bad Request (error code: 50083): Thread is archived")
+    archived_err.code = 50083
+    mock_thread.edit = AsyncMock(side_effect=[archived_err, None, None])
+
+    bot.get_channel = MagicMock(return_value=mock_thread)
+
+    task = Task(
+        id=uuid4(),
+        guild_id=999,
+        short_id="AUD-12",
+        title="Stale Cache Task",
+        status=TaskStatus.COMPLETED,
+        priority=PriorityLevel.LOW,
+        creator_discord_id=1001,
+        discord_thread_id=888999,
+    )
+
+    res = await adapter.sync_workspace(task, sync_tags=True, sync_archive=True, sync_starter_card=False)
+    assert res.success is True
+    assert mock_thread.edit.await_count == 3
+    assert mock_thread.edit.await_args_list[1].kwargs == {"archived": False}
+    assert mock_thread.edit.await_args_list[2].kwargs == {"applied_tags": [tag_done], "archived": True}
+    assert not any("Failed to edit thread state" in r.message for r in caplog.records)

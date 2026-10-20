@@ -294,7 +294,7 @@ class DiscordNotifier(INotificationDispatcher):
             msg = f"**Status Updated:** `{old_status}` ➔ **`{new_status}`** by <@{actor_id}>"
             if notes:
                 msg += f"\n> {notes}"
-            await self.workspace.post_activity(task, content=msg)
+            await self.workspace.post_activity(task, content=msg, rearchive_if_completed=False)
             await self.workspace.sync_workspace(task)
             chan = self.bot.get_channel(thread_id)
             if isinstance(chan, discord.Thread):
@@ -654,7 +654,7 @@ class DiscordNotifier(INotificationDispatcher):
         task = self._reconstruct_task(payload)
 
         if self.workspace and thread_id:
-            await self.workspace.post_activity(task, content=thread_msg)
+            await self.workspace.post_activity(task, content=thread_msg, rearchive_if_completed=False)
             await self.workspace.sync_workspace(task)
             chan = self.bot.get_channel(thread_id)
             if isinstance(chan, discord.Thread):
