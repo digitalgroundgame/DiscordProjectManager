@@ -50,42 +50,88 @@ class DiscordNotifier(INotificationDispatcher):
             project_id = uuid4()
         short_id = payload.get("short_id", "")
         title = payload.get("title", "")
+        body = payload.get("body")
         status_val = payload.get("new_status") or payload.get("status") or "notStarted"
         status = TaskStatus(status_val) if status_val in TaskStatus._value2member_map_ else TaskStatus.NOT_STARTED
         prio_val = payload.get("new_priority") or payload.get("priority") or "normal"
         priority = PriorityLevel(prio_val) if prio_val in PriorityLevel._value2member_map_ else PriorityLevel.NORMAL
         creator_id = int(payload.get("creator_discord_id") or payload.get("actor_discord_id") or 0)
-        assignee_id = payload.get("assignee_discord_id") or payload.get("new_assignee_id")
+        if "assignee_discord_id" in payload:
+            assignee_id = payload.get("assignee_discord_id")
+        else:
+            assignee_id = payload.get("new_assignee_id")
         thread_id = payload.get("discord_thread_id")
         msg_id = payload.get("discord_message_id")
         watchers = payload.get("watchers") or []
+        version = int(payload["version"]) if payload.get("version") is not None else 1
 
-        due_at = None
-        due_raw = payload.get("due_at")
-        if due_raw:
-            if isinstance(due_raw, datetime):
-                due_at = due_raw
-            elif isinstance(due_raw, str):
+        def _parse_dt(raw: Any) -> datetime | None:
+            if not raw:
+                return None
+            if isinstance(raw, datetime):
+                return raw
+            if isinstance(raw, str):
                 try:
-                    due_at = datetime.fromisoformat(due_raw)
+                    return datetime.fromisoformat(raw)
                 except (ValueError, TypeError):
-                    due_at = None
+                    return None
+            return None
 
-        return Task(
-            id=task_id,
-            guild_id=guild_id,
-            project_id=project_id,
-            short_id=short_id,
-            title=title,
-            status=status,
-            priority=priority,
-            creator_discord_id=creator_id,
-            assignee_discord_id=assignee_id,
-            watchers=watchers,
-            discord_thread_id=thread_id,
-            discord_message_id=msg_id,
-            due_at=due_at,
-        )
+        due_at = _parse_dt(payload.get("due_at"))
+        created_at = _parse_dt(payload.get("created_at"))
+        completed_at = _parse_dt(payload.get("completed_at"))
+
+        task_kwargs: dict[str, Any] = {
+            "id": task_id,
+            "guild_id": guild_id,
+            "project_id": project_id,
+            "short_id": short_id,
+            "version": version,
+            "title": title,
+            "body": body,
+            "status": status,
+            "priority": priority,
+            "creator_discord_id": creator_id,
+            "assignee_discord_id": assignee_id,
+            "watchers": watchers,
+            "discord_thread_id": thread_id,
+            "discord_message_id": msg_id,
+            "due_at": due_at,
+            "completed_at": completed_at,
+        }
+        if created_at is not None:
+            task_kwargs["created_at"] = created_at
+
+        return Task(**task_kwargs)
+
+    async def _resolve_task(self, payload: dict) -> Task:
+        """Resolves the authoritative Task from task_service when available, falling back to payload reconstruction."""
+        if self.task_service:
+            try:
+                task = None
+                task_id_raw = payload.get("task_id")
+                if task_id_raw:
+                    try:
+                        task_uuid = UUID(str(task_id_raw))
+                        res = await self.task_service.get_by_id(task_uuid)
+                        if isinstance(res, Task):
+                            task = res
+                    except (ValueError, TypeError):
+                        task = None
+
+                guild_id = payload.get("guild_id")
+                short_id = payload.get("short_id")
+                if not task and guild_id and short_id:
+                    res = await self.task_service.get_by_short_id(guild_id, short_id)
+                    if isinstance(res, Task):
+                        task = res
+
+                if task is not None:
+                    return task
+            except Exception as e:
+                logger.debug("Could not resolve authoritative task from task_service: %s", e)
+
+        return self._reconstruct_task(payload)
 
     async def _get_pref(self, guild_id: int | None, user_id: int) -> NotificationPreference:
         if not self.user_service or not guild_id:
@@ -288,7 +334,9 @@ class DiscordNotifier(INotificationDispatcher):
         assignee_id = payload.get("assignee_discord_id")
 
         thread: discord.Thread | None = None
-        task = self._reconstruct_task(payload)
+        task = await self._resolve_task(payload)
+        if not thread_id and task.discord_thread_id:
+            thread_id = task.discord_thread_id
 
         if self.workspace and thread_id:
             msg = f"**Status Updated:** `{old_status}` ➔ **`{new_status}`** by <@{actor_id}>"
@@ -438,7 +486,9 @@ class DiscordNotifier(INotificationDispatcher):
         assignee_id = payload.get("assignee_discord_id")
 
         thread: discord.Thread | None = None
-        task = self._reconstruct_task(payload)
+        task = await self._resolve_task(payload)
+        if not thread_id and task.discord_thread_id:
+            thread_id = task.discord_thread_id
 
         if self.workspace and thread_id:
             await self.workspace.post_activity(task, content=f"**Note added by <@{actor_id}>:**\n> {note}")
@@ -651,7 +701,9 @@ class DiscordNotifier(INotificationDispatcher):
                 recipients.add(assignee_id)
 
         thread: discord.Thread | None = None
-        task = self._reconstruct_task(payload)
+        task = await self._resolve_task(payload)
+        if not thread_id and task.discord_thread_id:
+            thread_id = task.discord_thread_id
 
         if self.workspace and thread_id:
             await self.workspace.post_activity(task, content=thread_msg, rearchive_if_completed=False)

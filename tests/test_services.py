@@ -329,7 +329,9 @@ async def test_squad_service_leads_lifecycle(services):
 
 @pytest.mark.asyncio
 async def test_task_service_update_outbox_events(services, db_session):
-    """Verify update_priority, update_assignee, and update_details enqueue TASK_UPDATED outbox events."""
+    """Verify update_priority, update_assignee, and update_details enqueue TASK_UPDATED events preserving due_at."""
+    from datetime import UTC, datetime, timedelta
+
     from sqlalchemy import select
 
     from src.adapters.db.tables import OutboxEventTable
@@ -338,14 +340,17 @@ async def test_task_service_update_outbox_events(services, db_session):
     proj_srv = services["project"]
     task_srv = services["task"]
     guild_id = 888777666555
+    due_target = datetime.now(UTC) + timedelta(days=5)
 
     project = await proj_srv.create_project(guild_id=guild_id, name="Outbox Test Proj", prefix="OTP")
     task = await task_srv.create_task(
         guild_id=guild_id,
         title="Original Title",
+        body="Original Body",
         creator_discord_id=1001,
         project_id=project.id,
         priority=PriorityLevel.LOW,
+        due_at=due_target,
         watchers=[5001],
     )
 
@@ -355,7 +360,7 @@ async def test_task_service_update_outbox_events(services, db_session):
     # 2. Update assignee
     await task_srv.update_assignee(task.id, new_assignee_id=2001, actor_discord_id=1001)
 
-    # 3. Update details
+    # 3. Update details (editing title/watchers without touching due_at)
     await task_srv.update_details(
         task_id=task.id,
         actor_discord_id=1001,
@@ -370,6 +375,17 @@ async def test_task_service_update_outbox_events(services, db_session):
     types = [e.event_type for e in events]
     assert EventType.TASK_CREATED.value in types
     assert types.count(EventType.TASK_UPDATED.value) == 3
+
+    # Check payload structure for all lifecycle events: due_at and body must never be dropped
+    lifecycle_events = [
+        e for e in events if e.event_type in (EventType.TASK_CREATED.value, EventType.TASK_UPDATED.value)
+    ]
+    assert len(lifecycle_events) == 4
+    for evt in lifecycle_events:
+        assert evt.payload.get("due_at") is not None
+        assert datetime.fromisoformat(evt.payload["due_at"]).replace(tzinfo=UTC) == due_target
+        assert evt.payload.get("body") == "Original Body"
+        assert evt.payload.get("project_id") == str(project.id)
 
     # Check payload structure for details update
     details_evt = next(e for e in events if e.idempotency_key.startswith(f"task_details:{task.id}"))

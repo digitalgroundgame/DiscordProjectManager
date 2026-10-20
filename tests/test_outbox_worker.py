@@ -1407,3 +1407,82 @@ async def test_task_updated_notification_delivers_jump_url_and_link_button(servi
         assert view is not None
         assert view.children[0].url == expected_url
         assert view.children[0].label == "Open Task"
+
+
+@pytest.mark.asyncio
+async def test_task_updated_and_status_changed_preserve_due_at_during_workspace_sync(services, repos, db_session):
+    """Regression test: editing a task or changing its status must not clear due_at on workspace sync."""
+    from datetime import timedelta
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.enums import PriorityLevel, TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    outbox_repo = repos["outbox"]
+    guild_id = 777666555444
+    due_target = datetime.now(UTC) + timedelta(days=3)
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Due Date Preservation", prefix="DUE")
+    task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Task with Deadline",
+        body="Important description body",
+        creator_discord_id=1001,
+        project_id=project.id,
+        priority=PriorityLevel.HIGH,
+        due_at=due_target,
+    )
+    await task_srv.update_discord_message_ids(task.id, discord_message_id=222333, discord_thread_id=111222)
+
+    # Edit task title without modifying due_at
+    await task_srv.update_details(
+        task_id=task.id,
+        actor_discord_id=1001,
+        title="Task with Deadline (Edited)",
+    )
+
+    # Change task status
+    await task_srv.update_status(
+        task_id=task.id,
+        new_status=TaskStatus.IN_PROGRESS,
+        expected_version=2,
+        actor_discord_id=1001,
+    )
+
+    bot = MagicMock()
+    bot.task_service = None
+    bot.get_channel = MagicMock(return_value=None)
+    workspace = MagicMock()
+    workspace.post_activity = AsyncMock(return_value=True)
+    workspace.sync_workspace = AsyncMock(return_value=True)
+
+    # 1. Test with task_service attached (DB resolution) + payload fallback
+    notifier = DiscordNotifier(bot, user_service=user_srv, task_service=task_srv, workspace=workspace)
+
+    pending = await outbox_repo.fetch_pending_batch(limit=20)
+    update_evt = next(e for e in pending if e.idempotency_key.startswith(f"task_details:{task.id}"))
+    status_evt = next(e for e in pending if e.idempotency_key.startswith(f"task_status:{task.id}"))
+
+    await notifier.dispatch_event(update_evt)
+    assert workspace.sync_workspace.await_count == 1
+    synced_task_1 = workspace.sync_workspace.call_args.args[0]
+    assert synced_task_1.due_at is not None
+    assert abs((synced_task_1.due_at.replace(tzinfo=UTC) - due_target).total_seconds()) < 1
+    assert synced_task_1.body == "Important description body"
+    assert synced_task_1.priority == PriorityLevel.HIGH
+
+    workspace.sync_workspace.reset_mock()
+
+    # 2. Test fallback reconstruction when task_service is None (purely from outbox payload)
+    notifier_no_srv = DiscordNotifier(bot, user_service=user_srv, task_service=None, workspace=workspace)
+    await notifier_no_srv.dispatch_event(status_evt)
+    assert workspace.sync_workspace.await_count == 1
+    synced_task_2 = workspace.sync_workspace.call_args.args[0]
+    assert synced_task_2.due_at is not None
+    assert abs((synced_task_2.due_at.replace(tzinfo=UTC) - due_target).total_seconds()) < 1
+    assert synced_task_2.body == "Important description body"
+    assert synced_task_2.priority == PriorityLevel.HIGH
+    assert synced_task_2.status == TaskStatus.IN_PROGRESS
