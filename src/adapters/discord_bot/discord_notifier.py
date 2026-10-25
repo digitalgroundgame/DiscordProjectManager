@@ -202,7 +202,9 @@ class DiscordNotifier(INotificationDispatcher):
 
     async def dispatch_event(self, event: OutboxEvent) -> None:
         p = event.payload
-        logger.info("Dispatching outbox event %s of type %s", event.id, event.event_type)
+        short_id = p.get("short_id")
+        short_id_tag = f" [{short_id}]" if short_id else ""
+        logger.info("Dispatching outbox event %s%s of type %s", event.id, short_id_tag, event.event_type)
 
         if event.event_type == EventType.TASK_DUE_REMINDER:
             await self._handle_due_reminder(p)

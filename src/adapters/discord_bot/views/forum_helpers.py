@@ -39,6 +39,7 @@ async def unarchive_thread_if_needed(
             if hasattr(edit_res, "__await__"):
                 await edit_res
             thread.archived = False
+            logger.debug("Temporarily unarchived thread %s for safe workspace mutation", getattr(thread, "id", None))
     except Exception as e:
         logger.debug("Failed to unarchive thread %s: %s", getattr(thread, "id", None), e)
 
@@ -52,6 +53,7 @@ async def unarchive_thread_if_needed(
                     if hasattr(edit_res, "__await__"):
                         await edit_res
                     thread.archived = True
+                    logger.debug("Restored archived state for thread %s", getattr(thread, "id", None))
             except Exception as e:
                 logger.debug("Failed to restore archived state for thread %s: %s", getattr(thread, "id", None), e)
 

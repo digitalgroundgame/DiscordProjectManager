@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
@@ -62,6 +63,7 @@ class DggPmBot(commands.Bot):
         self.guild_lead_role_repo = guild_lead_role_repo
         self.guild_lead_user_repo = guild_lead_user_repo
         self._background_tasks: set[asyncio.Task] = set()
+        self._disconnected_at: float | None = None
         if auth_service is not None:
             self.auth_service = auth_service
         elif project_service and self.squad_service:
@@ -228,11 +230,71 @@ class DggPmBot(commands.Bot):
                 lines.append(f"• `{group}` ({len(subs)}): {', '.join(f'`{s}`' for s in subs)}")
         return "\n".join(lines)
 
-    async def on_ready(self) -> None:
+    async def on_connect(self) -> None:
+        """Invoked when the client has successfully established a connection to the Discord Gateway."""
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "pending"
+        )
         logger.info(
-            "Logged in as %s (ID: %s) across %d guilds",
+            "Connected to Discord Gateway (shard: %s, initial latency: %s)",
+            getattr(self, "shard_id", None),
+            lat_str,
+        )
+
+    async def on_disconnect(self) -> None:
+        """Invoked when the client has disconnected from the Discord Gateway."""
+        self._disconnected_at = time.monotonic()
+        logger.warning("Disconnected from Discord Gateway. Waiting for automatic reconnect/resume...")
+
+    async def on_resumed(self) -> None:
+        """Invoked when the client has successfully resumed an existing gateway session."""
+        downtime_str = ""
+        if self._disconnected_at is not None:
+            downtime = time.monotonic() - self._disconnected_at
+            self._disconnected_at = None
+            downtime_str = f", downtime: {downtime:.2f}s"
+        else:
+            self._disconnected_at = None
+
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "unknown"
+        )
+        session_id = getattr(getattr(self, "ws", None), "session_id", "unknown")
+        logger.info(
+            "Discord Gateway session resumed successfully (session ID: %s, shard: %s%s, gateway latency: %s)",
+            session_id,
+            getattr(self, "shard_id", None),
+            downtime_str,
+            lat_str,
+        )
+        if self.outbox_service:
+            task = asyncio.create_task(
+                self._reconcile_failed_outbox_events(),
+                name="Reconcile-Failed-Outbox-On-Resume",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+    async def on_ready(self) -> None:
+        self._disconnected_at = None
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "unknown"
+        )
+        logger.info(
+            "Logged in as %s (ID: %s, shard: %s, gateway latency: %s) across %d guilds",
             self.user,
             self.user.id if self.user else "N/A",
+            getattr(self, "shard_id", None),
+            lat_str,
             len(self.guilds),
         )
         await self.change_presence(

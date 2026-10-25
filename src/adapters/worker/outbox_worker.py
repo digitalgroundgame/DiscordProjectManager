@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 
 from src.config import settings
@@ -83,11 +84,14 @@ class OutboxWorker:
             return 0
 
         logger.info("Processing outbox batch of %d events.", len(events))
+        start_time = time.monotonic()
         for event in events:
             if not self._running:
                 break
             await self._process_single_event(event)
 
+        elapsed = time.monotonic() - start_time
+        logger.info("Completed outbox batch of %d event(s) in %.2fs.", len(events), elapsed)
         return len(events)
 
     async def _process_single_event(self, event) -> None:

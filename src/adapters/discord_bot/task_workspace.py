@@ -131,6 +131,22 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
 
         return None
 
+    async def _get_dependencies_safe(self, task_id: UUID) -> tuple[list[Task] | None, list[Task] | None]:
+        """Safely retrieves prerequisites and dependents for a task if supported by task_service."""
+        if not self.task_service or not hasattr(self.task_service, "get_task_dependencies"):
+            return None, None
+        try:
+            res = await _maybe_await(self.task_service.get_task_dependencies(task_id))
+            if isinstance(res, tuple) and len(res) == 2:
+                prereqs, dependents = res
+                return (
+                    prereqs if isinstance(prereqs, list) and prereqs else None,
+                    dependents if isinstance(dependents, list) and dependents else None,
+                )
+        except Exception:
+            pass
+        return None, None
+
     async def provision_workspace(
         self,
         task: Task,
@@ -153,6 +169,7 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             thread_name = thread_name[:97] + "..."
 
         project_name = project.name if project else None
+        prereqs, dependents = await self._get_dependencies_safe(task.id)
         view = TaskActionView(
             task_id=task.id,
             current_status=task.status,
@@ -168,7 +185,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                 task=task,
                 project_name=project_name,
             )
-            embed = build_task_embed(task, project_name=project_name)
+            embed = build_task_embed(
+                task,
+                project_name=project_name,
+                prerequisites=prereqs,
+                dependents=dependents,
+            )
             content = build_thread_workspace_content(task)
 
             create_kwargs = {
@@ -204,7 +226,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             )
 
         elif isinstance(channel, discord.TextChannel):
-            embed = build_task_embed(task, project_name=project_name)
+            embed = build_task_embed(
+                task,
+                project_name=project_name,
+                prerequisites=prereqs,
+                dependents=dependents,
+            )
             msg = await _maybe_await(channel.send(embed=embed, view=view))
             thread = await _maybe_await(msg.create_thread(name=thread_name, auto_archive_duration=10080))
 
@@ -278,7 +305,13 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                     root_msg = await _maybe_await(thread.parent.fetch_message(task.discord_message_id))
 
                 if root_msg and hasattr(root_msg, "edit"):
-                    fresh_embed = build_task_embed(task, project_name=resolved_proj_name)
+                    prereqs, dependents = await self._get_dependencies_safe(task.id)
+                    fresh_embed = build_task_embed(
+                        task,
+                        project_name=resolved_proj_name,
+                        prerequisites=prereqs,
+                        dependents=dependents,
+                    )
                     fresh_view = TaskActionView(
                         task_id=task.id,
                         current_status=task.status,
@@ -367,6 +400,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             edit_kwargs["archived"] = False
 
         if edit_kwargs and hasattr(thread, "edit"):
+            logger.debug(
+                "Syncing thread workspace attributes for task [%s] (thread %s): %s",
+                task.short_id,
+                thread.id,
+                list(edit_kwargs.keys()),
+            )
             try:
                 await _maybe_await(thread.edit(**edit_kwargs))
                 if "archived" in edit_kwargs:
@@ -413,6 +452,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                     retry_after = getattr(e, "retry_after", None)
                     if "name" in edit_kwargs and (status == 429 or retry_after is not None):
                         backoff = float(retry_after) if retry_after else 600.0
+                        logger.warning(
+                            "Discord HTTP 429 encountered during thread rename for task [%s] (%s). Backing off for %.1fs",
+                            task.short_id,
+                            thread.id,
+                            backoff,
+                        )
                         self.rename_limiter.record_rate_limit(thread.id, backoff)
                         rename_res = await self.rename_limiter.request_rename(thread, edit_kwargs["name"])
                         title_deferred = rename_res.deferred
@@ -435,6 +480,14 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                                     task.short_id,
                                     rem_err,
                                 )
+                    elif status == 429 or retry_after is not None:
+                        logger.warning(
+                            "Discord HTTP 429 rate limit on editing thread attributes %s for task [%s] (%s). Retry after: %ss",
+                            list(edit_kwargs.keys()),
+                            task.short_id,
+                            task.discord_thread_id,
+                            retry_after,
+                        )
                     else:
                         logger.warning(
                             "Failed to edit thread state for task %s (%s): %s",
@@ -468,6 +521,7 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             except Exception:
                 pass
 
+        prereqs, dependents = await self._get_dependencies_safe(task.id)
         new_view = TaskActionView(
             task_id=task.id,
             current_status=task.status,
@@ -484,7 +538,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
             if isinstance(interaction.channel, discord.Thread):
                 content = build_thread_workspace_content(task)
                 if isinstance(interaction.channel.parent, discord.ForumChannel):
-                    new_embed = build_task_embed(task, project_name=resolved_proj_name)
+                    new_embed = build_task_embed(
+                        task,
+                        project_name=resolved_proj_name,
+                        prerequisites=prereqs,
+                        dependents=dependents,
+                    )
                     if hasattr(interaction, "response") and not interaction.response.is_done():
                         await _maybe_await(
                             interaction.response.edit_message(content=content, embed=new_embed, view=new_view)
@@ -495,7 +554,12 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                             interaction.response.edit_message(content=content, embed=None, view=new_view)
                         )
             else:
-                new_embed = build_task_embed(task, project_name=resolved_proj_name)
+                new_embed = build_task_embed(
+                    task,
+                    project_name=resolved_proj_name,
+                    prerequisites=prereqs,
+                    dependents=dependents,
+                )
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await _maybe_await(interaction.response.edit_message(embed=new_embed, view=new_view))
 

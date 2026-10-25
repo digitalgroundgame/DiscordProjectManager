@@ -1769,6 +1769,50 @@ async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
     mock_outbox_svc.reclaim_failed_events.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_bot_gateway_lifecycle_logging_on_connect_disconnect_resumed(services):
+    """Verify DggPmBot gateway lifecycle hooks (on_connect, on_disconnect, on_resumed) track downtime and reconcile outbox."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=1)
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    # 1. on_connect
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_connect()
+        mock_logger.info.assert_called()
+        assert "Connected to Discord Gateway" in mock_logger.info.call_args[0][0]
+
+    # 2. on_disconnect
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_disconnect()
+        assert bot._disconnected_at is not None
+        mock_logger.warning.assert_called()
+        assert "Disconnected from Discord Gateway" in mock_logger.warning.call_args[0][0]
+
+    # 3. on_resumed
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_resumed()
+        assert bot._disconnected_at is None
+        mock_logger.info.assert_called()
+        assert "Discord Gateway session resumed" in mock_logger.info.call_args[0][0]
+        # Yield control to allow background asyncio reconciliation task to execute
+        await asyncio.sleep(0.01)
+
+    mock_outbox_svc.reclaim_failed_events.assert_awaited()
+
+
 def test_task_status_command_parameters():
     """Verify that task-status command supports optional 'force' parameter."""
     cmd = PmCog.task_status
