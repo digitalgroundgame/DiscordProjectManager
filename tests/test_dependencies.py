@@ -447,4 +447,3 @@ async def test_task_details_modal_and_draft_view_prerequisites(services):
     await draft_view._on_priority_selected(interaction_prio)
     edited_embed = interaction_prio.response.edit_message.call_args.kwargs["embed"]
     assert f"• **Prerequisites**: `[{prereq_task.short_id}]`" in edited_embed.description
-

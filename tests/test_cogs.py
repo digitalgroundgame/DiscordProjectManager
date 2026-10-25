@@ -1771,7 +1771,8 @@ async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
 
 @pytest.mark.asyncio
 async def test_bot_gateway_lifecycle_logging_on_connect_disconnect_resumed(services):
-    """Verify DggPmBot gateway lifecycle hooks (on_connect, on_disconnect, on_resumed) track downtime and reconcile outbox."""
+    """Verify DggPmBot gateway lifecycle hooks (on_connect, on_disconnect, on_resumed) track downtime and
+    reconcile outbox."""
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
 
