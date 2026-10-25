@@ -69,6 +69,7 @@ class EventType(StrEnum):
     TASK_NOTE_ADDED = "TASK_NOTE_ADDED"
     TASK_DUE_REMINDER = "TASK_DUE_REMINDER"
     TASK_UPDATED = "TASK_UPDATED"
+    TASK_UNBLOCKED = "TASK_UNBLOCKED"
 
 
 class TaskHistoryAction(StrEnum):

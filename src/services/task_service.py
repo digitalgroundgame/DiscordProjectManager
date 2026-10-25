@@ -322,6 +322,60 @@ class TaskService:
                 outbox_repo=uow.outbox,
             )
 
+            # Evaluate downstream dependents if this task just transitioned to COMPLETED
+            if new_status == TaskStatus.COMPLETED and old_status != TaskStatus.COMPLETED:
+                dependent_ids = await uow.tasks.get_dependent_ids(task_id)
+                for dep_id in dependent_ids:
+                    dep_task = await uow.tasks.get_by_id(dep_id)
+                    if not dep_task or dep_task.is_archived or dep_task.status != TaskStatus.NOT_STARTED:
+                        continue
+
+                    prereq_ids = await uow.tasks.get_prerequisite_ids(dep_id)
+                    if not prereq_ids:
+                        continue
+
+                    prereq_tasks: list[Task] = []
+                    all_completed = True
+                    for pid in prereq_ids:
+                        if pid == task_id:
+                            prereq_tasks.append(updated_task)
+                        else:
+                            pt = await uow.tasks.get_by_id(pid)
+                            if not pt or pt.status != TaskStatus.COMPLETED:
+                                all_completed = False
+                                break
+                            prereq_tasks.append(pt)
+
+                    if all_completed:
+                        await self.outbox_service.enqueue_event(
+                            event_type=EventType.TASK_UNBLOCKED,
+                            idempotency_key=f"task_unblocked:{dep_task.id}:by:{task_id}:v{updated_task.version}",
+                            payload={
+                                "task_id": str(dep_task.id),
+                                "short_id": dep_task.short_id,
+                                "title": dep_task.title,
+                                "body": dep_task.body,
+                                "status": dep_task.status.value,
+                                "priority": dep_task.priority.value,
+                                "guild_id": dep_task.guild_id,
+                                "project_id": str(dep_task.project_id) if dep_task.project_id else None,
+                                "actor_discord_id": actor_discord_id,
+                                "creator_discord_id": dep_task.creator_discord_id,
+                                "assignee_discord_id": dep_task.assignee_discord_id,
+                                "watchers": dep_task.watchers,
+                                "due_at": dep_task.due_at.isoformat() if dep_task.due_at else None,
+                                "version": dep_task.version,
+                                "created_at": dep_task.created_at.isoformat() if dep_task.created_at else None,
+                                "discord_thread_id": dep_task.discord_thread_id,
+                                "discord_message_id": dep_task.discord_message_id,
+                                "unblocked_by_task_id": str(task_id),
+                                "unblocked_by_short_id": updated_task.short_id,
+                                "unblocked_by_title": updated_task.title,
+                                "prerequisites": [{"short_id": pt.short_id, "title": pt.title} for pt in prereq_tasks],
+                            },
+                            outbox_repo=uow.outbox,
+                        )
+
         return updated_task
 
     async def add_note(

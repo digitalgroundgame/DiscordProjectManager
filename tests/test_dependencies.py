@@ -447,3 +447,149 @@ async def test_task_details_modal_and_draft_view_prerequisites(services):
     await draft_view._on_priority_selected(interaction_prio)
     edited_embed = interaction_prio.response.edit_message.call_args.kwargs["embed"]
     assert f"• **Prerequisites**: `[{prereq_task.short_id}]`" in edited_embed.description
+
+
+@pytest.mark.asyncio
+async def test_completing_prerequisite_enqueues_task_unblocked_only_when_all_satisfied(services, db_session):
+    """Verify TASK_UNBLOCKED is enqueued only when 100% of prerequisites for a NOT_STARTED task are completed."""
+    from sqlalchemy import select
+
+    from src.adapters.db.tables import OutboxEventTable
+    from src.domain.enums import EventType
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877680
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Unblock Engine", prefix="UNB")
+    prereq_1 = await task_srv.create_task(
+        guild_id=guild_id, title="Backend API", creator_discord_id=1001, project_id=project.id
+    )
+    prereq_2 = await task_srv.create_task(
+        guild_id=guild_id, title="Auth Service", creator_discord_id=1001, project_id=project.id
+    )
+    dependent_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Frontend UI",
+        creator_discord_id=1001,
+        assignee_discord_id=2002,
+        watchers=[3003],
+        project_id=project.id,
+        prerequisite_short_ids=[prereq_1.short_id, prereq_2.short_id],
+    )
+    await task_srv.update_discord_message_ids(dependent_task.id, discord_message_id=888999, discord_thread_id=777888)
+
+    # 1. Completing prereq_1 (50% satisfied) must NOT enqueue TASK_UNBLOCKED
+    prereq_1 = await task_srv.update_status(
+        prereq_1.id, TaskStatus.COMPLETED, expected_version=prereq_1.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.event_type == EventType.TASK_UNBLOCKED.value)
+    rows = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows) == 0
+
+    # 2. Moving prereq_2 to IN_PROGRESS must NOT enqueue TASK_UNBLOCKED
+    prereq_2 = await task_srv.update_status(
+        prereq_2.id, TaskStatus.IN_PROGRESS, expected_version=prereq_2.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    rows = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows) == 0
+
+    # 3. Completing prereq_2 (100% satisfied) MUST enqueue TASK_UNBLOCKED for dependent_task
+    prereq_2 = await task_srv.update_status(
+        prereq_2.id, TaskStatus.COMPLETED, expected_version=prereq_2.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    rows = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows) == 1
+
+    evt = rows[0]
+    assert evt.payload["task_id"] == str(dependent_task.id)
+    assert evt.payload["short_id"] == dependent_task.short_id
+    assert evt.payload["title"] == "Frontend UI"
+    assert evt.payload["assignee_discord_id"] == 2002
+    assert evt.payload["watchers"] == [3003]
+    assert evt.payload["discord_thread_id"] == 777888
+    assert evt.payload["discord_message_id"] == 888999
+    assert evt.payload["unblocked_by_short_id"] == prereq_2.short_id
+    prereq_short_ids = {p["short_id"] for p in evt.payload["prerequisites"]}
+    assert prereq_short_ids == {prereq_1.short_id, prereq_2.short_id}
+
+
+@pytest.mark.asyncio
+async def test_reopening_task_or_non_not_started_dependent_does_not_trigger_false_unblock(services, db_session):
+    """Verify reopening a prerequisite or completing a blocker for an already started/completed/archived task
+    does not emit false positives."""
+    from sqlalchemy import select
+
+    from src.adapters.db.tables import OutboxEventTable
+    from src.domain.enums import EventType
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877681
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Reopen Guard", prefix="RPN")
+    prereq = await task_srv.create_task(
+        guild_id=guild_id, title="Core Schema", creator_discord_id=1001, project_id=project.id
+    )
+    dep_in_prog = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Already Started Task",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[prereq.short_id],
+    )
+    dep_archived = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Archived Dependent",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[prereq.short_id],
+    )
+    dep_ready = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Waiting Dependent",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[prereq.short_id],
+    )
+
+    # Set dep_in_prog to IN_PROGRESS and archive dep_archived before prereq completes
+    await task_srv.update_status(
+        dep_in_prog.id, TaskStatus.IN_PROGRESS, expected_version=dep_in_prog.version, actor_discord_id=1001
+    )
+    await task_srv.archive_task(dep_archived.id, actor_discord_id=1001)
+
+    # Complete prereq -> only dep_ready (NOT_STARTED & unarchived) should emit TASK_UNBLOCKED
+    prereq = await task_srv.update_status(
+        prereq.id, TaskStatus.COMPLETED, expected_version=prereq.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    stmt = select(OutboxEventTable).where(OutboxEventTable.event_type == EventType.TASK_UNBLOCKED.value)
+    rows = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].payload["task_id"] == str(dep_ready.id)
+
+    # Reopen prereq (COMPLETED -> IN_PROGRESS) and (IN_PROGRESS -> NOT_STARTED) -> must NOT emit any new TASK_UNBLOCKED
+    prereq = await task_srv.update_status(
+        prereq.id, TaskStatus.IN_PROGRESS, expected_version=prereq.version, actor_discord_id=1001
+    )
+    prereq = await task_srv.update_status(
+        prereq.id, TaskStatus.NOT_STARTED, expected_version=prereq.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    rows_after_reopen = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows_after_reopen) == 1
+
+    # Reopening dep_ready itself (if it had been completed and reopened) does not emit TASK_UNBLOCKED
+    dep_ready = await task_srv.update_status(
+        dep_ready.id, TaskStatus.COMPLETED, expected_version=dep_ready.version, actor_discord_id=1001
+    )
+    dep_ready = await task_srv.update_status(
+        dep_ready.id, TaskStatus.NOT_STARTED, expected_version=dep_ready.version, actor_discord_id=1001
+    )
+    db_session.expire_all()
+    rows_after_dep_reopen = (await db_session.execute(stmt)).scalars().all()
+    assert len(rows_after_dep_reopen) == 1

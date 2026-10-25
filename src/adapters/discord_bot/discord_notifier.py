@@ -216,6 +216,8 @@ class DiscordNotifier(INotificationDispatcher):
             await self._handle_task_created(p)
         elif event.event_type == EventType.TASK_UPDATED:
             await self._handle_task_updated(p)
+        elif event.event_type == EventType.TASK_UNBLOCKED:
+            await self._handle_task_unblocked(p)
 
     async def _handle_due_reminder(self, payload: dict) -> None:
         assignee_id = payload.get("assignee_discord_id")
@@ -789,5 +791,100 @@ class DiscordNotifier(INotificationDispatcher):
                     embed=embed,
                     thread=thread,
                     mention_text=user_mention,
+                    view=view,
+                )
+
+    async def _handle_task_unblocked(self, payload: dict) -> None:
+        short_id = payload.get("short_id", "")
+        title = payload.get("title", "")
+        guild_id = payload.get("guild_id")
+        actor_id = payload.get("actor_discord_id")
+        thread_id = payload.get("discord_thread_id")
+        message_id = payload.get("discord_message_id")
+        watchers: list[int] = payload.get("watchers", [])
+        assignee_id = payload.get("assignee_discord_id")
+        prereqs_raw: list[dict[str, Any]] = payload.get("prerequisites") or []
+        unblocked_by_short_id = payload.get("unblocked_by_short_id", "")
+        unblocked_by_title = payload.get("unblocked_by_title", "")
+
+        thread_msg = (
+            f"🎉 All prerequisite blockers for **[{short_id}] {title}** have completed! "
+            f"You are now clear to begin work."
+        )
+
+        thread: discord.Thread | None = None
+        task = await self._resolve_task(payload)
+        if not guild_id and task.guild_id:
+            guild_id = task.guild_id
+        if not thread_id and task.discord_thread_id:
+            thread_id = task.discord_thread_id
+        if not message_id and task.discord_message_id:
+            message_id = task.discord_message_id
+
+        if self.workspace and thread_id:
+            await self.workspace.post_activity(task, content=thread_msg, rearchive_if_completed=False)
+            await self.workspace.sync_workspace(task)
+            chan = self.bot.get_channel(thread_id)
+            if isinstance(chan, discord.Thread):
+                thread = chan
+        elif thread_id:
+            try:
+                chan = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+                if isinstance(chan, discord.Thread):
+                    thread = chan
+                    await thread.send(thread_msg)
+            except Exception as e:
+                logger.warning("Failed to post unblock activity to thread %s: %s", thread_id, e)
+
+        recipients = set(watchers)
+        if assignee_id:
+            recipients.add(assignee_id)
+        if actor_id:
+            recipients.discard(actor_id)
+
+        if recipients:
+            jump_url = resolve_task_jump_url(guild_id, thread_id, message_id)
+            view = TaskLinkButtonView(jump_url) if jump_url else None
+
+            desc = (
+                f"🎉 All prerequisite blockers for **[{short_id}] {title}** have completed! "
+                f"You are now clear to begin work."
+            )
+
+            embed = discord.Embed(
+                title=f"Task Unblocked: [{short_id}] {title}",
+                url=jump_url,
+                description=desc,
+                color=discord.Color.green(),
+            )
+            embed.set_footer(text=NOTIFICATION_FOOTER)
+
+            if prereqs_raw:
+                prereq_lines = [
+                    f"• 🟢 **[{p.get('short_id')}]** {p.get('title')}" for p in prereqs_raw if p.get("short_id")
+                ]
+                if prereq_lines:
+                    embed.add_field(
+                        name="Resolved Prerequisites",
+                        value="\n".join(prereq_lines),
+                        inline=False,
+                    )
+            elif unblocked_by_short_id:
+                embed.add_field(
+                    name="Resolved Prerequisite",
+                    value=f"• 🟢 **[{unblocked_by_short_id}]** {unblocked_by_title}".strip(),
+                    inline=False,
+                )
+
+            for uid in recipients:
+                await self._notify_user(
+                    guild_id=guild_id,
+                    user_id=uid,
+                    embed=embed,
+                    thread=thread,
+                    mention_text=(
+                        f"<@{uid}> 🎉 All prerequisite blockers for **[{short_id}] {title}** "
+                        f"have completed! You are now clear to begin work."
+                    ),
                     view=view,
                 )
