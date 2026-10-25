@@ -17,6 +17,7 @@ from src.adapters.discord_bot.views.task_embed import (
 )
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Project, Task
+from src.services.task_service import parse_inline_dependencies
 from src.utils.date_parser import get_due_date_from_preset, parse_natural_date
 
 if TYPE_CHECKING:
@@ -127,6 +128,7 @@ class TaskCustomDueModal(BaseModal):
             due_at=self.target_view.due_at,
             watchers=self.target_view.watchers,
             target_channel=self.target_view.target_channel or interaction.channel,
+            prerequisite_short_ids=getattr(self.target_view, "prerequisite_short_ids", None),
         )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -215,50 +217,55 @@ class TaskDetailsModal(BaseModal):
         )
         self.add_item(self.desc_input)
 
+    async def _send_modal_error(self, interaction: discord.Interaction, error_text: str) -> None:
+        from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+
+        if self.draft_view:
+            self.draft_view._rebuild_items()
+            embed = build_task_draft_embed(
+                title=self.draft_view.title,
+                description=self.draft_view.description,
+                project=self.draft_view.project,
+                assignee_id=self.draft_view.assignee_id,
+                priority=self.draft_view.priority,
+                due_at=self.draft_view.due_at,
+                watchers=self.draft_view.watchers,
+                target_channel=self.draft_view.target_channel or interaction.channel,
+                prerequisite_short_ids=self.draft_view.prerequisite_short_ids,
+            )
+            await interaction.response.edit_message(embed=embed, view=self.draft_view)
+            toast = await interaction.followup.send(
+                format_toast_message(error_text, delay=10.0),
+                ephemeral=True,
+                wait=True,
+            )
+            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+        elif self.parent_view:
+            if hasattr(self.parent_view, "_rebuild_items"):
+                self.parent_view._rebuild_items()
+            embed = self.parent_view.build_embed() if hasattr(self.parent_view, "build_embed") else None
+            if embed:
+                await interaction.response.edit_message(embed=embed, view=self.parent_view)
+            else:
+                await interaction.response.edit_message(view=self.parent_view)
+            toast = await interaction.followup.send(
+                format_toast_message(error_text, delay=10.0),
+                ephemeral=True,
+                wait=True,
+            )
+            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+        else:
+            await interaction.response.send_message(error_text, ephemeral=True)
+            menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
+
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
         if not title:
-            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
-
-            if self.draft_view:
-                self.draft_view._rebuild_items()
-                embed = build_task_draft_embed(
-                    title=self.draft_view.title,
-                    description=self.draft_view.description,
-                    project=self.draft_view.project,
-                    assignee_id=self.draft_view.assignee_id,
-                    priority=self.draft_view.priority,
-                    due_at=self.draft_view.due_at,
-                    watchers=self.draft_view.watchers,
-                    target_channel=self.draft_view.target_channel or interaction.channel,
-                )
-                await interaction.response.edit_message(embed=embed, view=self.draft_view)
-                toast = await interaction.followup.send(
-                    format_toast_message("❌ Task title cannot be empty.", delay=10.0),
-                    ephemeral=True,
-                    wait=True,
-                )
-                menu_manager.schedule_toast_dismissal(toast, delay=10.0)
-            elif self.parent_view:
-                if hasattr(self.parent_view, "_rebuild_items"):
-                    self.parent_view._rebuild_items()
-                embed = self.parent_view.build_embed() if hasattr(self.parent_view, "build_embed") else None
-                if embed:
-                    await interaction.response.edit_message(embed=embed, view=self.parent_view)
-                else:
-                    await interaction.response.edit_message(view=self.parent_view)
-                toast = await interaction.followup.send(
-                    format_toast_message("❌ Task title cannot be empty.", delay=10.0),
-                    ephemeral=True,
-                    wait=True,
-                )
-                menu_manager.schedule_toast_dismissal(toast, delay=10.0)
-            else:
-                await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
-                menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
+            await self._send_modal_error(interaction, "❌ Task title cannot be empty.")
             return
 
         desc = self.desc_input.value.strip() or None
+        inline_prereqs = parse_inline_dependencies(desc) if desc else []
 
         if self.parent_interaction:
             try:
@@ -271,6 +278,8 @@ class TaskDetailsModal(BaseModal):
             # Updating existing draft
             self.draft_view.title = title
             self.draft_view.description = desc
+            if inline_prereqs and not self.draft_view.prerequisite_short_ids:
+                self.draft_view.prerequisite_short_ids = inline_prereqs
             self.draft_view._rebuild_items()
             embed = build_task_draft_embed(
                 title=self.draft_view.title,
@@ -281,6 +290,7 @@ class TaskDetailsModal(BaseModal):
                 due_at=self.draft_view.due_at,
                 watchers=self.draft_view.watchers,
                 target_channel=self.draft_view.target_channel or interaction.channel,
+                prerequisite_short_ids=self.draft_view.prerequisite_short_ids,
             )
             await interaction.response.edit_message(embed=embed, view=self.draft_view)
         else:
@@ -292,6 +302,7 @@ class TaskDetailsModal(BaseModal):
                 description=desc,
                 target_channel=self.target_channel,
                 auth_service=self.auth_service,
+                prerequisite_short_ids=inline_prereqs,
             )
             embed = build_task_draft_embed(
                 title=title,
@@ -302,6 +313,7 @@ class TaskDetailsModal(BaseModal):
                 due_at=None,
                 watchers=None,
                 target_channel=self.target_channel or interaction.channel,
+                prerequisite_short_ids=inline_prereqs,
             )
             await interaction.response.send_message(embed=embed, view=draft_view, ephemeral=True)
 
@@ -472,7 +484,7 @@ class TaskCreateDraftView(BaseView):
         self.edit_btn.callback = self._on_edit_details_clicked
         self.add_item(self.edit_btn)
 
-        if self.project:
+        if self.project or self.prerequisite_short_ids:
             prereq_label = f"Prereqs ({len(self.prerequisite_short_ids)})"
             self.prereqs_btn = discord.ui.Button(
                 label=prereq_label,
@@ -581,6 +593,7 @@ class TaskCreateDraftView(BaseView):
             due_at=self.due_at,
             watchers=self.watchers,
             target_channel=self.target_channel or interaction.channel,
+            prerequisite_short_ids=self.prerequisite_short_ids,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -596,6 +609,7 @@ class TaskCreateDraftView(BaseView):
             due_at=self.due_at,
             watchers=self.watchers,
             target_channel=self.target_channel or interaction.channel,
+            prerequisite_short_ids=self.prerequisite_short_ids,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -618,6 +632,7 @@ class TaskCreateDraftView(BaseView):
             due_at=self.due_at,
             watchers=self.watchers,
             target_channel=self.target_channel or interaction.channel,
+            prerequisite_short_ids=self.prerequisite_short_ids,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -634,6 +649,7 @@ class TaskCreateDraftView(BaseView):
             due_at=self.due_at,
             watchers=self.watchers,
             target_channel=self.target_channel or interaction.channel,
+            prerequisite_short_ids=self.prerequisite_short_ids,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -649,16 +665,17 @@ class TaskCreateDraftView(BaseView):
             due_at=self.due_at,
             watchers=self.watchers,
             target_channel=self.target_channel or interaction.channel,
+            prerequisite_short_ids=self.prerequisite_short_ids,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _on_prereqs_clicked(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild or not self.project:
+        if not interaction.guild:
             return
 
         tasks, _ = await self.task_service.list_tasks(
             guild_id=interaction.guild.id,
-            project_id=self.project.id,
+            project_id=self.project.id if self.project else None,
             include_archived=False,
             limit=50,
         )
@@ -725,6 +742,15 @@ class TaskCreateDraftView(BaseView):
                 prerequisite_short_ids=self.prerequisite_short_ids,
             )
 
+            prereqs: list[Task] = []
+            if hasattr(self.task_service, "get_task_dependencies"):
+                try:
+                    deps_res = await self.task_service.get_task_dependencies(task.id)
+                    if isinstance(deps_res, tuple) and len(deps_res) == 2:
+                        prereqs = list(deps_res[0] or [])
+                except Exception:
+                    prereqs = []
+
             target_chan = self.target_channel or interaction.channel
 
             # If target_chan is a Thread (e.g. clicked inside Pinned Control Hub), route to parent ForumChannel
@@ -742,7 +768,11 @@ class TaskCreateDraftView(BaseView):
                     if isinstance(proj_chan, (discord.ForumChannel, discord.TextChannel)):
                         target_chan = proj_chan
 
-            embed = build_task_embed(task, project_name=self.project.name if self.project else None)
+            embed = build_task_embed(
+                task,
+                project_name=self.project.name if self.project else None,
+                prerequisites=prereqs or None,
+            )
 
             msg = None
             if isinstance(target_chan, discord.ForumChannel):
@@ -814,10 +844,25 @@ class TaskCreateDraftView(BaseView):
                 await self.task_service.update_discord_message_ids(task.id, msg.id, None)
                 task = await self.task_service.get_by_id(task.id) or task
 
+            # Sync prerequisite workspace starter cards if bot workspace is available
+            client_ws = getattr(getattr(interaction, "client", None), "workspace", None)
+            if client_ws and hasattr(client_ws, "sync_workspace"):
+                for p_task in prereqs:
+                    try:
+                        await client_ws.sync_workspace(p_task)
+                    except Exception:
+                        pass
+
             jump_url = get_task_jump_url(task)
             link_bullet = f"• [🔗 **Open Task Workspace**]({jump_url})\n" if jump_url else ""
             assignee_str = f"<@{task.assignee_discord_id}>" if task.assignee_discord_id else "Unassigned"
             proj_name = self.project.name if self.project else "Standalone"
+            prereq_ids_list = [p.short_id for p in prereqs] or list(self.prerequisite_short_ids)
+            prereq_line = (
+                f"\n• **Prerequisites**: {', '.join(f'`[{sid}]`' for sid in prereq_ids_list)}"
+                if prereq_ids_list
+                else ""
+            )
 
             success_embed = discord.Embed(
                 title=f"✅ Task Created: [{task.short_id}] {task.title}",
@@ -827,6 +872,7 @@ class TaskCreateDraftView(BaseView):
                     f"• **Assignee**: {assignee_str}\n"
                     f"• **Priority**: `{task.priority.value.upper()}`\n"
                     f"• **Status**: `{task.status.value}`"
+                    f"{prereq_line}"
                 ),
                 color=discord.Color.green(),
             )

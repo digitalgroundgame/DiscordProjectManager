@@ -34,7 +34,7 @@ from src.domain.models import Task
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
-from src.services.task_service import TaskService
+from src.services.task_service import TaskService, parse_prerequisite_short_ids
 
 if TYPE_CHECKING:
     from src.services.outbox_service import OutboxService
@@ -134,18 +134,48 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         if not interaction.guild:
             return []
         try:
-            tasks, _ = await self.task_service.list_tasks(
-                guild_id=interaction.guild.id,
-                search_query=current if current else None,
-                exclude_completed=False,
-                limit=25,
-            )
+            raw_current = current or ""
+            if "," in raw_current:
+                prefix_parts = [p.strip() for p in raw_current.split(",")[:-1] if p.strip()]
+                search_term = raw_current.split(",")[-1].strip()
+                prefix_str = ", ".join(prefix_parts) + ", " if prefix_parts else ""
+                already_picked = {p.upper() for p in parse_prerequisite_short_ids(prefix_parts)}
+            else:
+                search_term = raw_current.strip()
+                prefix_str = ""
+                already_picked = set()
+
+            project_id = None
+            ns = getattr(interaction, "namespace", None)
+            proj_name = getattr(ns, "project_name", None) if ns else None
+            if isinstance(proj_name, str) and proj_name.strip() and self.project_service:
+                try:
+                    proj = await self.project_service.get_by_name(interaction.guild.id, proj_name.strip())
+                    if proj:
+                        project_id = proj.id
+                except Exception:
+                    project_id = None
+
+            list_kwargs: dict[str, Any] = {
+                "guild_id": interaction.guild.id,
+                "exclude_completed": False,
+                "limit": 50,
+            }
+            if project_id is not None:
+                list_kwargs["project_id"] = project_id
+
+            tasks, _ = await self.task_service.list_tasks(**list_kwargs)
+            if search_term:
+                q = search_term.lower().lstrip("#[")
+                tasks = [t for t in tasks if q in t.short_id.lower() or q in t.title.lower()]
+
+            filtered = [t for t in tasks if t.short_id.upper() not in already_picked][:25]
             return [
                 app_commands.Choice(
-                    name=f"[{t.short_id}] {t.title}"[:100],
-                    value=t.short_id,
+                    name=f"{prefix_str}[{t.short_id}] {t.title}"[:100],
+                    value=f"{prefix_str}{t.short_id}"[:100],
                 )
-                for t in tasks
+                for t in filtered
             ]
         except Exception:
             return []
@@ -233,7 +263,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 "**Core Slash Commands (`/pm`):**\n"
                 "• `/pm menu`: Open the Project Management Control Center\n"
                 "• `/pm settings` or `/pm notifications`: Configure personal notification delivery\n"
-                "• `/pm task create [project] [title]`: Create a task & thread\n"
+                "• `/pm task create [project] [title] [depends_on]`: Create a task & thread\n"
                 "• `/pm task list [project] [user] [status]`: View paginated active tasks\n"
                 "• `/pm task assign [task] [assignee]`: Assign a task to a member\n"
                 "• `/pm task status [task] [status]`: Update task status\n"
@@ -715,6 +745,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         priority="Task priority level",
         cc="Watcher members to notify (@mentions or IDs)",
         description="Optional detailed markdown description",
+        depends_on="Prerequisite task ID(s) that must finish first (e.g. APP-1 or APP-1, APP-2)",
     )
     @app_commands.choices(
         priority=[
@@ -723,7 +754,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             app_commands.Choice(name="Low", value="low"),
         ]
     )
-    @app_commands.autocomplete(project_name=project_autocomplete)
+    @app_commands.autocomplete(project_name=project_autocomplete, depends_on=task_autocomplete)
     async def task_create(
         self,
         interaction: discord.Interaction,
@@ -734,6 +765,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         priority: str = "normal",
         cc: str | None = None,
         description: str | None = None,
+        depends_on: str | None = None,
     ) -> None:
         if not interaction.guild:
             await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
@@ -757,18 +789,32 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 if priority.lower() in PriorityLevel._value2member_map_
                 else PriorityLevel.NORMAL
             )
+            prereq_ids = parse_prerequisite_short_ids(depends_on) if depends_on else []
 
-            task = await self.task_service.create_task(
-                guild_id=interaction.guild.id,
-                title=title,
-                creator_discord_id=interaction.user.id,
-                project_id=project.id,
-                assignee_discord_id=assignee.id if assignee else None,
-                due_at=due_at,
-                priority=p_level,
-                body=description,
-                watchers=watchers,
-            )
+            create_kwargs: dict[str, Any] = {
+                "guild_id": interaction.guild.id,
+                "title": title,
+                "creator_discord_id": interaction.user.id,
+                "project_id": project.id,
+                "assignee_discord_id": assignee.id if assignee else None,
+                "due_at": due_at,
+                "priority": p_level,
+                "body": description,
+                "watchers": watchers,
+            }
+            if prereq_ids:
+                create_kwargs["prerequisite_short_ids"] = prereq_ids
+
+            task = await self.task_service.create_task(**create_kwargs)
+
+            prereqs: list[Task] = []
+            if hasattr(self.task_service, "get_task_dependencies"):
+                try:
+                    deps_res = await self.task_service.get_task_dependencies(task.id)
+                    if isinstance(deps_res, tuple) and len(deps_res) == 2:
+                        prereqs = list(deps_res[0] or [])
+                except Exception:
+                    prereqs = []
 
             if self.workspace:
                 ref = await self.workspace.provision_workspace(
@@ -782,6 +828,11 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     discord_message_id=ref.message_id,
                     discord_thread_id=ref.thread_id,
                 )
+                for p_task in prereqs:
+                    try:
+                        await self.workspace.sync_workspace(p_task)
+                    except Exception:
+                        pass
                 if ref.channel_id != interaction.channel_id:
                     await interaction.followup.send(
                         f"✅ Created task **[{task.short_id}] {task.title}** in <#{ref.channel_id}>"
@@ -790,12 +841,12 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 else:
                     await interaction.followup.send(
                         f"✅ Task **[{task.short_id}]** created in project **{project.name}**.",
-                        embed=build_task_embed(task, project_name=project.name),
+                        embed=build_task_embed(task, project_name=project.name, prerequisites=prereqs or None),
                     )
             else:
                 await interaction.followup.send(
                     f"✅ Task **[{task.short_id}]** created in project **{project.name}**.",
-                    embed=build_task_embed(task, project_name=project.name),
+                    embed=build_task_embed(task, project_name=project.name, prerequisites=prereqs or None),
                 )
             from src.adapters.discord_bot.menu_manager import menu_manager
 

@@ -286,3 +286,165 @@ async def test_get_unresolved_prerequisites_lifecycle(services):
 
     # Task without dependencies returns empty list
     assert await task_srv.get_unresolved_prerequisites(task_1.id) == []
+
+
+def test_parse_prerequisite_short_ids():
+    """Verify comma/space-separated prerequisite short ID normalization and deduplication."""
+    from src.services.task_service import parse_prerequisite_short_ids
+
+    assert parse_prerequisite_short_ids(None) == []
+    assert parse_prerequisite_short_ids("") == []
+    assert parse_prerequisite_short_ids("   ,  ") == []
+    assert parse_prerequisite_short_ids("be-1, #FE-2  [OPS-10], be-1") == [
+        "BE-1",
+        "FE-2",
+        "OPS-10",
+    ]
+    assert parse_prerequisite_short_ids(["#be-1, fe-2", "FE-2", "[QA-3]"]) == [
+        "BE-1",
+        "FE-2",
+        "QA-3",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_task_fails_upfront_on_missing_prerequisite(services):
+    """If a prerequisite_short_id does not exist, create_task raises TaskNotFoundError without creating the task."""
+    from src.services.task_service import TaskNotFoundError
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877670
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Upfront Check", prefix="UFC")
+    task_1 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Valid Prerequisite",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+
+    with pytest.raises(TaskNotFoundError, match="UFC-999"):
+        await task_srv.create_task(
+            guild_id=guild_id,
+            title="Should Not Be Created",
+            creator_discord_id=1001,
+            project_id=project.id,
+            prerequisite_short_ids=[task_1.short_id, "UFC-999"],
+        )
+
+    # Verify only task_1 exists and the next task number was not consumed
+    tasks, total = await task_srv.list_tasks(guild_id=guild_id, project_id=project.id)
+    assert total == 1
+    assert tasks[0].id == task_1.id
+
+    task_2 = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Next Valid Task",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[f"#{task_1.short_id.lower()}"],
+    )
+    assert task_2.short_id == "UFC-2"
+    prereqs, _ = await task_srv.get_task_dependencies(task_2.id)
+    assert [p.id for p in prereqs] == [task_1.id]
+
+
+@pytest.mark.asyncio
+async def test_pm_cog_task_autocomplete_multi_id_and_project_scope(services):
+    """Verify PmCog.task_autocomplete scopes by project_name when present and supports comma-separated multi-IDs."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877671
+
+    proj_a = await proj_srv.create_project(guild_id=guild_id, name="Alpha", prefix="ALP")
+    proj_b = await proj_srv.create_project(guild_id=guild_id, name="Beta", prefix="BET")
+
+    t_a1 = await task_srv.create_task(
+        guild_id=guild_id, title="Alpha One", creator_discord_id=1001, project_id=proj_a.id
+    )
+    t_a2 = await task_srv.create_task(
+        guild_id=guild_id, title="Alpha Two", creator_discord_id=1001, project_id=proj_a.id
+    )
+    await task_srv.create_task(guild_id=guild_id, title="Beta One", creator_discord_id=1001, project_id=proj_b.id)
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        task_service=task_srv,
+        squad_service=services["squad"],
+        user_service=services["user"],
+    )
+
+    interaction = MagicMock()
+    interaction.guild = SimpleNamespace(id=guild_id)
+    interaction.guild_id = guild_id
+    interaction.namespace = SimpleNamespace(project_name="Alpha")
+
+    # 1. Scoped to Alpha project
+    choices = await cog.task_autocomplete(interaction, "")
+    values = [c.value for c in choices]
+    assert t_a1.short_id in values
+    assert t_a2.short_id in values
+    assert "BET-1" not in values
+
+    # 2. Multi-ID comma-separated autocomplete preserves prefix and excludes already-entered IDs
+    multi_choices = await cog.task_autocomplete(interaction, f"{t_a1.short_id}, ")
+    multi_values = [c.value for c in multi_choices]
+    assert f"{t_a1.short_id}, {t_a2.short_id}" in multi_values
+    assert f"{t_a1.short_id}, {t_a1.short_id}" not in multi_values
+
+
+@pytest.mark.asyncio
+async def test_task_details_modal_and_draft_view_prerequisites(services):
+    """Verify TaskDetailsModal has no prereqs input and TaskCreateDraftView preserves prerequisites across updates."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.adapters.discord_bot.views.task_builder import TaskCreateDraftView, TaskDetailsModal
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 998877672
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Modal Project", prefix="MOD")
+    prereq_task = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Base Setup",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+
+    # 1. TaskDetailsModal only contains Task Title and Description/Body inputs
+    modal = TaskDetailsModal(
+        task_service=task_srv,
+        project=project,
+    )
+    assert not hasattr(modal, "prereqs_input")
+    modal.title_input._value = "Dependent Feature"
+    modal.desc_input._value = "Feature details"
+
+    interaction_ok = MagicMock()
+    interaction_ok.guild = SimpleNamespace(id=guild_id)
+    interaction_ok.guild_id = guild_id
+    interaction_ok.response = AsyncMock()
+    await modal.on_submit(interaction_ok)
+    interaction_ok.response.send_message.assert_awaited_once()
+    sent_kwargs = interaction_ok.response.send_message.call_args.kwargs
+    draft_view: TaskCreateDraftView = sent_kwargs["view"]
+
+    # 2. Selecting prerequisites in TaskCreateDraftView and updating another field preserves prerequisites
+    draft_view.prerequisite_short_ids = [prereq_task.short_id]
+    draft_view.priority_select._values = ["high"]
+    interaction_prio = MagicMock()
+    interaction_prio.response = AsyncMock()
+    await draft_view._on_priority_selected(interaction_prio)
+    edited_embed = interaction_prio.response.edit_message.call_args.kwargs["embed"]
+    assert f"• **Prerequisites**: `[{prereq_task.short_id}]`" in edited_embed.description
+

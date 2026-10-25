@@ -32,7 +32,13 @@ from src.ports.unit_of_work import IUnitOfWork
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 
-__all__ = ["StaleVersionError", "TaskService", "parse_inline_dependencies", "resolve_member_name"]
+__all__ = [
+    "StaleVersionError",
+    "TaskService",
+    "parse_inline_dependencies",
+    "parse_prerequisite_short_ids",
+    "resolve_member_name",
+]
 
 
 class _NullUnitOfWork(IUnitOfWork):
@@ -60,6 +66,30 @@ class _NullUnitOfWork(IUnitOfWork):
     @property
     def session(self) -> Any:
         return None
+
+
+def parse_prerequisite_short_ids(raw: str | list[str] | None) -> list[str]:
+    """Normalizes comma- or whitespace-separated prerequisite task short IDs."""
+    if not raw:
+        return []
+    chunks = [raw] if isinstance(raw, str) else list(raw)
+    keys: list[str] = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        for part in str(chunk).split(","):
+            part_str = part.strip()
+            if not part_str:
+                continue
+            bracket_match = re.match(r"^\[([A-Za-z0-9_-]+)\]", part_str)
+            if bracket_match:
+                keys.append(bracket_match.group(1).upper())
+                continue
+            for token in part_str.split():
+                clean = token.strip().lstrip("#[").rstrip("]").strip().upper()
+                if clean:
+                    keys.append(clean)
+    return list(dict.fromkeys(keys))
 
 
 def parse_inline_dependencies(text: str | None) -> list[str]:
@@ -117,7 +147,7 @@ class TaskService:
         body: str | None = None,
         watchers: list[int] | None = None,
         metadata_json: dict[str, Any] | None = None,
-        prerequisite_short_ids: list[str] | None = None,
+        prerequisite_short_ids: list[str] | str | None = None,
     ) -> Task:
         # Resolve project if project_name given
         resolved_project_id = project_id
@@ -129,6 +159,12 @@ class TaskService:
 
         if not resolved_project_id:
             raise ValidationError("A project container must be specified for every task.")
+
+        explicit_prereqs = parse_prerequisite_short_ids(prerequisite_short_ids)
+        for prereq_key in explicit_prereqs:
+            depends_on_task = await self.get_by_short_id(guild_id, prereq_key)
+            if not depends_on_task:
+                raise TaskNotFoundError(f"Prerequisite task '{prereq_key}' was not found in this server.")
 
         clean_watchers = list(set(watchers or []))
 
@@ -197,7 +233,7 @@ class TaskService:
             )
 
         # Link any prerequisites specified explicitly or found in body tags
-        target_prereqs = list(prerequisite_short_ids or [])
+        target_prereqs = list(explicit_prereqs)
         if not target_prereqs and saved_task.body:
             target_prereqs = parse_inline_dependencies(saved_task.body)
         for prereq_key in target_prereqs:
@@ -209,6 +245,8 @@ class TaskService:
                     actor_discord_id=creator_discord_id,
                 )
             except Exception:
+                if prereq_key in explicit_prereqs:
+                    raise
                 pass
 
         return saved_task
