@@ -3,6 +3,7 @@
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/architecture-hexagonal-green.svg)](docs/wiki/Architecture.md)
 [![Schema: RFC 5545 & MS Graph](https://img.shields.io/badge/schema-RFC%205545%20%2F%20MS%20Graph-orange.svg)](docs/wiki/Architecture.md#data-standardization-rfc-5545--microsoft-graph)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A self-hosted, zero-signup Discord-native project management platform built to eliminate context-switching by embedding task workflows directly into Discord text channels, threads, and direct messages.
 
@@ -74,3 +75,9 @@ make db-migrate  # Apply pending Alembic migrations
 ```
 
 For NixOS (`devenv`), offline seeding (`--no-discord`), and complete Coolify deployment runbooks, see the **[Wiki](docs/wiki/Home.md)**.
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.

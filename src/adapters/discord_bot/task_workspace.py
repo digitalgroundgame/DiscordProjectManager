@@ -453,7 +453,8 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                     if "name" in edit_kwargs and (status == 429 or retry_after is not None):
                         backoff = float(retry_after) if retry_after else 600.0
                         logger.warning(
-                            "Discord HTTP 429 encountered during thread rename for task [%s] (%s). Backing off for %.1fs",
+                            "Discord HTTP 429 encountered during thread rename for task [%s] (%s). "
+                            "Backing off for %.1fs",
                             task.short_id,
                             thread.id,
                             backoff,
@@ -482,7 +483,8 @@ class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
                                 )
                     elif status == 429 or retry_after is not None:
                         logger.warning(
-                            "Discord HTTP 429 rate limit on editing thread attributes %s for task [%s] (%s). Retry after: %ss",
+                            "Discord HTTP 429 rate limit on editing thread attributes %s for task [%s] (%s). "
+                            "Retry after: %ss",
                             list(edit_kwargs.keys()),
                             task.short_id,
                             task.discord_thread_id,

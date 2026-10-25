@@ -124,7 +124,8 @@ class ThreadRenameRateLimiter:
         self._cancel_deferred_task(thread_id)
 
         logger.info(
-            "Thread rename throttled for %s -> '%s'. Debouncing and scheduling deferred rename in %.1fs (cooldown: %.1fs).",
+            "Thread rename throttled for %s -> '%s'. "
+            "Debouncing and scheduling deferred rename in %.1fs (cooldown: %.1fs).",
             thread_id,
             new_name,
             delay,
