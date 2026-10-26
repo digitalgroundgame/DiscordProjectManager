@@ -7,14 +7,8 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
-from src.adapters.discord_bot.views.project_menu import ProjectMenuView, build_project_menu_embed
-from src.adapters.discord_bot.views.task_menu import (
-    TaskCreateModal,
-    TaskMenuView,
-    TaskSelectProjectView,
-    build_task_board_embed,
-)
 from src.domain.models import Project, Squad
 from src.services.auth_service import AuthService
 from src.services.project_service import ProjectService
@@ -107,7 +101,7 @@ class HubTaskProjectSelectView(BaseView):
     async def _open_modal(self, interaction: discord.Interaction, val: str) -> None:
         parent_inter = self._initial_interaction or interaction
         if val == "standalone":
-            modal = TaskCreateModal(
+            modal = DiscordViewRouter.build_task_create_modal(
                 task_service=self.task_service,
                 project=None,
                 target_channel=self.target_channel,
@@ -120,7 +114,7 @@ class HubTaskProjectSelectView(BaseView):
             if not selected_proj:
                 await interaction.response.send_message("❌ Selected project not found.", ephemeral=True)
                 return
-            modal = TaskCreateModal(
+            modal = DiscordViewRouter.build_task_create_modal(
                 task_service=self.task_service,
                 project=selected_proj,
                 target_channel=self.target_channel,
@@ -265,18 +259,16 @@ class HubBoardProjectSelectView(BaseView):
             if match:
                 project_label = f"[{match.prefix}] {match.name} (This Channel)"
 
-        view = TaskMenuView(
-            self.task_service,
-            self.project_service,
-            self.squad_service,
+        assignee_label = f"<@{self.assignee_id}> (My Tasks)" if self.assignee_id else "All Members"
+        embed, view = DiscordViewRouter.build_task_menu(
+            task_service=self.task_service,
+            project_service=self.project_service,
+            squad_service=self.squad_service,
             projects=self.projects,
             current_channel_id=self.current_channel_id,
             parent_channel_id=self.parent_channel_id,
             initial_project_id=selected_id,
             initial_assignee_id=self.assignee_id,
-        )
-        assignee_label = f"<@{self.assignee_id}> (My Tasks)" if self.assignee_id else "All Members"
-        embed = build_task_board_embed(
             tasks=tasks,
             total_count=total,
             project_label=project_label,
@@ -415,7 +407,7 @@ class PmHubView(BaseView):
                 proj_chan = interaction.guild.get_channel(matched_proj.discord_channel_id)
                 if proj_chan:
                     target_channel = proj_chan
-            modal = TaskCreateModal(
+            modal = DiscordViewRouter.build_task_create_modal(
                 task_service=self.task_service,
                 project=matched_proj,
                 target_channel=target_channel,
@@ -459,7 +451,7 @@ class PmHubView(BaseView):
                     proj_chan = interaction.guild.get_channel(matched_proj.discord_channel_id)
                     if proj_chan:
                         target_channel = proj_chan
-                modal = TaskCreateModal(
+                modal = DiscordViewRouter.build_task_create_modal(
                     task_service=self.task_service,
                     project=matched_proj,
                     target_channel=target_channel,
@@ -468,7 +460,7 @@ class PmHubView(BaseView):
                 await interaction.response.send_modal(modal)
             elif len(allowed_projects) == 0:
                 if can_create_standalone:
-                    modal = TaskCreateModal(
+                    modal = DiscordViewRouter.build_task_create_modal(
                         task_service=self.task_service,
                         project=None,
                         target_channel=interaction.channel,
@@ -488,7 +480,7 @@ class PmHubView(BaseView):
                 from src.adapters.discord_bot.menu_manager import menu_manager
 
                 await menu_manager.register_menu(interaction)
-                view = TaskSelectProjectView(
+                view = DiscordViewRouter.build_task_select_project_view(
                     projects=allowed_projects,
                     task_service=self.task_service,
                     project_service=self.project_service,
@@ -564,18 +556,16 @@ class PmHubView(BaseView):
             match = channel_projects[0]
             project_label = f"[{match.prefix}] {match.name} (This Channel)"
 
-        view = TaskMenuView(
-            self.task_service,
-            self.project_service,
-            self.squad_service,
+        embed, view = DiscordViewRouter.build_task_menu(
+            task_service=self.task_service,
+            project_service=self.project_service,
+            squad_service=self.squad_service,
             projects=projects,
             current_channel_id=channel_id,
             parent_channel_id=parent_id,
             initial_project_id=selected_project_id,
             initial_assignee_id=interaction.user.id,
             initial_interaction=interaction,
-        )
-        embed = build_task_board_embed(
             tasks=tasks,
             total_count=total,
             project_label=project_label,
@@ -604,7 +594,7 @@ class PmHubView(BaseView):
             if (self.auth_service and interaction.guild)
             else False
         )
-        view = ProjectMenuView(
+        embed, view = DiscordViewRouter.build_project_menu(
             self.project_service,
             self.squad_service,
             self.task_service,
@@ -612,7 +602,6 @@ class PmHubView(BaseView):
             is_server_manager=can_manage,
             auth_service=self.auth_service,
         )
-        embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(
@@ -647,24 +636,13 @@ class PmHubView(BaseView):
 
         await menu_manager.register_menu(interaction)
 
-        from src.adapters.discord_bot.views.project_menu import ProjectChannelSelectView
-
-        view = ProjectChannelSelectView(
+        embed, view = DiscordViewRouter.build_project_channel_select(
             self.project_service,
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
             user_service=self.user_service,
             return_to="hub",
-        )
-        embed = discord.Embed(
-            title="Create Project: Select Forum Channel",
-            description=(
-                "Choose a **Forum Channel** to bind as the project's task board.\n\n"
-                "Tasks become organized forum post cards with native Discord tag filtering "
-                "and an interactive pinned Control Hub."
-            ),
-            color=discord.Color.blue(),
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
@@ -718,9 +696,7 @@ class PmHubView(BaseView):
                 color=discord.Color.from_rgb(16, 152, 247),
             )
             embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(
+            view = DiscordViewRouter.build_tech_tree_viewer(
                 self.task_service, target_project, current_orientation="lr", auth_service=self.auth_service
             )
             await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)
@@ -740,9 +716,7 @@ class PmHubView(BaseView):
                 )
                 return
 
-        from src.adapters.discord_bot.views.tree_view import TechTreeProjectSelectView
-
-        view = TechTreeProjectSelectView(
+        view = DiscordViewRouter.build_tech_tree_project_select(
             self.task_service, self.project_service, projects, orientation="lr", auth_service=self.auth_service
         )
         await interaction.response.send_message(
@@ -761,7 +735,6 @@ class PmHubView(BaseView):
         if not interaction.guild:
             return
         from src.adapters.discord_bot.menu_manager import menu_manager
-        from src.adapters.discord_bot.views.task_menu import TaskMenuView, build_task_board_embed
 
         await menu_manager.register_menu(interaction)
 
@@ -786,17 +759,15 @@ class PmHubView(BaseView):
             match = channel_projects[0]
             project_label = f"[{match.prefix}] {match.name} (This Channel)"
 
-        view = TaskMenuView(
-            self.task_service,
-            self.project_service,
-            self.squad_service,
+        embed, view = DiscordViewRouter.build_task_menu(
+            task_service=self.task_service,
+            project_service=self.project_service,
+            squad_service=self.squad_service,
             projects=projects,
             current_channel_id=channel_id,
             parent_channel_id=parent_id,
             initial_project_id=selected_project_id,
             initial_interaction=interaction,
-        )
-        embed = build_task_board_embed(
             tasks=tasks,
             total_count=total,
             project_label=project_label,

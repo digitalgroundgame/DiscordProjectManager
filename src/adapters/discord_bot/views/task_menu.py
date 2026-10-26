@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.task_builder import TaskDetailsModal
 from src.domain.enums import TaskStatus
@@ -591,11 +592,14 @@ class TaskMenuView(BaseView):
         return None
 
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
-        from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
-
         if self.squad_service:
-            view = PmHubView(self.project_service, self.squad_service, self.task_service)
-            embed = build_hub_welcome_embed()
+            embed, view = DiscordViewRouter.build_hub_view(
+                self.project_service,
+                self.squad_service,
+                self.task_service,
+                getattr(self, "user_service", None),
+                self.auth_service,
+            )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_new_task_clicked(self, interaction: discord.Interaction) -> None:

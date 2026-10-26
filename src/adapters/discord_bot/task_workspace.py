@@ -9,6 +9,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.thread_rate_limiter import ThreadRenameRateLimiter
 from src.adapters.discord_bot.views.forum_helpers import (
     resolve_forum_tags,
@@ -773,9 +774,7 @@ class DiscordTaskWorkspaceAdapter(TaskWorkspacePort):
             return
 
         if action == "note":
-            from src.adapters.discord_bot.views.task_modals import TaskNoteModal
-
-            modal = TaskNoteModal(
+            modal = DiscordViewRouter.build_task_note_modal(
                 task_id=task_id,
                 short_id=task.short_id,
                 task_service=self.task_service,
@@ -968,13 +967,7 @@ class DiscordTaskWorkspaceAdapter(TaskWorkspacePort):
         if action in ("start", "complete"):
             incomplete = await self.task_service.get_unresolved_prerequisites(task.id)
             if incomplete:
-                from src.adapters.discord_bot.views.task_blocked_view import (
-                    TaskBlockedConfirmView,
-                    build_task_blocked_confirm_embed,
-                )
-
-                embed = build_task_blocked_confirm_embed(task, target_status, incomplete)
-                view = TaskBlockedConfirmView(
+                embed, view = DiscordViewRouter.build_task_blocked_confirm_view(
                     task=task,
                     target_status=target_status,
                     incomplete_prereqs=incomplete,

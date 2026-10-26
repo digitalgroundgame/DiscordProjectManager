@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.calendar_feed_view import (
     CalendarFeedView,
     build_calendar_feed_embed,
@@ -225,8 +226,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
             return
         try:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
             _, count = (
                 await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
@@ -248,19 +247,15 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             )
             is_server_admin = self.auth_service.is_server_manager(interaction.user) if self.auth_service else False
 
-            view = PmDashboardView(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
+                guild=interaction.guild,
+                user=interaction.user,
                 project_service=self.project_service,
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 auth_service=self.auth_service,
                 initial_interaction=interaction,
-                is_server_manager=can_manage,
-                is_server_admin=is_server_admin,
-            )
-            embed = build_pm_dashboard_embed(
-                guild=interaction.guild,
-                user=interaction.user,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
@@ -328,18 +323,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     ephemeral=True,
                 )
             else:
-                from src.adapters.discord_bot.views.settings_menu import UserSettingsView, build_settings_embed
-
                 current_pref = await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
-                view = UserSettingsView(
-                    user_service=self.user_service,
+                embed, view = DiscordViewRouter.build_user_settings_view(
+                    user=interaction.user,
                     current_pref=current_pref,
+                    user_service=self.user_service,
                     project_service=self.project_service,
                     squad_service=self.squad_service,
                     task_service=self.task_service,
                     calendar_service=self.calendar_service,
                 )
-                embed = build_settings_embed(interaction.user, current_pref)
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
             from src.adapters.discord_bot.menu_manager import menu_manager
@@ -1173,13 +1166,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 unresolved = await self.task_service.get_unresolved_prerequisites(task_entity.id)
                 if unresolved:
                     if not force:
-                        from src.adapters.discord_bot.views.task_blocked_view import (
-                            TaskBlockedConfirmView,
-                            build_task_blocked_confirm_embed,
-                        )
-
-                        embed = build_task_blocked_confirm_embed(task_entity, new_status, unresolved)
-                        view = TaskBlockedConfirmView(
+                        embed, view = DiscordViewRouter.build_task_blocked_confirm_view(
                             task=task_entity,
                             target_status=new_status,
                             incomplete_prereqs=unresolved,
@@ -1713,9 +1700,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 color=discord.Color.from_rgb(16, 152, 247),
             )
             embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(
+            view = DiscordViewRouter.build_tech_tree_viewer(
                 self.task_service, project, current_orientation=orient_val, auth_service=self.auth_service
             )
             await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)
@@ -2164,9 +2149,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 color=discord.Color.from_rgb(16, 152, 247),
             )
             embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(
+            view = DiscordViewRouter.build_tech_tree_viewer(
                 self.task_service, project, current_orientation=orient_val, auth_service=self.auth_service
             )
             await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)

@@ -8,6 +8,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.domain.enums import SquadRoleType
 from src.domain.models import Squad
@@ -1085,9 +1086,6 @@ class SquadMenuView(BaseView):
 
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
         if self.return_to == "dashboard" and interaction.guild:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-            from src.domain.enums import NotificationPreference
-
             projects = (
                 await self.project_service.list_projects(interaction.guild.id, include_archived=False)
                 if self.project_service
@@ -1099,30 +1097,26 @@ class SquadMenuView(BaseView):
             current_pref = (
                 await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
                 if self.user_service
-                else NotificationPreference.DM
+                else None
             )
-            view = PmDashboardView(
-                self.project_service,
-                self.squad_service,
-                self.task_service,
-                self.user_service,
-                initial_interaction=interaction,
-            )
-            embed = build_pm_dashboard_embed(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
                 guild=interaction.guild,
                 user=interaction.user,
+                project_service=self.project_service,
+                squad_service=self.squad_service,
+                task_service=self.task_service,
+                user_service=self.user_service,
+                initial_interaction=interaction,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
-                is_server_manager=view.is_server_manager,
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         else:
-            from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
-
             if self.project_service and self.task_service:
-                view = PmHubView(self.project_service, self.squad_service, self.task_service, self.user_service)
-                embed = build_hub_welcome_embed()
+                embed, view = DiscordViewRouter.build_hub_view(
+                    self.project_service, self.squad_service, self.task_service, self.user_service
+                )
                 await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_create_squad_clicked(self, interaction: discord.Interaction) -> None:

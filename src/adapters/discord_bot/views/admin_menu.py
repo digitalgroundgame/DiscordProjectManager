@@ -8,16 +8,8 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
-from src.adapters.discord_bot.views.project_menu import (
-    ProjectChannelSelectView,
-    ProjectMenuView,
-    build_project_menu_embed,
-)
-from src.adapters.discord_bot.views.settings_menu import (
-    UserSettingsView,
-    build_settings_embed,
-)
 from src.domain.enums import NotificationPreference
 from src.services.auth_service import AuthService
 
@@ -618,21 +610,13 @@ class PmDashboardView(BaseView):
             await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
             return
 
-        view = ProjectChannelSelectView(
+        embed, view = DiscordViewRouter.build_project_channel_select(
             self.project_service,
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
             user_service=self.user_service,
             return_to="dashboard",
-        )
-        embed = discord.Embed(
-            title="📁 Create Project: Select Forum Channel",
-            description=(
-                "Select the target Forum Channel where this project will live.\n"
-                "Standard status tags and an interactive pinned Control Hub will be created automatically."
-            ),
-            color=discord.Color.blurple(),
         )
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
@@ -653,7 +637,7 @@ class PmDashboardView(BaseView):
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_projects_clicked(self, interaction: discord.Interaction) -> None:
-        view = ProjectMenuView(
+        embed, view = DiscordViewRouter.build_project_menu(
             self.project_service,
             self.squad_service,
             self.task_service,
@@ -663,7 +647,6 @@ class PmDashboardView(BaseView):
             is_server_manager=self.is_server_manager,
             auth_service=self.auth_service,
         )
-        embed = build_project_menu_embed(view.is_server_manager)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_settings_clicked(self, interaction: discord.Interaction) -> None:
@@ -672,16 +655,16 @@ class PmDashboardView(BaseView):
             return
 
         current_pref = await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
-        view = UserSettingsView(
-            user_service=self.user_service,
+        embed, view = DiscordViewRouter.build_user_settings_view(
+            user=interaction.user,
             current_pref=current_pref,
+            user_service=self.user_service,
             project_service=self.project_service,
             squad_service=self.squad_service,
             task_service=self.task_service,
             initial_interaction=interaction,
             return_to="dashboard",
         )
-        embed = build_settings_embed(interaction.user, current_pref)
         await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_overview_clicked(self, interaction: discord.Interaction) -> None:
