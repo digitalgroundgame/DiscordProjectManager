@@ -14,16 +14,16 @@ from src.adapters.discord_bot.views.forum_helpers import (
     ensure_project_tag,
     setup_forum_tags,
 )
-from src.adapters.discord_bot.workspace_protocol import (
-    IProjectDiscordWorkspace,
-    ITaskDiscordWorkspace,
+from src.domain.exceptions import ProjectNotFoundError
+from src.domain.models import Project, Squad
+from src.ports.workspace import (
     ProjectProvisionSpec,
+    ProjectWorkspacePort,
     ProjectWorkspaceRef,
     RebuildProgress,
     RebuildWorkspaceResult,
+    TaskWorkspacePort,
 )
-from src.domain.exceptions import ProjectNotFoundError
-from src.domain.models import Project, Squad
 
 if TYPE_CHECKING:
     from src.services.auth_service import AuthService
@@ -42,7 +42,7 @@ async def _maybe_await(res: Any) -> Any:
     return res
 
 
-class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
+class DiscordProjectWorkspaceAdapter(ProjectWorkspacePort):
     """Deep implementation adapter managing Project Discord presence, tags, and Control Hubs."""
 
     def __init__(
@@ -53,7 +53,7 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         auth_service: AuthService | None = None,
-        task_workspace: ITaskDiscordWorkspace | None = None,
+        task_workspace: TaskWorkspacePort | None = None,
     ):
         self.bot = bot
         self.project_service = project_service
@@ -64,10 +64,10 @@ class DiscordProjectWorkspaceAdapter(IProjectDiscordWorkspace):
         self.task_workspace = task_workspace
 
     @property
-    def _effective_task_workspace(self) -> ITaskDiscordWorkspace | None:
+    def _effective_task_workspace(self) -> TaskWorkspacePort | None:
         if self.task_workspace is not None:
             return self.task_workspace
-        if isinstance(getattr(self.bot, "workspace", None), ITaskDiscordWorkspace):
+        if isinstance(getattr(self.bot, "workspace", None), TaskWorkspacePort):
             return self.bot.workspace
         if self.task_service and self.project_service:
             from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
