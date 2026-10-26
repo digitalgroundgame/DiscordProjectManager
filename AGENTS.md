@@ -66,8 +66,13 @@ See [ADR 0007: 4-Layer Hexagonal Architecture](docs/adr/0007-hexagonal-architect
 
 When working on GitHub issues or project migration tasks:
 
-1. **Branch Naming**:
-   - Create a feature branch named `arch/<issue-number>-<short-slug>` (e.g. `arch/53-actor-principal`).
+1. **Branch Naming & Isolation (MANDATORY)**:
+   - **Never commit directly to `develop` or `main`.**
+   - Before starting any issue in Project #14, always create a **fresh branch** from the latest `develop`:
+     ```bash
+     git fetch origin && git checkout -b arch/<issue-number>-<short-slug> origin/develop
+     ```
+     (e.g., `arch/53-actor-principal`).
 
 2. **Implementation & Verification**:
    - **Baseline**: Verify tests pass with `uv run pytest tests/` (or `direnv exec . uv run pytest`).
