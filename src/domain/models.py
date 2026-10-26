@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.actor import ActorPrincipal as ActorPrincipal
 from src.domain.enums import (
     EventType,
     NotificationPreference,
