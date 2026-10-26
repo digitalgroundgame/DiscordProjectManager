@@ -427,3 +427,33 @@ async def test_discord_notifier_due_reminder_triggers_tag_sync_unassigned():
     mock_workspace.sync_workspace.assert_awaited_once()
     synced_task = mock_workspace.sync_workspace.call_args.args[0]
     assert synced_task.is_overdue is True
+
+
+def test_workspace_ports_isolation_and_adapter_conformance(services):
+    """Verify TaskWorkspacePort and ProjectWorkspacePort conform to hexagonal architecture."""
+    import sys
+
+    from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
+    from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
+    from src.ports.workspace import ProjectWorkspacePort, TaskWorkspacePort
+
+    # Verify zero discord imports in src/ports/workspace.py
+    workspace_port_module = sys.modules["src.ports.workspace"]
+    imported_names = set(dir(workspace_port_module))
+    assert "discord" not in imported_names
+
+    # Verify adapter runtime conformance
+    bot = MagicMock(spec=discord.Client)
+    task_adapter = DiscordTaskWorkspaceAdapter(
+        bot=bot,
+        task_service=services["task"],
+        project_service=services["project"],
+    )
+    assert isinstance(task_adapter, TaskWorkspacePort)
+
+    project_adapter = DiscordProjectWorkspaceAdapter(
+        bot=bot,
+        project_service=services["project"],
+        task_workspace=task_adapter,
+    )
+    assert isinstance(project_adapter, ProjectWorkspacePort)

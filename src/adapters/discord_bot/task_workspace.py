@@ -28,16 +28,16 @@ from src.adapters.discord_bot.views.task_embed import (
     build_task_history_embed,
     build_thread_workspace_content,
 )
-from src.adapters.discord_bot.workspace_protocol import (
-    _UNSET,
-    ITaskDiscordWorkspace,
-    SyncWorkspaceResult,
-    TaskControlPanel,
-    TaskWorkspaceRef,
-)
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.exceptions import StaleVersionError
 from src.domain.models import Project, Task, TaskHistory
+from src.ports.workspace import (
+    _UNSET,
+    SyncWorkspaceResult,
+    TaskControlPanel,
+    TaskWorkspacePort,
+    TaskWorkspaceRef,
+)
 from src.services.auth_service import AuthService
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ def _is_thread_archived_error(exc: Exception) -> bool:
     return "50083" in msg or "Thread is archived" in msg
 
 
-class DiscordTaskWorkspaceAdapter(ITaskDiscordWorkspace):
+class DiscordTaskWorkspaceAdapter(TaskWorkspacePort):
     """Deep implementation adapter managing Task Discord presence and thread lifecycles."""
 
     def __init__(

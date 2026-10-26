@@ -53,6 +53,7 @@ def test_ports_have_no_vendor_discord_imports() -> None:
 def test_ports_have_no_framework_or_adapter_imports() -> None:
     """Core ports must not depend on concrete adapters, database ORMs, or web frameworks."""
     forbidden_prefixes = (
+        "discord",
         "src.adapters",
         "sqlalchemy",
         "fastapi",
