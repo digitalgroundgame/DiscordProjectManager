@@ -21,7 +21,7 @@ All DGG-PM bot commands are grouped under the single `/pm` top-level namespace t
 
 | Subcommand | Parameters | Description |
 | :--- | :--- | :--- |
-| **`create`** | `project_name` (required)<br>`title` (required)<br>`assignee` (optional)<br>`due` (optional)<br>`priority` (optional: `high`, `normal`, `low`)<br>`cc` (optional)<br>`description` (optional) | Creates a new task in a project container, provisions a dedicated thread / forum post, and attaches an interactive action card. |
+| **`create`** | `project_name` (required)<br>`title` (required)<br>`assignee` (optional)<br>`due` (optional)<br>`priority` (optional: `high`, `normal`, `low`)<br>`cc` (optional)<br>`description` (optional)<br>`prereqs` (optional: e.g. `INF-1, INF-2`) | Creates a new task in a project container, provisions a dedicated thread / forum post, and attaches an interactive action card. |
 | **`assign`** | `task` (required)<br>`assignee` (optional) | Assigns or unassigns a member from a task (validated against mapped project team roles). |
 | **`status`** | `task` (required)<br>`status` (required: `not_started`, `in_progress`, `completed`)<br>`notes` (optional) | Updates task status with CAS optimistic concurrency control and syncs thread tags. |
 | **`list`** | `project_name` (optional)<br>`user` (optional)<br>`status` (optional: `active`, `inProgress`, `notStarted`, `completed`, `all`) | Displays an interactive paginated task board with dynamic filters. |
