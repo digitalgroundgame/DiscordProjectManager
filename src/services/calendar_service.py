@@ -6,7 +6,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from src.config import settings
 from src.domain.standard_mappings import to_rfc5545_vcalendar
 from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 
@@ -24,10 +23,12 @@ class CalendarService:
         calendar_token_repo: IUserCalendarTokenRepo,
         task_repo: ITaskRepo,
         uow: IUnitOfWork | None = None,
+        base_url: str | None = None,
     ) -> None:
         self.token_repo = calendar_token_repo
         self.task_repo = task_repo
         self.uow = uow
+        self.base_url = base_url
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
@@ -95,7 +96,11 @@ class CalendarService:
     @staticmethod
     def build_feed_urls(token: str, base_url: str | None = None) -> dict[str, str]:
         """Builds webcal:// and https:// URLs for calendar subscription given a token."""
-        raw_base = (base_url or settings.PUBLIC_BASE_URL).rstrip("/")
+        if not base_url:
+            from src.config import get_settings
+
+            base_url = get_settings().PUBLIC_BASE_URL
+        raw_base = (base_url or "http://localhost:8000").rstrip("/")
         feed_path = f"/calendar/{token}.ics"
         http_url = f"{raw_base}{feed_path}"
 
