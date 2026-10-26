@@ -10,7 +10,6 @@ from src.adapters.db.repos.base import BasePostgresRepo
 from src.adapters.db.tables import (
     ProjectSquadTable,
     ProjectTable,
-    SquadTable,
 )
 from src.domain.models import Project, ProjectSquad, Squad
 from src.ports.repositories import IProjectRepo
@@ -250,20 +249,17 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         async with self._get_session() as session:
-            stmt = (
-                select(SquadTable)
-                .join(ProjectSquadTable, ProjectSquadTable.squad_id == SquadTable.id)
-                .where(ProjectSquadTable.project_id == project_id)
-            )
+            stmt = select(ProjectSquadTable).where(ProjectSquadTable.project_id == project_id)
             res = await session.execute(stmt)
             rows = res.scalars().all()
             return [
                 Squad(
-                    id=r.id,
-                    guild_id=r.guild_id,
-                    name=r.name,
-                    discord_role_id=r.discord_role_id,
-                    created_at=r.created_at,
+                    id=ps.squad.id,
+                    guild_id=ps.squad.guild_id,
+                    name=ps.squad.name,
+                    discord_role_id=ps.squad.discord_role_id,
+                    created_at=ps.squad.created_at,
                 )
-                for r in rows
+                for ps in rows
+                if ps.squad is not None
             ]

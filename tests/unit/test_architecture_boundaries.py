@@ -14,6 +14,7 @@ from tests.test_architecture import (
     test_ports_have_no_framework_or_adapter_imports,
     test_ports_have_no_vendor_discord_imports,
     test_postgres_project_repo_create_and_update_role_do_not_query_squad_table,
+    test_project_repo_does_not_query_other_aggregates,
     test_services_layer_isolation,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "test_ports_have_no_framework_or_adapter_imports",
     "test_ports_have_no_vendor_discord_imports",
     "test_postgres_project_repo_create_and_update_role_do_not_query_squad_table",
+    "test_project_repo_does_not_query_other_aggregates",
     "test_services_layer_isolation",
 ]
