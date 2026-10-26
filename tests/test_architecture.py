@@ -119,10 +119,8 @@ def test_services_layer_isolation() -> None:
     )
 
     # Known temporary exceptions tracked by migration issues:
-    # - ("auth_service.py", "discord"): Tracked by Issue #53 (Arch 1.1)
     # - ("tree_render.py", "PIL"): Tracked by Issue #59 (Arch 3.1)
     known_exceptions = {
-        ("auth_service.py", "discord"),
         ("tree_render.py", "PIL"),
         ("tree_render.py", "PIL.Image"),
         ("tree_render.py", "PIL.ImageDraw"),
