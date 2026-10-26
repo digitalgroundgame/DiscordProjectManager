@@ -4,8 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Project, Task
-from src.ports.repositories import IOutboxRepo, IProjectRepo, ITaskRepo
-from src.ports.unit_of_work import IUnitOfWork
+from src.ports.repositories import (
+    IGuildLeadRoleRepository,
+    IGuildLeadUserRepository,
+    IOutboxRepo,
+    IProjectRepo,
+    ISquadRepo,
+    ITaskRepo,
+    IUserCalendarTokenRepo,
+    IUserPreferenceRepo,
+)
+from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 
 
 @pytest.mark.asyncio
@@ -131,3 +140,44 @@ async def test_task_service_rollback_on_outbox_failure(async_engine: AsyncEngine
         tasks, count = await uow.tasks.list_tasks(guild_id=55555, project_id=p.id)
         assert count == 0
         assert len(tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_uow_exposes_all_domain_repositories(async_engine: AsyncEngine):
+    """Assert all 8 repositories are accessible via IUnitOfWork interface."""
+    session_factory = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    uow: IUnitOfWork = SqlAlchemyUnitOfWork(session_factory)
+
+    async with uow:
+        assert isinstance(uow.tasks, ITaskRepo)
+        assert isinstance(uow.projects, IProjectRepo)
+        assert isinstance(uow.squads, ISquadRepo)
+        assert isinstance(uow.outbox, IOutboxRepo)
+        assert isinstance(uow.user_prefs, IUserPreferenceRepo)
+        assert isinstance(uow.guild_lead_roles, IGuildLeadRoleRepository)
+        assert isinstance(uow.guild_lead_users, IGuildLeadUserRepository)
+        assert isinstance(uow.calendar_tokens, IUserCalendarTokenRepo)
+
+
+@pytest.mark.asyncio
+async def test_null_unit_of_work():
+    """Verify NullUnitOfWork adheres to IUnitOfWork interface without raising."""
+    null_uow = NullUnitOfWork()
+    assert null_uow.tasks is None
+    assert null_uow.projects is None
+    assert null_uow.squads is None
+    assert null_uow.outbox is None
+    assert null_uow.user_prefs is None
+    assert null_uow.guild_lead_roles is None
+    assert null_uow.guild_lead_users is None
+    assert null_uow.calendar_tokens is None
+
+    async with null_uow as active:
+        assert active is null_uow
+        await null_uow.commit()
+        await null_uow.rollback()
+    assert null_uow.session is None

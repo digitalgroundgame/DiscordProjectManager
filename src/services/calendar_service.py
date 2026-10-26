@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from src.config import settings
 from src.domain.standard_mappings import to_rfc5545_vcalendar
+from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 
 if TYPE_CHECKING:
     from src.ports.repositories import ITaskRepo, IUserCalendarTokenRepo
@@ -20,34 +23,47 @@ class CalendarService:
         self,
         calendar_token_repo: IUserCalendarTokenRepo,
         task_repo: ITaskRepo,
+        uow: IUnitOfWork | None = None,
     ) -> None:
         self.token_repo = calendar_token_repo
         self.task_repo = task_repo
+        self.uow = uow
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
+        if self.uow is not None:
+            async with self.uow as active_uow:
+                yield active_uow
+        else:
+            yield NullUnitOfWork(calendar_tokens=self.token_repo, tasks=self.task_repo)
 
     async def get_or_create_token(self, user_discord_id: int) -> str:
         """Retrieves existing calendar token for a user or creates a new cryptographically secure token."""
-        record = await self.token_repo.get_by_user_id(user_discord_id)
-        if record:
-            return record.token
+        async with self._transaction() as uow:
+            record = await uow.calendar_tokens.get_by_user_id(user_discord_id)
+            if record:
+                return record.token
 
-        token = secrets.token_urlsafe(32)
-        created = await self.token_repo.create_or_regenerate_token(user_discord_id, token)
-        logger.info("Generated new calendar feed token for user %s", user_discord_id)
-        return created.token
+            token = secrets.token_urlsafe(32)
+            created = await uow.calendar_tokens.create_or_regenerate_token(user_discord_id, token)
+            logger.info("Generated new calendar feed token for user %s", user_discord_id)
+            return created.token
 
     async def regenerate_token(self, user_discord_id: int) -> str:
         """Revokes any existing token and generates a fresh token for the user."""
-        token = secrets.token_urlsafe(32)
-        created = await self.token_repo.create_or_regenerate_token(user_discord_id, token)
-        logger.info("Regenerated calendar feed token for user %s", user_discord_id)
-        return created.token
+        async with self._transaction() as uow:
+            token = secrets.token_urlsafe(32)
+            created = await uow.calendar_tokens.create_or_regenerate_token(user_discord_id, token)
+            logger.info("Regenerated calendar feed token for user %s", user_discord_id)
+            return created.token
 
     async def revoke_token(self, user_discord_id: int) -> bool:
         """Revokes (deletes) the calendar token for a user."""
-        revoked = await self.token_repo.revoke_token(user_discord_id)
-        if revoked:
-            logger.info("Revoked calendar feed token for user %s", user_discord_id)
-        return revoked
+        async with self._transaction() as uow:
+            revoked = await uow.calendar_tokens.revoke_token(user_discord_id)
+            if revoked:
+                logger.info("Revoked calendar feed token for user %s", user_discord_id)
+            return revoked
 
     async def get_user_id_by_token(self, token: str) -> int | None:
         """Validates a calendar token and returns the associated Discord user ID."""

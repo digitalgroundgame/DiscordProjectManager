@@ -103,12 +103,12 @@ async def services(repos, async_engine: AsyncEngine):
         expire_on_commit=False,
     )
     uow = SqlAlchemyUnitOfWork(session_factory)
-    project_service = ProjectService(repos["project"])
-    squad_service = SquadService(repos["squad"])
+    project_service = ProjectService(repos["project"], uow=uow)
+    squad_service = SquadService(repos["squad"], uow=uow)
     outbox_service = OutboxService(repos["outbox"])
     task_service = TaskService(repos["task"], project_service, outbox_service, uow=uow)
-    user_service = UserService(repos["user"])
-    calendar_service = CalendarService(repos["calendar_token"], repos["task"])
+    user_service = UserService(repos["user"], uow=uow)
+    calendar_service = CalendarService(repos["calendar_token"], repos["task"], uow=uow)
     return {
         "project": project_service,
         "squad": squad_service,

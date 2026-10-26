@@ -27,8 +27,8 @@ from src.domain.tech_tree import (
     TechTree,
     resolve_member_name,
 )
-from src.ports.repositories import IOutboxRepo, IProjectRepo, ITaskRepo
-from src.ports.unit_of_work import IUnitOfWork
+from src.ports.repositories import ITaskRepo
+from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 
@@ -39,33 +39,6 @@ __all__ = [
     "parse_prerequisite_short_ids",
     "resolve_member_name",
 ]
-
-
-class _NullUnitOfWork(IUnitOfWork):
-    """Fallback Unit of Work when no transactional unit of work is injected."""
-
-    def __init__(self, task_repo: ITaskRepo, project_repo: IProjectRepo, outbox_repo: IOutboxRepo):
-        self.tasks = task_repo
-        self.projects = project_repo
-        self.outbox = outbox_repo
-        self.squads = None  # type: ignore[assignment]
-        self.user_prefs = None  # type: ignore[assignment]
-
-    async def __aenter__(self) -> _NullUnitOfWork:
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        pass
-
-    async def commit(self) -> None:
-        pass
-
-    async def rollback(self) -> None:
-        pass
-
-    @property
-    def session(self) -> Any:
-        return None
 
 
 def parse_prerequisite_short_ids(raw: str | list[str] | None) -> list[str]:
@@ -128,10 +101,10 @@ class TaskService:
             async with self.uow as active_uow:
                 yield active_uow
         else:
-            yield _NullUnitOfWork(
-                self.task_repo,
-                self.project_service.project_repo,
-                self.outbox_service.outbox_repo,
+            yield NullUnitOfWork(
+                tasks=self.task_repo,
+                projects=self.project_service.project_repo,
+                outbox=self.outbox_service.outbox_repo,
             )
 
     async def create_task(
@@ -149,26 +122,26 @@ class TaskService:
         metadata_json: dict[str, Any] | None = None,
         prerequisite_short_ids: list[str] | str | None = None,
     ) -> Task:
-        # Resolve project if project_name given
-        resolved_project_id = project_id
-        if project_name and not resolved_project_id:
-            project = await self.project_service.get_by_name(guild_id, project_name)
-            if not project:
-                raise ProjectNotFoundError(f"Project '{project_name}' was not found in this server.")
-            resolved_project_id = project.id
-
-        if not resolved_project_id:
-            raise ValidationError("A project container must be specified for every task.")
-
-        explicit_prereqs = parse_prerequisite_short_ids(prerequisite_short_ids)
-        for prereq_key in explicit_prereqs:
-            depends_on_task = await self.get_by_short_id(guild_id, prereq_key)
-            if not depends_on_task:
-                raise TaskNotFoundError(f"Prerequisite task '{prereq_key}' was not found in this server.")
-
-        clean_watchers = list(set(watchers or []))
-
         async with self._transaction() as uow:
+            # Resolve project if project_name given
+            resolved_project_id = project_id
+            if project_name and not resolved_project_id:
+                project = await uow.projects.get_by_name(guild_id, project_name)
+                if not project:
+                    raise ProjectNotFoundError(f"Project '{project_name}' was not found in this server.")
+                resolved_project_id = project.id
+
+            if not resolved_project_id:
+                raise ValidationError("A project container must be specified for every task.")
+
+            explicit_prereqs = parse_prerequisite_short_ids(prerequisite_short_ids)
+            for prereq_key in explicit_prereqs:
+                depends_on_task = await uow.tasks.get_by_short_id(guild_id, prereq_key)
+                if not depends_on_task:
+                    raise TaskNotFoundError(f"Prerequisite task '{prereq_key}' was not found in this server.")
+
+            clean_watchers = list(set(watchers or []))
+
             # Allocate short ID within transaction
             task_number, short_id = await self.project_service.allocate_next_short_id(
                 resolved_project_id, project_repo=uow.projects
@@ -259,14 +232,14 @@ class TaskService:
         actor_discord_id: int,
         notes: str | None = None,
     ) -> Task:
-        current_task = await self.task_repo.get_by_id(task_id)
-        if not current_task:
-            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
-
-        old_status = current_task.status
-        completed_at = datetime.now(UTC) if new_status == TaskStatus.COMPLETED else None
-
         async with self._transaction() as uow:
+            current_task = await uow.tasks.get_by_id(task_id)
+            if not current_task:
+                raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+            old_status = current_task.status
+            completed_at = datetime.now(UTC) if new_status == TaskStatus.COMPLETED else None
+
             updated_task = await uow.tasks.update_status_cas(
                 task_id=task_id,
                 expected_version=expected_version,
@@ -384,11 +357,10 @@ class TaskService:
         actor_discord_id: int,
         note_text: str,
     ) -> TaskHistory:
-        task = await self.task_repo.get_by_id(task_id)
-        if not task:
-            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
-
         async with self._transaction() as uow:
+            task = await uow.tasks.get_by_id(task_id)
+            if not task:
+                raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
             history = TaskHistory(
                 task_id=task_id,
                 actor_discord_id=actor_discord_id,
@@ -433,16 +405,16 @@ class TaskService:
         new_assignee_id: int | None,
         actor_discord_id: int,
     ) -> Task:
-        current_task = await self.task_repo.get_by_id(task_id)
-        if not current_task:
-            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
-
-        old_assignee = current_task.assignee_discord_id
-        if old_assignee == new_assignee_id:
-            return current_task
-
-        clear = new_assignee_id is None
         async with self._transaction() as uow:
+            current_task = await uow.tasks.get_by_id(task_id)
+            if not current_task:
+                raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+            old_assignee = current_task.assignee_discord_id
+            if old_assignee == new_assignee_id:
+                return current_task
+
+            clear = new_assignee_id is None
             updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 assignee_discord_id=new_assignee_id,
@@ -503,15 +475,15 @@ class TaskService:
         new_priority: PriorityLevel,
         actor_discord_id: int,
     ) -> Task:
-        current_task = await self.task_repo.get_by_id(task_id)
-        if not current_task:
-            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
-
-        old_priority = current_task.priority
-        if old_priority == new_priority:
-            return current_task
-
         async with self._transaction() as uow:
+            current_task = await uow.tasks.get_by_id(task_id)
+            if not current_task:
+                raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+            old_priority = current_task.priority
+            if old_priority == new_priority:
+                return current_task
+
             updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 priority=new_priority,
@@ -569,45 +541,45 @@ class TaskService:
         clear_due_at: bool = False,
         watchers: list[int] | None = None,
     ) -> Task:
-        current_task = await self.task_repo.get_by_id(task_id)
-        if not current_task:
-            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
-
-        diffs: list[dict[str, Any]] = []
-        changes: list[str] = []
-        if title is not None and title.strip() != current_task.title:
-            diffs.append({"field": "title", "old_value": current_task.title, "new_value": title.strip()})
-            changes.append(f"Title: {current_task.title} -> {title.strip()}")
-        if clear_body and current_task.body:
-            diffs.append({"field": "body", "old_value": current_task.body, "new_value": None})
-            changes.append("Description removed")
-        elif body is not None and body.strip() != (current_task.body or ""):
-            diffs.append({"field": "body", "old_value": current_task.body, "new_value": body.strip()})
-            changes.append("Description updated")
-        if clear_due_at and current_task.due_at:
-            diffs.append({"field": "due_at", "old_value": current_task.due_at.isoformat(), "new_value": None})
-            changes.append("Due date removed")
-        elif due_at is not None and due_at != current_task.due_at:
-            due_str = due_at.strftime("%Y-%m-%d %H:%M UTC")
-            diffs.append(
-                {
-                    "field": "due_at",
-                    "old_value": current_task.due_at.isoformat() if current_task.due_at else None,
-                    "new_value": due_str,
-                }
-            )
-            changes.append(f"Due date set to {due_str}")
-        if watchers is not None and set(watchers) != set(current_task.watchers):
-            added = sorted(set(watchers) - set(current_task.watchers))
-            removed = sorted(set(current_task.watchers) - set(watchers))
-            if added:
-                diffs.append({"field": "watchers", "action": "added", "user_ids": added})
-                changes.append(f"Added watchers: {', '.join(str(u) for u in added)}")
-            if removed:
-                diffs.append({"field": "watchers", "action": "removed", "user_ids": removed})
-                changes.append(f"Removed watchers: {', '.join(str(u) for u in removed)}")
-
         async with self._transaction() as uow:
+            current_task = await uow.tasks.get_by_id(task_id)
+            if not current_task:
+                raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+            diffs: list[dict[str, Any]] = []
+            changes: list[str] = []
+            if title is not None and title.strip() != current_task.title:
+                diffs.append({"field": "title", "old_value": current_task.title, "new_value": title.strip()})
+                changes.append(f"Title: {current_task.title} -> {title.strip()}")
+            if clear_body and current_task.body:
+                diffs.append({"field": "body", "old_value": current_task.body, "new_value": None})
+                changes.append("Description removed")
+            elif body is not None and body.strip() != (current_task.body or ""):
+                diffs.append({"field": "body", "old_value": current_task.body, "new_value": body.strip()})
+                changes.append("Description updated")
+            if clear_due_at and current_task.due_at:
+                diffs.append({"field": "due_at", "old_value": current_task.due_at.isoformat(), "new_value": None})
+                changes.append("Due date removed")
+            elif due_at is not None and due_at != current_task.due_at:
+                due_str = due_at.strftime("%Y-%m-%d %H:%M UTC")
+                diffs.append(
+                    {
+                        "field": "due_at",
+                        "old_value": current_task.due_at.isoformat() if current_task.due_at else None,
+                        "new_value": due_str,
+                    }
+                )
+                changes.append(f"Due date set to {due_str}")
+            if watchers is not None and set(watchers) != set(current_task.watchers):
+                added = sorted(set(watchers) - set(current_task.watchers))
+                removed = sorted(set(current_task.watchers) - set(watchers))
+                if added:
+                    diffs.append({"field": "watchers", "action": "added", "user_ids": added})
+                    changes.append(f"Added watchers: {', '.join(str(u) for u in added)}")
+                if removed:
+                    diffs.append({"field": "watchers", "action": "removed", "user_ids": removed})
+                    changes.append(f"Removed watchers: {', '.join(str(u) for u in removed)}")
+
             updated_task = await uow.tasks.update_task(
                 task_id=task_id,
                 title=title,
@@ -675,7 +647,8 @@ class TaskService:
         discord_message_id: int,
         discord_thread_id: int | None = None,
     ) -> None:
-        await self.task_repo.update_discord_message(task_id, discord_message_id, discord_thread_id)
+        async with self._transaction() as uow:
+            await uow.tasks.update_discord_message(task_id, discord_message_id, discord_thread_id)
 
     async def get_by_id(self, task_id: UUID) -> Task | None:
         return await self.task_repo.get_by_id(task_id)
@@ -755,11 +728,11 @@ class TaskService:
 
     async def delete_task(self, task_id: UUID, actor_discord_id: int | None = None) -> Task | None:
         """Permanently deletes a task, its dependencies, history, watchers, and cancels pending reminders."""
-        task = await self.get_by_id(task_id)
-        if not task:
-            return None
-
         async with self._transaction() as uow:
+            task = await uow.tasks.get_by_id(task_id)
+            if not task:
+                return None
+
             await self.outbox_service.cancel_task_reminders(task_id, outbox_repo=uow.outbox)
             deleted = await uow.tasks.delete(task_id)
             if not deleted:
@@ -778,28 +751,28 @@ class TaskService:
         actor_discord_id: int | None = None,
     ) -> bool:
         """Adds a dependency indicating that task_short_id depends on depends_on_short_id."""
-        task = await self.get_by_short_id(guild_id, task_short_id)
-        if not task:
-            raise TaskNotFoundError(f"Task '{task_short_id}' was not found in this server.")
-
-        depends_on_task = await self.get_by_short_id(guild_id, depends_on_short_id)
-        if not depends_on_task:
-            raise TaskNotFoundError(f"Prerequisite task '{depends_on_short_id}' was not found in this server.")
-
-        if task.id == depends_on_task.id:
-            raise ValidationError("A task cannot depend on itself.")
-
-        # Cycle detection via TechTree domain module
-        guild_deps = await self.task_repo.get_all_guild_dependencies(guild_id)
-        tree = TechTree([task, depends_on_task], guild_deps)
-        try:
-            tree.validate_edge(task.id, depends_on_task.id)
-        except SelfDependencyError as e:
-            raise ValidationError(str(e)) from e
-        except CircularDependencyError as e:
-            raise ValidationError(str(e)) from e
-
         async with self._transaction() as uow:
+            task = await uow.tasks.get_by_short_id(guild_id, task_short_id.upper())
+            if not task:
+                raise TaskNotFoundError(f"Task '{task_short_id}' was not found in this server.")
+
+            depends_on_task = await uow.tasks.get_by_short_id(guild_id, depends_on_short_id.upper())
+            if not depends_on_task:
+                raise TaskNotFoundError(f"Prerequisite task '{depends_on_short_id}' was not found in this server.")
+
+            if task.id == depends_on_task.id:
+                raise ValidationError("A task cannot depend on itself.")
+
+            # Cycle detection via TechTree domain module
+            guild_deps = await uow.tasks.get_all_guild_dependencies(guild_id)
+            tree = TechTree([task, depends_on_task], guild_deps)
+            try:
+                tree.validate_edge(task.id, depends_on_task.id)
+            except SelfDependencyError as e:
+                raise ValidationError(str(e)) from e
+            except CircularDependencyError as e:
+                raise ValidationError(str(e)) from e
+
             res = await uow.tasks.add_dependency(task.id, depends_on_task.id)
             if actor_discord_id:
                 history = TaskHistory(
@@ -819,15 +792,15 @@ class TaskService:
         actor_discord_id: int | None = None,
     ) -> bool:
         """Removes a dependency between task_short_id and depends_on_short_id."""
-        task = await self.get_by_short_id(guild_id, task_short_id)
-        if not task:
-            raise TaskNotFoundError(f"Task '{task_short_id}' was not found in this server.")
-
-        depends_on_task = await self.get_by_short_id(guild_id, depends_on_short_id)
-        if not depends_on_task:
-            raise TaskNotFoundError(f"Prerequisite task '{depends_on_short_id}' was not found in this server.")
-
         async with self._transaction() as uow:
+            task = await uow.tasks.get_by_short_id(guild_id, task_short_id.upper())
+            if not task:
+                raise TaskNotFoundError(f"Task '{task_short_id}' was not found in this server.")
+
+            depends_on_task = await uow.tasks.get_by_short_id(guild_id, depends_on_short_id.upper())
+            if not depends_on_task:
+                raise TaskNotFoundError(f"Prerequisite task '{depends_on_short_id}' was not found in this server.")
+
             res = await uow.tasks.remove_dependency(task.id, depends_on_task.id)
             if actor_discord_id and res:
                 history = TaskHistory(
