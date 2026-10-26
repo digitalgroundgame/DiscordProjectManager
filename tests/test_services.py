@@ -390,6 +390,14 @@ async def test_task_service_update_outbox_events(services, db_session):
     # Check payload structure for details update
     details_evt = next(e for e in events if e.idempotency_key.startswith(f"task_details:{task.id}"))
     assert details_evt.payload["update_type"] == "details"
-    assert "Title: `Original Title` ➔ **`Updated Title`**" in details_evt.payload["changes"]
-    assert "Added watchers: <@5002>" in details_evt.payload["changes"]
+    assert "Title: Original Title -> Updated Title" in details_evt.payload["changes"]
+    assert "Added watchers: 5002" in details_evt.payload["changes"]
     assert set(details_evt.payload["watchers"]) == {5001, 5002}
+    assert any(
+        d.get("field") == "title" and d.get("old_value") == "Original Title" and d.get("new_value") == "Updated Title"
+        for d in details_evt.payload.get("diffs", [])
+    )
+    assert any(
+        d.get("field") == "watchers" and d.get("action") == "added" and d.get("user_ids") == [5002]
+        for d in details_evt.payload.get("diffs", [])
+    )

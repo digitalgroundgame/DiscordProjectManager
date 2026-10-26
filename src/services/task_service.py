@@ -451,12 +451,17 @@ class TaskService:
             if not updated_task:
                 raise ValidationError(f"Failed to update assignee for task {task_id}.")
 
-            note = f"Assigned to <@{new_assignee_id}>" if new_assignee_id else "Removed assignee (unassigned)"
+            note = f"Assigned to {new_assignee_id}" if new_assignee_id else "Removed assignee (unassigned)"
             history = TaskHistory(
                 task_id=task_id,
                 actor_discord_id=actor_discord_id,
                 action=TaskHistoryAction.ASSIGNED,
                 notes=note,
+                diff_payload={
+                    "field": "assignee",
+                    "old_value": old_assignee,
+                    "new_value": new_assignee_id,
+                },
             )
             await uow.tasks.add_history(history)
 
@@ -568,24 +573,39 @@ class TaskService:
         if not current_task:
             raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
 
+        diffs: list[dict[str, Any]] = []
         changes: list[str] = []
         if title is not None and title.strip() != current_task.title:
-            changes.append(f"Title: `{current_task.title}` ➔ **`{title.strip()}`**")
+            diffs.append({"field": "title", "old_value": current_task.title, "new_value": title.strip()})
+            changes.append(f"Title: {current_task.title} -> {title.strip()}")
         if clear_body and current_task.body:
+            diffs.append({"field": "body", "old_value": current_task.body, "new_value": None})
             changes.append("Description removed")
         elif body is not None and body.strip() != (current_task.body or ""):
+            diffs.append({"field": "body", "old_value": current_task.body, "new_value": body.strip()})
             changes.append("Description updated")
         if clear_due_at and current_task.due_at:
+            diffs.append({"field": "due_at", "old_value": current_task.due_at.isoformat(), "new_value": None})
             changes.append("Due date removed")
         elif due_at is not None and due_at != current_task.due_at:
-            changes.append(f"Due date set to `{due_at.strftime('%Y-%m-%d %H:%M UTC')}`")
+            due_str = due_at.strftime("%Y-%m-%d %H:%M UTC")
+            diffs.append(
+                {
+                    "field": "due_at",
+                    "old_value": current_task.due_at.isoformat() if current_task.due_at else None,
+                    "new_value": due_str,
+                }
+            )
+            changes.append(f"Due date set to {due_str}")
         if watchers is not None and set(watchers) != set(current_task.watchers):
-            added = set(watchers) - set(current_task.watchers)
-            removed = set(current_task.watchers) - set(watchers)
+            added = sorted(set(watchers) - set(current_task.watchers))
+            removed = sorted(set(current_task.watchers) - set(watchers))
             if added:
-                changes.append(f"Added watchers: {', '.join(f'<@{u}>' for u in sorted(added))}")
+                diffs.append({"field": "watchers", "action": "added", "user_ids": added})
+                changes.append(f"Added watchers: {', '.join(str(u) for u in added)}")
             if removed:
-                changes.append(f"Removed watchers: {', '.join(f'<@{u}>' for u in sorted(removed))}")
+                diffs.append({"field": "watchers", "action": "removed", "user_ids": removed})
+                changes.append(f"Removed watchers: {', '.join(str(u) for u in removed)}")
 
         async with self._transaction() as uow:
             updated_task = await uow.tasks.update_task(
@@ -637,6 +657,7 @@ class TaskService:
                         "version": updated_task.version,
                         "created_at": updated_task.created_at.isoformat() if updated_task.created_at else None,
                         "changes": changes,
+                        "diffs": diffs,
                         "status": updated_task.status.value,
                         "is_completed": updated_task.status == TaskStatus.COMPLETED,
                         "update_type": "details",

@@ -187,7 +187,12 @@ def build_task_history_embed(task: Task, history: list[TaskHistory]) -> discord.
             detail = f" performed action: `{h.action.value}`"
 
         if h.notes:
-            detail += f'\n  *"{h.notes}"*'
+            note_text = h.notes
+            if getattr(h, "diff_payload", None) and h.diff_payload.get("field") == "assignee":
+                new_assignee = h.diff_payload.get("new_value")
+                if new_assignee:
+                    note_text = f"Assigned to <@{new_assignee}>"
+            detail += f'\n  *"{note_text}"*'
 
         lines.append(f"• **{time_str}** by {actor}:{detail}")
 

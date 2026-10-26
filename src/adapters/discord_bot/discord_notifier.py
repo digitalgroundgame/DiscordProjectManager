@@ -692,8 +692,34 @@ class DiscordNotifier(INotificationDispatcher):
                 recipients.add(assignee_id)
 
         else:
-            changes = payload.get("changes", [])
-            change_text = "\n".join(f"• {c}" for c in changes) if changes else "Task details were updated."
+            diffs = payload.get("diffs", [])
+            if diffs:
+                formatted_lines: list[str] = []
+                for d in diffs:
+                    field = d.get("field")
+                    if field == "title":
+                        formatted_lines.append(f"Title: `{d.get('old_value')}` ➔ **`{d.get('new_value')}`**")
+                    elif field == "body":
+                        formatted_lines.append(
+                            "Description removed" if d.get("new_value") is None else "Description updated"
+                        )
+                    elif field == "due_at":
+                        new_due = d.get("new_value")
+                        if new_due is None:
+                            formatted_lines.append("Due date removed")
+                        else:
+                            formatted_lines.append(f"Due date set to `{new_due}`")
+                    elif field == "watchers":
+                        user_ids = d.get("user_ids", [])
+                        mentions = ", ".join(f"<@{u}>" for u in user_ids)
+                        action = d.get("action", "updated")
+                        formatted_lines.append(f"{action.capitalize()} watchers: {mentions}")
+                    else:
+                        formatted_lines.append(str(d))
+                change_text = "\n".join(f"• {c}" for c in formatted_lines)
+            else:
+                changes = payload.get("changes", [])
+                change_text = "\n".join(f"• {c}" for c in changes) if changes else "Task details were updated."
             thread_msg = f"**Task Updated by <@{actor_id}>:**\n{change_text}"
             embed_desc = f"<@{actor_id}> updated task details:\n{change_text}"
             embed_title = f"Task Updated: [{short_id}] {title}"

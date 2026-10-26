@@ -68,6 +68,7 @@ class TaskHistory(DomainModel):
     old_status: TaskStatus | None = None
     new_status: TaskStatus | None = None
     notes: str | None = None
+    diff_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

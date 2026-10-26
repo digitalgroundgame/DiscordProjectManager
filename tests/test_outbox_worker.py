@@ -1620,3 +1620,66 @@ async def test_task_unblocked_notification_delivery_preferences_and_workspace_sy
     for call in mock_thread.send.await_args_list:
         assert call.kwargs.get("view") is not None
         assert call.kwargs["view"].children[0].url == expected_jump_url
+
+
+@pytest.mark.asyncio
+async def test_structured_diffs_notification_formatting():
+    """Verify that structured domain diffs in outbox payload are formatted into Discord markdown and mentions."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.models import OutboxEvent
+
+    bot = MagicMock(spec=discord.Client)
+    dmd_users = {}
+
+    async def mock_get_or_fetch_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=lambda uid: dmd_users.get(uid))
+    bot.fetch_user = AsyncMock(side_effect=mock_get_or_fetch_user)
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 555666
+    mock_thread.guild = MagicMock(id=111)
+    mock_thread.send = AsyncMock()
+    bot.get_channel = MagicMock(return_value=mock_thread)
+    bot.fetch_channel = AsyncMock(return_value=mock_thread)
+
+    notifier = DiscordNotifier(bot)
+
+    evt = OutboxEvent(
+        event_type=EventType.TASK_UPDATED,
+        idempotency_key="diff_test_1",
+        payload={
+            "task_id": "diff-task-1",
+            "short_id": "DIFF-1",
+            "title": "New Title",
+            "guild_id": 111,
+            "actor_discord_id": 9999,
+            "assignee_discord_id": 2001,
+            "watchers": [2001],
+            "diffs": [
+                {"field": "title", "old_value": "Old Title", "new_value": "New Title"},
+                {"field": "due_at", "new_value": "2026-12-01 12:00 UTC"},
+                {"field": "watchers", "action": "added", "user_ids": [3001, 3002]},
+            ],
+            "update_type": "details",
+            "discord_thread_id": 555666,
+        },
+    )
+
+    await notifier.dispatch_event(evt)
+    assert 2001 in dmd_users
+    dm_call = dmd_users[2001].send.call_args.kwargs
+    embed = dm_call["embed"]
+    assert "Title: `Old Title` ➔ **`New Title`**" in embed.description
+    assert "Due date set to `2026-12-01 12:00 UTC`" in embed.description
+    assert "Added watchers: <@3001>, <@3002>" in embed.description
