@@ -6,10 +6,9 @@ from sqlalchemy import select
 from src.adapters.db.repos import (
     BasePostgresRepo,
     PostgresProjectRepo,
-    PostgresSquadRepo,
     PostgresTaskRepo,
 )
-from src.adapters.db.tables import ProjectSquadTable, ProjectTable, SquadTable
+from src.adapters.db.tables import ProjectTable, SquadTable
 from src.domain.models import Project, Task
 
 
@@ -62,30 +61,27 @@ async def test_postgres_project_repo_does_not_mutate_squad_table(db_session) -> 
 
 
 @pytest.mark.asyncio
-async def test_postgres_project_repo_links_existing_squad(db_session) -> None:
-    """PostgresProjectRepo.create links existing squads without creating new ones."""
-    squad_repo = PostgresSquadRepo(db_session)
-    project_repo = PostgresProjectRepo(db_session)
+async def test_project_service_links_squads_via_uow(services) -> None:
+    """ProjectService.create_project coordinates uow.squads and uow.projects to link squads (Issue #84)."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
 
     # Pre-create a squad
-    from src.domain.models import Squad
+    squad = await squad_srv.create_squad(guild_id=12345, name="Core Devs", discord_role_id=88801)
 
-    squad = await squad_repo.create(Squad(guild_id=12345, name="Core Devs", discord_role_id=88801))
-
-    # Create project linking this squad's role
-    project = Project(
+    # Create project linking this squad's role and a new role
+    created = await proj_srv.create_project(
         guild_id=12345,
         name="Linked Project",
         prefix="LNK",
-        discord_role_ids=[88801, 88802],  # 88802 doesn't exist
+        discord_role_ids=[88801, 88802],
     )
-    created = await project_repo.create(project)
 
-    # Verify ProjectSquadTable only links the existing squad
-    links_res = await db_session.execute(select(ProjectSquadTable).where(ProjectSquadTable.project_id == created.id))
-    links = links_res.scalars().all()
-    assert len(links) == 1
-    assert links[0].squad_id == squad.id
+    # Verify squads mapped for project
+    squads = await proj_srv.list_squads_for_project(created.id)
+    assert len(squads) == 2
+    linked_squad_ids = {s.id for s in squads}
+    assert squad.id in linked_squad_ids
 
 
 @pytest.mark.asyncio

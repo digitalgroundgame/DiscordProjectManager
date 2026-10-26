@@ -218,3 +218,20 @@ assert config._settings is None, f'config._settings was eagerly instantiated: {c
     assert result.returncode == 0, (
         f"Importing src/ modules triggered eager singletons:\n{result.stderr}\n{result.stdout}"
     )
+
+
+def test_postgres_project_repo_create_and_update_role_do_not_query_squad_table() -> None:
+    """PostgresProjectRepo.create and update_role_id must not reference or query SquadTable (Issue #84)."""
+    repo_file = ADAPTERS_DIR / "db" / "repos" / "project_repo.py"
+    assert repo_file.is_file(), f"File not found: {repo_file}"
+
+    tree = ast.parse(repo_file.read_text(encoding="utf-8"), filename=str(repo_file))
+    target_methods = {"create", "update_role_id"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in target_methods:
+            for child in ast.walk(node):
+                if isinstance(child, ast.Name) and child.id == "SquadTable":
+                    raise AssertionError(
+                        f"PostgresProjectRepo.{node.name} directly references SquadTable at line {child.lineno}"
+                    )

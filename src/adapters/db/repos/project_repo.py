@@ -62,18 +62,6 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             )
             session.add(row)
 
-            # Map any existing squads for project.discord_role_ids (only mutates ProjectSquadTable)
-            for rid in project.discord_role_ids:
-                squad_stmt = select(SquadTable).where(
-                    SquadTable.guild_id == project.guild_id,
-                    SquadTable.discord_role_id == rid,
-                )
-                squad_res = await session.execute(squad_stmt)
-                squad_row = squad_res.scalar_one_or_none()
-                if squad_row:
-                    pt_row = ProjectSquadTable(project_id=project.id, squad_id=squad_row.id)
-                    session.add(pt_row)
-
             if self._should_commit(None):
                 await session.commit()
             else:
@@ -189,7 +177,12 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
                 await session.flush()
             return _to_domain_project(row)
 
-    async def update_role_id(self, project_id: UUID, discord_role_id: int | None) -> Project | None:
+    async def update_role_id(
+        self,
+        project_id: UUID,
+        discord_role_id: int | None,
+        squad_id: UUID | None = None,
+    ) -> Project | None:
         async with self._get_session() as session:
             proj_stmt = select(ProjectTable).where(ProjectTable.id == project_id)
             res = await session.execute(proj_stmt)
@@ -200,16 +193,9 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             del_stmt = delete(ProjectSquadTable).where(ProjectSquadTable.project_id == project_id)
             await session.execute(del_stmt)
 
-            if discord_role_id is not None:
-                squad_stmt = select(SquadTable).where(
-                    SquadTable.guild_id == proj_row.guild_id,
-                    SquadTable.discord_role_id == discord_role_id,
-                )
-                squad_res = await session.execute(squad_stmt)
-                squad_row = squad_res.scalar_one_or_none()
-                if squad_row:
-                    pt_row = ProjectSquadTable(project_id=project_id, squad_id=squad_row.id)
-                    await session.merge(pt_row)
+            if squad_id is not None:
+                pt_row = ProjectSquadTable(project_id=project_id, squad_id=squad_id)
+                await session.merge(pt_row)
 
             proj_row.updated_at = datetime.now(UTC)
             if self._should_commit(None):
