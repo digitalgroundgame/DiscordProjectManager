@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-import src.adapters.rendering  # noqa: F401
 from src.adapters.db.postgres_repo import (
     PostgresOutboxRepo,
     PostgresProjectRepo,
@@ -21,6 +20,7 @@ from src.adapters.db.postgres_repo import (
 )
 from src.adapters.db.tables import Base
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
+from src.adapters.rendering import PillowTechTreeRenderer
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -107,7 +107,13 @@ async def services(repos, async_engine: AsyncEngine):
     project_service = ProjectService(repos["project"], uow=uow)
     squad_service = SquadService(repos["squad"], uow=uow)
     outbox_service = OutboxService(repos["outbox"])
-    task_service = TaskService(repos["task"], project_service, outbox_service, uow=uow)
+    task_service = TaskService(
+        repos["task"],
+        project_service,
+        outbox_service,
+        uow=uow,
+        tree_renderer=PillowTechTreeRenderer(),
+    )
     user_service = UserService(repos["user"], uow=uow)
     calendar_service = CalendarService(repos["calendar_token"], repos["task"], uow=uow)
     return {

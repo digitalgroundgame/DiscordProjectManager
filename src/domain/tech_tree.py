@@ -564,21 +564,6 @@ class TechTree:
 
         return nodes, edges
 
-    _default_png_renderer: Any | None = None
-    _default_mermaid_renderer: Any | None = None
-
-    @classmethod
-    def register_default_renderers(
-        cls,
-        png_renderer: Any | None = None,
-        mermaid_renderer: Any | None = None,
-    ) -> None:
-        """Allows driven adapters to register default rendering engines without domain coupling."""
-        if png_renderer is not None:
-            cls._default_png_renderer = png_renderer
-        if mermaid_renderer is not None:
-            cls._default_mermaid_renderer = mermaid_renderer
-
     def render(self, renderer: TechTreeRenderer[T_RenderOutput] | Any, **kwargs: Any) -> T_RenderOutput:
         """Renders the Tech Tree using an injected rendering adapter."""
         return renderer.render(self, **kwargs)
@@ -590,14 +575,11 @@ class TechTree:
         subtitle: str | None = None,
         orientation: str = "lr",
     ) -> io.BytesIO:
-        """Renders the Tech Tree into a PNG byte buffer using an injected or registered renderer."""
-        actual_renderer = renderer or self._default_png_renderer
-        if actual_renderer is None:
-            raise ValueError(
-                "No PNG renderer provided or registered. Pass renderer=... to to_png or use tree.render(renderer)."
-            )
+        """Renders the Tech Tree into a PNG byte buffer using an injected renderer."""
+        if renderer is None:
+            raise ValueError("No PNG renderer provided. Pass renderer=... to to_png or use tree.render(renderer).")
         mode = orientation.value if hasattr(orientation, "value") else str(orientation)
-        return actual_renderer.render(self, title=title, subtitle=subtitle, mode=mode)
+        return renderer.render(self, title=title, subtitle=subtitle, mode=mode)
 
     def to_mermaid(
         self,
@@ -605,10 +587,8 @@ class TechTree:
         orientation: str = "lr",
     ) -> str:
         """Renders the Tech Tree into a Mermaid markdown graph for Discord text messages."""
-        actual_renderer = renderer or self._default_mermaid_renderer
-        if actual_renderer is None:
+        if renderer is None:
             raise ValueError(
-                "No Mermaid renderer provided or registered. "
-                "Pass renderer=... to to_mermaid or use tree.render(renderer)."
+                "No Mermaid renderer provided. Pass renderer=... to to_mermaid or use tree.render(renderer)."
             )
-        return actual_renderer.render(self, orientation=orientation)
+        return renderer.render(self, orientation=orientation)

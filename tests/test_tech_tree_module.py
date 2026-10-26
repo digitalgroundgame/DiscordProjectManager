@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from PIL import Image
 
-import src.adapters.rendering  # noqa: F401
+from src.adapters.rendering import MermaidTechTreeRenderer, PillowTechTreeRenderer
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.domain.tech_tree import (
@@ -236,7 +236,14 @@ class TestTechTreeRenderingSeam:
         t2 = _make_task("PNG-2", status=TaskStatus.IN_PROGRESS)
         tree = TechTree.build([t1, t2], [(t2.id, t1.id)])
 
-        buf = tree.to_png(title="Test Project Tree", orientation=TechTreeOrientation.HORIZONTAL)
+        with pytest.raises(ValueError, match="No PNG renderer provided"):
+            tree.to_png()
+
+        buf = tree.to_png(
+            renderer=PillowTechTreeRenderer(),
+            title="Test Project Tree",
+            orientation=TechTreeOrientation.HORIZONTAL,
+        )
         assert isinstance(buf, io.BytesIO)
         img = Image.open(buf)
         assert img.format == "PNG"
@@ -248,7 +255,10 @@ class TestTechTreeRenderingSeam:
         t2 = _make_task("MER-2", title="Run System", status=TaskStatus.IN_PROGRESS)
         tree = TechTree.build([t1, t2], [(t2.id, t1.id)])
 
-        mermaid = tree.to_mermaid(orientation="lr")
+        with pytest.raises(ValueError, match="No Mermaid renderer provided"):
+            tree.to_mermaid()
+
+        mermaid = tree.to_mermaid(renderer=MermaidTechTreeRenderer(), orientation="lr")
         assert "graph LR" in mermaid
         assert 'MER-1["MER-1: Start Engine"]:::complete' in mermaid
         assert 'MER-2["MER-2: Run System"]:::active' in mermaid

@@ -10,13 +10,6 @@ from src.adapters.rendering.pillow_renderer import (
     plan_layout,
     render_tree,
 )
-from src.domain.tech_tree import TechTree
-
-# Auto-register default renderers onto pure domain TechTree
-TechTree.register_default_renderers(
-    png_renderer=PillowTechTreeRenderer(),
-    mermaid_renderer=MermaidTechTreeRenderer(),
-)
 
 __all__ = [
     "THEME",

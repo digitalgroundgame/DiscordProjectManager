@@ -114,6 +114,8 @@ def test_services_layer_isolation() -> None:
         "PIL",
         "uvicorn",
         "src.adapters",
+        "src.config",
+        "src.bootstrap",
     )
 
     # Zero exceptions in application services layer: pure domain & port dependencies only
@@ -209,6 +211,11 @@ assert menu_manager._default_menu_manager is None, 'menu_manager._default_menu_m
 
 from src import config
 assert config._settings is None, f'config._settings was eagerly instantiated: {config._settings}'
+
+from src.domain.tech_tree import TechTree
+assert not hasattr(TechTree, "register_default_renderers"), "TechTree has register_default_renderers global method"
+assert getattr(TechTree, "_default_png_renderer", None) is None
+assert getattr(TechTree, "_default_mermaid_renderer", None) is None
 """
     result = subprocess.run(
         [sys.executable, "-c", verification_code],
@@ -235,3 +242,20 @@ def test_postgres_project_repo_create_and_update_role_do_not_query_squad_table()
                     raise AssertionError(
                         f"PostgresProjectRepo.{node.name} directly references SquadTable at line {child.lineno}"
                     )
+
+
+def test_discord_bot_adapter_modules_do_not_exceed_600_lines() -> None:
+    """Every module under src/adapters/discord_bot/ must strictly observe the 600-line ceiling (AGENTS.md)."""
+    discord_bot_dir = ADAPTERS_DIR / "discord_bot"
+    assert discord_bot_dir.is_dir(), f"Directory not found: {discord_bot_dir}"
+
+    oversized_files: list[tuple[str, int]] = []
+    for py_file in discord_bot_dir.rglob("*.py"):
+        line_count = len(py_file.read_text(encoding="utf-8").splitlines())
+        if line_count > 600:
+            oversized_files.append((str(py_file.relative_to(SRC_DIR.parent)), line_count))
+
+    assert not oversized_files, (
+        "Modularity violation: Discord adapter modules exceed 600 lines (AGENTS.md):\n"
+        + "\n".join(f"  - {path}: {count} lines" for path, count in oversized_files)
+    )
