@@ -5,7 +5,7 @@ import discord
 import httpx
 import pytest
 
-from src.adapters.api.app import api_app, get_db_session
+from src.adapters.api.app import api_app, get_calendar_service
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.views.calendar_feed_view import CalendarFeedView
 from src.domain.enums import PriorityLevel
@@ -177,11 +177,8 @@ async def test_fastapi_calendar_endpoint(services, db_session):
     )
     await db_session.commit()
 
-    # Override get_db_session to use test SQLite session
-    async def override_get_db_session():
-        yield db_session
-
-    api_app.dependency_overrides[get_db_session] = override_get_db_session
+    # Override get_calendar_service to use test calendar service
+    api_app.dependency_overrides[get_calendar_service] = lambda: calendar_srv
 
     try:
         transport = httpx.ASGITransport(app=api_app)

@@ -13,7 +13,8 @@ import discord  # noqa: E402
 import uvicorn  # noqa: E402
 
 from src.adapters.api.app import api_app  # noqa: E402
-from src.adapters.db.postgres_repo import (  # noqa: E402
+from src.adapters.db.observability_adapter import SqlAlchemySystemMetricsAdapter  # noqa: E402
+from src.adapters.db.repos import (  # noqa: E402
     PostgresGuildLeadRoleRepository,
     PostgresGuildLeadUserRepository,
     PostgresOutboxRepo,
@@ -32,6 +33,7 @@ from src.adapters.rendering import PillowTechTreeRenderer  # noqa: E402
 from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.services.calendar_service import CalendarService  # noqa: E402
+from src.services.observability_service import ObservabilityService  # noqa: E402
 from src.services.outbox_service import OutboxService  # noqa: E402
 from src.services.project_service import ProjectService  # noqa: E402
 from src.services.squad_service import SquadService  # noqa: E402
@@ -71,6 +73,10 @@ async def run_app() -> None:
     task_service = TaskService(task_repo, project_service, outbox_service, uow=uow, tree_renderer=tree_renderer)
     user_service = UserService(user_pref_repo, uow=uow)
     calendar_service = CalendarService(calendar_token_repo, task_repo, uow=uow)
+    metrics_adapter = SqlAlchemySystemMetricsAdapter(async_session_factory)
+    observability_service = ObservabilityService(metrics_adapter)
+    api_app.state.calendar_service = calendar_service
+    api_app.state.observability_service = observability_service
 
     # 3. Wire Discord Bot & Notifier
     bot = DggPmBot(
