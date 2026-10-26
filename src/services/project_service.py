@@ -65,17 +65,19 @@ class ProjectService(TransactionalService):
                 role_ids.insert(0, discord_role_id)
 
             # Auto-provision any missing squads for the specified role IDs
+            squad_ids: list[UUID] = []
             if uow.squads:
                 for rid in role_ids:
                     squad = await uow.squads.get_by_role_id(guild_id, rid)
                     if not squad:
-                        await uow.squads.create(
+                        squad = await uow.squads.create(
                             Squad(
                                 guild_id=guild_id,
                                 name=f"Squad-{rid}",
                                 discord_role_id=rid,
                             )
                         )
+                    squad_ids.append(squad.id)
 
             project = Project(
                 guild_id=guild_id,
@@ -88,7 +90,10 @@ class ProjectService(TransactionalService):
                 lead_discord_id=lead_discord_id,
                 category=category.strip() if category else None,
             )
-            return await uow.projects.create(project)
+            created = await uow.projects.create(project)
+            for sid in squad_ids:
+                await uow.projects.assign_squad(ProjectSquad(project_id=created.id, squad_id=sid))
+            return created
 
     async def get_by_id(self, project_id: UUID) -> Project | None:
         return await self.project_repo.get_by_id(project_id)
@@ -141,17 +146,19 @@ class ProjectService(TransactionalService):
             project = await uow.projects.get_by_id(project_id)
             if not project:
                 return None
+            target_squad_id: UUID | None = None
             if discord_role_id is not None and uow.squads:
                 squad = await uow.squads.get_by_role_id(project.guild_id, discord_role_id)
                 if not squad:
-                    await uow.squads.create(
+                    squad = await uow.squads.create(
                         Squad(
                             guild_id=project.guild_id,
                             name=f"Squad-{discord_role_id}",
                             discord_role_id=discord_role_id,
                         )
                     )
-            return await uow.projects.update_role_id(project_id, discord_role_id)
+                target_squad_id = squad.id
+            return await uow.projects.update_role_id(project_id, discord_role_id, squad_id=target_squad_id)
 
     async def set_project_lead(self, project_id: UUID, lead_discord_id: int | None) -> Project | None:
         """Updates or clears the designated Project Lead Discord user for a project."""
