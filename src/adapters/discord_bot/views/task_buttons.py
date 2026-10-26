@@ -9,10 +9,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.views.base_view import BaseView
-from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.exceptions import PermissionDeniedError
 from src.domain.models import Task
+from src.ports.workspace import TaskWorkspacePort
 from src.utils.date_parser import get_due_date_from_preset
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ class TaskQuickControlsView(BaseView):
         self._rebuild_items()
 
     @property
-    def effective_workspace(self) -> ITaskDiscordWorkspace | None:
+    def effective_workspace(self) -> TaskWorkspacePort | None:
         if self.workspace is not None:
             return self.workspace
         if self.bot is not None:
@@ -129,6 +129,15 @@ class TaskQuickControlsView(BaseView):
                 save_fn = getattr(ws, "save_task_controls", None)
                 if asyncio.iscoroutinefunction(save_fn) or isinstance(save_fn, AsyncMock):
                     return ws
+        if self.task_service:
+            from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
+
+            return DiscordTaskWorkspaceAdapter(
+                bot=self.bot,
+                task_service=self.task_service,
+                project_service=getattr(self.task_service, "project_service", None),
+                auth_service=self.auth_service,
+            )
         return None
 
     def _get_thread(self, interaction: discord.Interaction) -> discord.Thread | None:
@@ -354,107 +363,50 @@ class TaskQuickControlsView(BaseView):
 
     async def _on_save_clicked(self, interaction: discord.Interaction) -> None:
         ws = self.effective_workspace
-        if ws:
-            clear_body = self.staged_body is None and bool(self.task.body)
-            updated_task = await ws.save_task_controls(
-                interaction,
-                task=self.task,
-                priority=self.staged_priority,
-                assignee_id=self.staged_assignee_id,
-                due_at=self.staged_due_at,
-                clear_due_at=self.staged_clear_due,
-                watchers=self.staged_watchers,
-                title=self.staged_title,
-                body=self.staged_body,
-                clear_body=clear_body,
-            )
-            if updated_task:
-                self.task = updated_task
-            self.stop()
-            embed = discord.Embed(
-                title=f"Updated [{self.task.short_id}]",
-                description="Task changes have been saved to the workspace.",
-                color=discord.Color.green(),
-            )
-            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
-
-            attach_dismissal_footer(embed, delay=3.0)
-            if hasattr(interaction, "response") and not interaction.response.is_done():
-                await interaction.response.edit_message(embed=embed, view=None)
-            elif hasattr(interaction, "edit_original_response"):
-                await interaction.edit_original_response(embed=embed, view=None)
-
-            menu_manager.unregister_menu(interaction)
-            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+        if not ws:
             return
-
-        if self.auth_service:
-            await self.auth_service.require_task_mutation(interaction.user, self.task)
-
-        thread = self._get_thread(interaction)
-        keep_archived = self.task.status == TaskStatus.COMPLETED or self.task.is_archived
-        async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
-            updated_task = self.task
-            title_changed = self.staged_title != updated_task.title
-            body_changed = self.staged_body != updated_task.body
-
-            if self.staged_priority != updated_task.priority:
-                updated_task = await self.task_service.update_priority(
-                    task_id=self.task.id,
-                    new_priority=self.staged_priority,
-                    actor_discord_id=interaction.user.id,
-                )
-
-            details_changed = (
-                title_changed
-                or body_changed
-                or self.staged_due_at != updated_task.due_at
-                or self.staged_clear_due
-                or set(self.staged_watchers) != set(updated_task.watchers)
-            )
-            if details_changed:
-                details_kwargs: dict[str, Any] = {
-                    "due_at": self.staged_due_at,
-                    "clear_due_at": self.staged_clear_due,
-                    "watchers": self.staged_watchers,
-                }
-                if title_changed:
-                    details_kwargs["title"] = self.staged_title
-                if body_changed:
-                    details_kwargs["body"] = self.staged_body
-                    if not self.staged_body:
-                        details_kwargs["clear_body"] = True
-
-                updated_task = await self.task_service.update_details(
-                    task_id=self.task.id,
-                    actor_discord_id=interaction.user.id,
-                    **details_kwargs,
-                )
-
-            if self.staged_assignee_id != updated_task.assignee_discord_id:
-                updated_task = await self.task_service.update_assignee(
-                    task_id=self.task.id,
-                    new_assignee_id=self.staged_assignee_id,
-                    actor_discord_id=interaction.user.id,
-                )
-
+        title_changed = self.staged_title != self.task.title
+        clear_body = self.staged_body is None and bool(self.task.body)
+        updated_task = await ws.save_task_controls(
+            interaction,
+            task=self.task,
+            priority=self.staged_priority,
+            assignee_id=self.staged_assignee_id,
+            due_at=self.staged_due_at,
+            clear_due_at=self.staged_clear_due,
+            watchers=self.staged_watchers,
+            title=self.staged_title,
+            body=self.staged_body,
+            clear_body=clear_body,
+        )
+        if updated_task:
             self.task = updated_task
-            self.stop()
-            embed = discord.Embed(
-                title=f"Updated [{self.task.short_id}]",
-                description="Task changes have been saved to the workspace.",
-                color=discord.Color.green(),
-            )
-            from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
+        self.stop()
+        embed = discord.Embed(
+            title=f"Updated [{self.task.short_id}]",
+            description="Task changes have been saved to the workspace.",
+            color=discord.Color.green(),
+        )
+        from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-            attach_dismissal_footer(embed, delay=3.0)
+        attach_dismissal_footer(embed, delay=3.0)
+        is_done = False
+        if hasattr(interaction, "response") and hasattr(interaction.response, "is_done"):
+            res = interaction.response.is_done()
+            if isinstance(res, bool):
+                is_done = res
+        if hasattr(interaction, "response") and not is_done:
             await interaction.response.edit_message(embed=embed, view=None)
-            if self.bot and hasattr(self.bot, "sync_root_task_message"):
-                await self.bot.sync_root_task_message(updated_task)
-                await self.bot.sync_task_thread(updated_task, sync_title=title_changed, sync_archive=False)
+        elif hasattr(interaction, "edit_original_response"):
+            await interaction.edit_original_response(embed=embed, view=None)
 
-            menu_manager.unregister_menu(interaction)
-            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+        if self.bot and hasattr(self.bot, "sync_root_task_message"):
+            await self.bot.sync_root_task_message(self.task)
+            if hasattr(self.bot, "sync_task_thread"):
+                await self.bot.sync_task_thread(self.task, sync_title=title_changed, sync_archive=False)
+
+        menu_manager.unregister_menu(interaction)
+        menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
 
     _on_done_clicked = _on_save_clicked
 

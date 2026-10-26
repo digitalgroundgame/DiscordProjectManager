@@ -882,29 +882,28 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             if prereq_ids:
                 create_kwargs["prerequisite_short_ids"] = prereq_ids
 
-            task = await self.task_service.create_task(**create_kwargs)
+            task, ref = await self.task_service.create_task_with_workspace(
+                guild_id=interaction.guild.id,
+                title=title,
+                creator_discord_id=interaction.user.id,
+                project_id=project.id,
+                project_name=project.name,
+                assignee_discord_id=assignee.id if assignee else None,
+                due_at=due_at,
+                priority=p_level,
+                body=description,
+                watchers=watchers,
+                prerequisite_short_ids=prereq_ids,
+                target_container=interaction.channel,
+                preferred_channel_id=interaction.channel_id,
+                workspace=self.workspace,
+            )
 
             prereqs_suffix = ""
             if prereq_ids:
                 prereqs_suffix = f"\n🔗 **Prerequisites**: {', '.join(f'`[{p}]`' for p in prereq_ids)}"
 
-            if self.workspace:
-                ref = await self.workspace.provision_workspace(
-                    task,
-                    project=project,
-                    target_container=interaction.channel,
-                    preferred_channel_id=interaction.channel_id,
-                )
-                await self.task_service.update_discord_message_ids(
-                    task.id,
-                    discord_message_id=ref.message_id,
-                    discord_thread_id=ref.thread_id,
-                )
-                for p_task in prereq_tasks:
-                    try:
-                        await self.workspace.sync_workspace(p_task)
-                    except Exception:
-                        pass
+            if ref:
                 if ref.channel_id != interaction.channel_id:
                     await interaction.followup.send(
                         f"✅ Created task **[{task.short_id}] {task.title}** in <#{ref.channel_id}>"

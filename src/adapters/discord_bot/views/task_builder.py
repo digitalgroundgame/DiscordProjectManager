@@ -8,15 +8,12 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
-from src.adapters.discord_bot.views.forum_helpers import resolve_forum_tags
-from src.adapters.discord_bot.views.task_buttons import TaskActionView
 from src.adapters.discord_bot.views.task_embed import (
-    build_task_embed,
-    build_thread_workspace_content,
     get_task_jump_url,
 )
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Project, Task
+from src.ports.workspace import TaskWorkspacePort
 from src.services.task_service import parse_inline_dependencies
 from src.utils.date_parser import get_due_date_from_preset, parse_natural_date
 
@@ -436,6 +433,7 @@ class TaskCreateDraftView(BaseView):
         watchers: list[int] | None = None,
         auth_service: AuthService | None = None,
         prerequisite_short_ids: list[str] | None = None,
+        workspace: Any = None,
     ):
         super().__init__(timeout=300)
         self.task_service = task_service
@@ -449,9 +447,28 @@ class TaskCreateDraftView(BaseView):
         self.watchers = watchers or []
         self.auth_service = auth_service
         self.prerequisite_short_ids = prerequisite_short_ids or []
+        self.workspace = workspace
         self._initial_interaction: discord.Interaction | None = None
 
         self._rebuild_items()
+
+    def _resolve_effective_workspace(self, interaction: discord.Interaction) -> Any:
+        if self.workspace is not None:
+            return self.workspace
+        if self.task_service and getattr(self.task_service, "workspace", None):
+            return self.task_service.workspace
+        client = getattr(interaction, "client", None)
+        client_ws = getattr(client, "workspace", None) if client else None
+        if isinstance(client_ws, TaskWorkspacePort):
+            return client_ws
+        from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
+
+        return DiscordTaskWorkspaceAdapter(
+            bot=client,
+            task_service=self.task_service,
+            project_service=getattr(self.task_service, "project_service", None),
+            auth_service=self.auth_service,
+        )
 
     async def on_timeout(self) -> None:
         try:
@@ -729,28 +746,6 @@ class TaskCreateDraftView(BaseView):
                         interaction.guild, self.assignee_id, self.project.id if self.project else None
                     )
 
-            task = await self.task_service.create_task(
-                guild_id=interaction.guild.id,
-                title=self.title,
-                creator_discord_id=interaction.user.id,
-                project_id=self.project.id if self.project else None,
-                assignee_discord_id=self.assignee_id,
-                due_at=self.due_at,
-                priority=self.priority,
-                body=self.description,
-                watchers=self.watchers,
-                prerequisite_short_ids=self.prerequisite_short_ids,
-            )
-
-            prereqs: list[Task] = []
-            if hasattr(self.task_service, "get_task_dependencies"):
-                try:
-                    deps_res = await self.task_service.get_task_dependencies(task.id)
-                    if isinstance(deps_res, tuple) and len(deps_res) == 2:
-                        prereqs = list(deps_res[0] or [])
-                except Exception:
-                    prereqs = []
-
             target_chan = self.target_channel or interaction.channel
 
             # If target_chan is a Thread (e.g. clicked inside Pinned Control Hub), route to parent ForumChannel
@@ -768,92 +763,33 @@ class TaskCreateDraftView(BaseView):
                     if isinstance(proj_chan, (discord.ForumChannel, discord.TextChannel)):
                         target_chan = proj_chan
 
-            embed = build_task_embed(
-                task,
+            ws = self._resolve_effective_workspace(interaction)
+            task, ref = await self.task_service.create_task_with_workspace(
+                guild_id=interaction.guild.id,
+                title=self.title,
+                creator_discord_id=interaction.user.id,
+                project_id=self.project.id if self.project else None,
                 project_name=self.project.name if self.project else None,
-                prerequisites=prereqs or None,
+                assignee_discord_id=self.assignee_id,
+                due_at=self.due_at,
+                priority=self.priority,
+                body=self.description,
+                watchers=self.watchers,
+                prerequisite_short_ids=self.prerequisite_short_ids,
+                target_container=target_chan,
+                workspace=ws,
             )
 
-            msg = None
-            if isinstance(target_chan, discord.ForumChannel):
-                post_name = f"[{task.short_id}] {task.title[:90]}"
-                thread_view = TaskActionView(
-                    task_id=task.id,
-                    current_status=task.status,
-                    current_priority=task.priority,
-                    task_service=self.task_service,
-                    current_assignee_id=task.assignee_discord_id,
-                    current_watchers=task.watchers,
-                )
-                applied_tags = resolve_forum_tags(
-                    target_chan, task, project_name=self.project.name if self.project else None
-                )
-                thread_content = build_thread_workspace_content(task)
-
-                res = await target_chan.create_thread(
-                    name=post_name,
-                    content=thread_content,
-                    embed=embed,
-                    view=thread_view,
-                    applied_tags=applied_tags,
-                    auto_archive_duration=10080,
-                )
-                thread = getattr(res, "thread", res)
-                msg = getattr(res, "message", None)
-                thread_id = getattr(thread, "id", None)
-                msg_id = getattr(msg, "id", 0) if msg else 0
-                await self.task_service.update_discord_message_ids(task.id, msg_id, thread_id)
-                # Re-fetch task to get updated message/thread IDs for jump URL
-                task = await self.task_service.get_by_id(task.id) or task
-            elif isinstance(target_chan, discord.TextChannel):
-                msg = await target_chan.send(embed=embed)
+            prereqs: list[Task] = []
+            if hasattr(self.task_service, "get_task_dependencies"):
                 try:
-                    thread = await msg.create_thread(
-                        name=f"[{task.short_id}] {task.title[:90]}",
-                        auto_archive_duration=10080,
-                    )
-                    thread_view = TaskActionView(
-                        task_id=task.id,
-                        current_status=task.status,
-                        current_priority=task.priority,
-                        task_service=self.task_service,
-                        current_assignee_id=task.assignee_discord_id,
-                        current_watchers=task.watchers,
-                    )
-                    thread_content = build_thread_workspace_content(task)
-                    await thread.send(content=thread_content, view=thread_view)
-                    await self.task_service.update_discord_message_ids(task.id, msg.id, thread.id)
-                    task = await self.task_service.get_by_id(task.id) or task
+                    deps_res = await self.task_service.get_task_dependencies(task.id)
+                    if isinstance(deps_res, tuple) and len(deps_res) == 2:
+                        prereqs = list(deps_res[0] or [])
                 except Exception:
-                    await self.task_service.update_discord_message_ids(task.id, msg.id, None)
-                    task = await self.task_service.get_by_id(task.id) or task
-            elif isinstance(target_chan, discord.Thread):
-                view = TaskActionView(
-                    task_id=task.id,
-                    current_status=task.status,
-                    current_priority=task.priority,
-                    task_service=self.task_service,
-                    current_assignee_id=task.assignee_discord_id,
-                    current_watchers=task.watchers,
-                )
-                msg = await target_chan.send(embed=embed, view=view)
-                await self.task_service.update_discord_message_ids(task.id, msg.id, target_chan.id)
-                task = await self.task_service.get_by_id(task.id) or task
-            elif target_chan:
-                msg = await target_chan.send(embed=embed)
-                await self.task_service.update_discord_message_ids(task.id, msg.id, None)
-                task = await self.task_service.get_by_id(task.id) or task
+                    prereqs = []
 
-            # Sync prerequisite workspace starter cards if bot workspace is available
-            client_ws = getattr(getattr(interaction, "client", None), "workspace", None)
-            if client_ws and hasattr(client_ws, "sync_workspace"):
-                for p_task in prereqs:
-                    try:
-                        await client_ws.sync_workspace(p_task)
-                    except Exception:
-                        pass
-
-            jump_url = get_task_jump_url(task)
+            jump_url = ref.jump_url if ref else get_task_jump_url(task)
             link_bullet = f"• [🔗 **Open Task Workspace**]({jump_url})\n" if jump_url else ""
             assignee_str = f"<@{task.assignee_discord_id}>" if task.assignee_discord_id else "Unassigned"
             proj_name = self.project.name if self.project else "Standalone"
