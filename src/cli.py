@@ -9,32 +9,30 @@ import sys
 
 from src.adapters.discord_bot.bot import DggPmBot
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
-from src.config import settings
+from src.config import Settings, get_settings
 
 logger = logging.getLogger("dgg_pm.cli")
 
 
-def create_cli_bot() -> DggPmBot:
+def create_cli_bot(settings: Settings | None = None) -> DggPmBot:
     """Instantiate a DggPmBot instance with registered cogs for CLI operations."""
-    bot = DggPmBot()
+    resolved_settings = settings or Settings(SYNC_COMMANDS_ON_STARTUP=False)
+    bot = DggPmBot(settings=resolved_settings)
     return bot
 
 
 async def sync_commands(guild_id: int | None = None, is_global: bool = False) -> int:
     """Synchronize slash commands with Discord via HTTP without opening a Gateway connection."""
-    token = settings.DISCORD_BOT_TOKEN
+    active_settings = get_settings()
+    token = active_settings.DISCORD_BOT_TOKEN
     if not token:
         logger.error("DISCORD_BOT_TOKEN is not configured. Cannot sync slash commands.")
         print("❌ Error: DISCORD_BOT_TOKEN is not set in environment or .env", file=sys.stderr)
         return 1
 
-    target_guild_id = None if is_global else (guild_id or settings.DISCORD_GUILD_ID)
+    target_guild_id = None if is_global else (guild_id or active_settings.DISCORD_GUILD_ID)
 
-    # Disable automatic startup sync inside setup_hook so CLI controls sync execution directly
-    orig_sync_on_startup = settings.SYNC_COMMANDS_ON_STARTUP
-    settings.SYNC_COMMANDS_ON_STARTUP = False
-
-    bot = create_cli_bot()
+    bot = create_cli_bot(settings=Settings(SYNC_COMMANDS_ON_STARTUP=False))
 
     try:
         # Perform HTTP login only (no Gateway WebSocket connection / no IDENTIFY count)
@@ -59,7 +57,6 @@ async def sync_commands(guild_id: int | None = None, is_global: bool = False) ->
         print(f"❌ Failed to sync slash commands: {exc}", file=sys.stderr)
         return 1
     finally:
-        settings.SYNC_COMMANDS_ON_STARTUP = orig_sync_on_startup
         await bot.close()
 
 

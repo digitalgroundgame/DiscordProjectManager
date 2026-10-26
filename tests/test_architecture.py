@@ -180,3 +180,41 @@ def test_no_unittest_mock_in_production_code() -> None:
     assert not violating_files, "Architecture violation: unittest.mock imported in production code:\n" + "\n".join(
         f"  - {path} imports '{mod}'" for path, mod in violating_files
     )
+
+
+def test_no_import_time_database_engine_or_singletons() -> None:
+    """Importing modules under src/ must never instantiate database engines or global singletons."""
+    import subprocess
+    import sys
+
+    verification_code = """
+import importlib
+import pkgutil
+import src
+
+for module_info in pkgutil.walk_packages(src.__path__, prefix='src.'):
+    mod_name = module_info.name
+    if 'migrations' in mod_name or mod_name.endswith('.__main__'):
+        continue
+    importlib.import_module(mod_name)
+
+from src.adapters.db import session
+assert session._engine is None, f'session._engine was eagerly instantiated: {session._engine}'
+assert session._session_factory is None, (
+    f'session._session_factory was eagerly instantiated: {session._session_factory}'
+)
+
+from src.adapters.discord_bot import menu_manager
+assert menu_manager._default_menu_manager is None, 'menu_manager._default_menu_manager was eagerly instantiated'
+
+from src import config
+assert config._settings is None, f'config._settings was eagerly instantiated: {config._settings}'
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", verification_code],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"Importing src/ modules triggered eager singletons:\n{result.stderr}\n{result.stdout}"
+    )

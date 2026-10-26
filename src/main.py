@@ -10,38 +10,16 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 import discord  # noqa: E402
-import uvicorn  # noqa: E402
+import uvicorn  # noqa: E402, F401
 
-from src.adapters.api.app import api_app  # noqa: E402
-from src.adapters.db.observability_adapter import SqlAlchemySystemMetricsAdapter  # noqa: E402
-from src.adapters.db.repos import (  # noqa: E402
-    PostgresGuildLeadRoleRepository,
-    PostgresGuildLeadUserRepository,
-    PostgresOutboxRepo,
-    PostgresProjectRepo,
-    PostgresSquadRepo,
-    PostgresTaskRepo,
-    PostgresUserCalendarTokenRepo,
-    PostgresUserPreferenceRepo,
-)
-from src.adapters.db.session import async_session_factory, close_db, init_db  # noqa: E402
-from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
+from src.adapters.db.session import init_db  # noqa: E402
 from src.adapters.discord_bot.bot import DggPmBot  # noqa: E402
 from src.adapters.discord_bot.discord_notifier import DiscordNotifier  # noqa: E402
 from src.adapters.discord_bot.gateway_supervisor import start_bot_with_retry  # noqa: E402
-from src.adapters.rendering import PillowTechTreeRenderer  # noqa: E402
 from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
-from src.config import settings  # noqa: E402
-from src.services.calendar_service import CalendarService  # noqa: E402
-from src.services.observability_service import ObservabilityService  # noqa: E402
-from src.services.outbox_service import OutboxService  # noqa: E402
-from src.services.project_service import ProjectService  # noqa: E402
-from src.services.squad_service import SquadService  # noqa: E402
-from src.services.task_service import TaskService  # noqa: E402
-from src.services.user_service import UserService  # noqa: E402
+from src.bootstrap.container import create_container  # noqa: E402
 
 logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -49,72 +27,46 @@ logger = logging.getLogger("dgg_pm.main")
 
 
 async def run_app() -> None:
+    # 1. Initialize Composition Root Container
+    container = create_container()
+    if container.settings.DEBUG:
+        logging.getLogger().setLevel(logging.DEBUG)
     logger.info("Initializing dgg-pm platform...")
 
-    # 1. Initialize Database schema
-    await init_db()
+    # 2. Initialize Database schema
+    await init_db(engine=container.engine)
     logger.info("Database schema initialized.")
 
-    # 2. Wire Hexagonal Repositories & Services with Session Pool Factory
-    task_repo = PostgresTaskRepo(async_session_factory)
-    project_repo = PostgresProjectRepo(async_session_factory)
-    squad_repo = PostgresSquadRepo(async_session_factory)
-    outbox_repo = PostgresOutboxRepo(async_session_factory)
-    user_pref_repo = PostgresUserPreferenceRepo(async_session_factory)
-    guild_lead_role_repo = PostgresGuildLeadRoleRepository(async_session_factory)
-    guild_lead_user_repo = PostgresGuildLeadUserRepository(async_session_factory)
-    calendar_token_repo = PostgresUserCalendarTokenRepo(async_session_factory)
-
-    uow = SqlAlchemyUnitOfWork(async_session_factory)
-    tree_renderer = PillowTechTreeRenderer()
-    project_service = ProjectService(project_repo, uow=uow)
-    squad_service = SquadService(squad_repo, uow=uow)
-    outbox_service = OutboxService(outbox_repo)
-    task_service = TaskService(task_repo, project_service, outbox_service, uow=uow, tree_renderer=tree_renderer)
-    user_service = UserService(user_pref_repo, uow=uow)
-    calendar_service = CalendarService(calendar_token_repo, task_repo, uow=uow)
-    metrics_adapter = SqlAlchemySystemMetricsAdapter(async_session_factory)
-    observability_service = ObservabilityService(metrics_adapter)
-    api_app.state.calendar_service = calendar_service
-    api_app.state.observability_service = observability_service
-
-    # 3. Wire Discord Bot & Notifier
+    # 3. Instantiate bot, notifier, worker wired to container components
     bot = DggPmBot(
-        task_service=task_service,
-        project_service=project_service,
-        squad_service=squad_service,
-        user_service=user_service,
-        calendar_service=calendar_service,
-        outbox_service=outbox_service,
-        guild_lead_role_repo=guild_lead_role_repo,
-        guild_lead_user_repo=guild_lead_user_repo,
+        task_service=container.task_service,
+        project_service=container.project_service,
+        squad_service=container.squad_service,
+        user_service=container.user_service,
+        calendar_service=container.calendar_service,
+        outbox_service=container.outbox_service,
+        guild_lead_role_repo=container.guild_lead_role_repo,
+        guild_lead_user_repo=container.guild_lead_user_repo,
+        settings=container.settings,
+        menu_manager=container.menu_manager,
     )
     notifier = DiscordNotifier(
         bot,
-        user_service=user_service,
+        user_service=container.user_service,
         workspace=bot.workspace,
-        task_service=task_service,
+        task_service=container.task_service,
     )
-
-    # 4. Wire Outbox Worker
     worker = OutboxWorker(
-        outbox_repo=outbox_repo,
+        outbox_repo=container.outbox_repo,
         notifier=notifier,
-        poll_interval=settings.OUTBOX_POLL_INTERVAL_SECONDS,
-        batch_size=settings.OUTBOX_BATCH_SIZE,
-        max_retries=settings.OUTBOX_MAX_RETRIES,
-        backoff_cap_seconds=settings.OUTBOX_BACKOFF_CAP_SECONDS,
-        max_retention_hours=settings.OUTBOX_MAX_RETENTION_HOURS,
+        poll_interval=container.settings.OUTBOX_POLL_INTERVAL_SECONDS,
+        batch_size=container.settings.OUTBOX_BATCH_SIZE,
+        max_retries=container.settings.OUTBOX_MAX_RETRIES,
+        backoff_cap_seconds=container.settings.OUTBOX_BACKOFF_CAP_SECONDS,
+        max_retention_hours=container.settings.OUTBOX_MAX_RETENTION_HOURS,
     )
-
-    # 5. Configure FastAPI Server
-    uvicorn_config = uvicorn.Config(
-        app=api_app,
-        host=settings.API_HOST,
-        port=settings.API_PORT,
-        log_level="warning",
-    )
-    uvicorn_server = uvicorn.Server(uvicorn_config)
+    uvicorn_server = container.uvicorn_server
+    settings = container.settings
 
     # 6. Lifecycle Events and Shutdown Handler
     loop = asyncio.get_running_loop()
@@ -199,7 +151,7 @@ async def run_app() -> None:
         worker.stop()
         if not bot.is_closed():
             await bot.close()
-        await close_db()
+        await container.close()
         logger.info("Graceful shutdown complete.")
 
     if has_fatal_error:

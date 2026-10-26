@@ -88,7 +88,28 @@ class MenuSessionManager:
         task.add_done_callback(self._background_tasks.discard)
 
 
-menu_manager = MenuSessionManager()
+_default_menu_manager: MenuSessionManager | None = None
+
+
+def get_menu_manager() -> MenuSessionManager:
+    """Return the active MenuSessionManager instance, creating it lazily if not set."""
+    global _default_menu_manager
+    if _default_menu_manager is None:
+        _default_menu_manager = MenuSessionManager()
+    return _default_menu_manager
+
+
+def set_menu_manager(manager: MenuSessionManager | None) -> None:
+    """Explicitly assign the active MenuSessionManager instance from container or test."""
+    global _default_menu_manager
+    _default_menu_manager = manager
+
+
+def __getattr__(name: str) -> Any:
+    """Provide lazy backwards compatibility for 'from src.adapters.discord_bot.menu_manager import menu_manager'."""
+    if name == "menu_manager":
+        return get_menu_manager()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def attach_dismissal_notice(

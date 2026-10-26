@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src import __version__
-from src.config import settings
+from src.config import get_settings
 from src.services.calendar_service import CalendarService
 from src.services.observability_service import ObservabilityService
 
@@ -43,9 +43,10 @@ def require_metrics_permission(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> None:
     """Optionally guards /metrics behind a bearer token when API_METRICS_TOKEN is set."""
-    if not settings.API_METRICS_TOKEN:
+    active_settings = getattr(api_app.state, "settings", None) or get_settings()
+    if not active_settings.API_METRICS_TOKEN:
         return
-    if credentials is None or credentials.credentials != settings.API_METRICS_TOKEN:
+    if credentials is None or credentials.credentials != active_settings.API_METRICS_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid or missing bearer token")
 
 

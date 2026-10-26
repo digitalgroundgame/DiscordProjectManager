@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import MenuSessionManager, get_menu_manager
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 from src.adapters.discord_bot.views.hub_menu import PmHubView
@@ -16,7 +17,7 @@ from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
     ITaskDiscordWorkspace,
 )
-from src.config import settings
+from src.config import Settings, get_settings
 from src.domain.models import Task
 from src.ports.repositories import IGuildLeadRoleRepository, IGuildLeadUserRepository
 from src.services.auth_service import AuthService
@@ -44,6 +45,8 @@ class DggPmBot(commands.Bot):
         guild_lead_user_repo: IGuildLeadUserRepository | None = None,
         auth_service: AuthService | None = None,
         calendar_service: CalendarService | None = None,
+        settings: Settings | None = None,
+        menu_manager: MenuSessionManager | None = None,
     ):
         intents = discord.Intents.default()
         intents.guilds = True
@@ -55,6 +58,8 @@ class DggPmBot(commands.Bot):
             intents=intents,
             help_command=None,
         )
+        self.settings = settings
+        self.menu_manager = menu_manager or get_menu_manager()
         self.task_service = task_service
         self.project_service = project_service
         self.squad_service = squad_service
@@ -157,9 +162,10 @@ class DggPmBot(commands.Bot):
             )
 
         # Sync application slash commands if configured
-        if settings.SYNC_COMMANDS_ON_STARTUP:
+        active_settings = self.settings or get_settings()
+        if active_settings.SYNC_COMMANDS_ON_STARTUP:
             try:
-                await self.sync_slash_commands(guild_id=settings.DISCORD_GUILD_ID)
+                await self.sync_slash_commands(guild_id=active_settings.DISCORD_GUILD_ID)
             except discord.errors.Forbidden as exc:
                 if exc.code == 50001:  # Missing Access
                     logger.critical(
@@ -173,8 +179,8 @@ class DggPmBot(commands.Bot):
                         "  2. DISCORD_GUILD_ID in your .env does not match your server's actual ID.\n"
                         "  3. The bot was invited without the 'applications.commands' OAuth2 scope.\n"
                         "================================================================================",
-                        settings.DISCORD_GUILD_ID or "(Global)",
-                        settings.DISCORD_GUILD_ID or "(Global)",
+                        active_settings.DISCORD_GUILD_ID or "(Global)",
+                        active_settings.DISCORD_GUILD_ID or "(Global)",
                     )
                 else:
                     logger.error("Forbidden (403) while syncing slash commands (code %s): %s", exc.code, exc)
@@ -320,7 +326,8 @@ class DggPmBot(commands.Bot):
         try:
             if not self.outbox_service:
                 return 0
-            lookback = max_age_hours if max_age_hours is not None else settings.OUTBOX_RECLAIM_LOOKBACK_HOURS
+            active_settings = self.settings or get_settings()
+            lookback = max_age_hours if max_age_hours is not None else active_settings.OUTBOX_RECLAIM_LOOKBACK_HOURS
             count = await self.outbox_service.reclaim_failed_events(max_age_hours=lookback)
             if count > 0:
                 logger.info(
