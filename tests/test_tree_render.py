@@ -4,7 +4,7 @@ import discord
 import pytest
 from PIL import Image
 
-from src.services.tree_render import render_tree
+from src.adapters.rendering import render_tree
 
 
 def test_render_empty_tree():

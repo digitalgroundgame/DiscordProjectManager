@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from PIL import Image
 
+import src.adapters.rendering  # noqa: F401
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.domain.tech_tree import (

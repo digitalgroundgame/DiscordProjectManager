@@ -27,6 +27,7 @@ from src.domain.tech_tree import (
     TechTree,
     resolve_member_name,
 )
+from src.ports.renderer import TechTreeRendererPort
 from src.ports.repositories import ITaskRepo
 from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 from src.ports.workspace import SyncWorkspaceResult, TaskWorkspacePort, TaskWorkspaceRef
@@ -90,12 +91,14 @@ class TaskService:
         outbox_service: OutboxService,
         uow: IUnitOfWork | None = None,
         workspace: TaskWorkspacePort | None = None,
+        tree_renderer: TechTreeRendererPort | None = None,
     ):
         self.task_repo = task_repo
         self.project_service = project_service
         self.outbox_service = outbox_service
         self.uow = uow
         self.workspace = workspace
+        self.tree_renderer = tree_renderer
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
@@ -1002,8 +1005,10 @@ class TaskService:
         project_id: UUID,
         orientation: str = "lr",
         member_resolver: Any = None,
+        renderer: TechTreeRendererPort | None = None,
     ) -> io.BytesIO:
         project = await self.project_service.get_by_id(project_id)
         project_name = project.name if project else "Project Tech Tree"
         tree = await self.get_project_tech_tree(guild_id, project_id, member_resolver=member_resolver)
-        return tree.to_png(title=f"Tech Tree: {project_name}", orientation=orientation)
+        effective_renderer = renderer or self.tree_renderer
+        return tree.to_png(title=f"Tech Tree: {project_name}", orientation=orientation, renderer=effective_renderer)
