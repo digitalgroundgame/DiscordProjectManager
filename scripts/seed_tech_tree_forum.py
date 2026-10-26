@@ -36,6 +36,7 @@ from src.adapters.db.postgres_repo import (  # noqa: E402
 from src.adapters.db.session import async_session_factory, close_db, init_db  # noqa: E402
 from src.adapters.db.tables import ProjectTable, TaskDependencyTable, TaskTable  # noqa: E402
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
+from src.adapters.discord_bot.member_resolver import resolve_discord_member_name  # noqa: E402
 from src.adapters.discord_bot.views.forum_helpers import (  # noqa: E402
     STANDARD_PM_TAG_DEFINITIONS,
     resolve_forum_tags,
@@ -417,7 +418,12 @@ async def seed_discord_forum(
 
     # 4. Generate Tech-Tree PNG Buffer & Pinned Hub Post
     logger.info("Rendering Civilization-style Tech Tree PNG graphic...")
-    tree_buf = await task_service.render_project_tree(guild_id, project.id, orientation="lr", member_resolver=guild)
+    tree_buf = await task_service.render_project_tree(
+        guild_id,
+        project.id,
+        orientation="lr",
+        member_resolver=lambda uid: resolve_discord_member_name(uid, guild),
+    )
 
     # Check if a pinned control center thread already exists
     active_threads: list[discord.Thread] = list(getattr(forum_channel, "threads", []))

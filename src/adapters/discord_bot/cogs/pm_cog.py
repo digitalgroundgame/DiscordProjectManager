@@ -12,6 +12,7 @@ from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.cogs.project_cog import ProjectCommandsMixin
 from src.adapters.discord_bot.cogs.task_cog import TaskCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.calendar_feed_view import (
     CalendarFeedView,
@@ -389,7 +390,7 @@ class PmCog(
                 guild_id=interaction.guild.id,
                 project_id=project.id,
                 orientation=orient_val,
-                member_resolver=interaction.guild,
+                member_resolver=lambda uid: resolve_discord_member_name(uid, interaction.guild),
             )
             file = discord.File(fp=buf, filename="tech_tree.png")
             orient_label = "Horizontal (Left to Right)" if orient_val == "lr" else "Vertical (Top to Bottom)"

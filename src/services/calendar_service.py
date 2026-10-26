@@ -94,13 +94,18 @@ class CalendarService:
         )
 
     @staticmethod
-    def build_feed_urls(token: str, base_url: str | None = None) -> dict[str, str]:
+    def build_feed_urls(
+        self_or_token: CalendarService | str,
+        token_or_base: str | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, str]:
         """Builds webcal:// and https:// URLs for calendar subscription given a token."""
-        if not base_url:
-            from src.config import get_settings
-
-            base_url = get_settings().PUBLIC_BASE_URL
-        raw_base = (base_url or "http://localhost:8000").rstrip("/")
+        if isinstance(self_or_token, CalendarService):
+            token = token_or_base or ""
+            raw_base = (base_url or self_or_token.base_url or "http://localhost:8000").rstrip("/")
+        else:
+            token = self_or_token
+            raw_base = (base_url or token_or_base or "http://localhost:8000").rstrip("/")
         feed_path = f"/calendar/{token}.ics"
         http_url = f"{raw_base}{feed_path}"
 

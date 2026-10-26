@@ -6,6 +6,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project
 
@@ -84,7 +85,7 @@ class TechTreeViewer(BaseView):
             guild_id=interaction.guild.id,
             project_id=self.project.id,
             orientation=self.current_orientation,
-            member_resolver=interaction.guild,
+            member_resolver=lambda uid: resolve_discord_member_name(uid, interaction.guild),
         )
         file = discord.File(fp=buf, filename="tech_tree.png")
         orient_label = "Horizontal (Left to Right)" if self.current_orientation == "lr" else "Vertical (Top to Bottom)"
@@ -172,7 +173,7 @@ class TechTreeProjectSelectView(BaseView):
             guild_id=interaction.guild.id,
             project_id=project.id,
             orientation=self.orientation,
-            member_resolver=interaction.guild,
+            member_resolver=lambda uid: resolve_discord_member_name(uid, interaction.guild),
         )
         file = discord.File(fp=buf, filename="tech_tree.png")
         orient_label = "Horizontal (Left to Right)" if self.orientation == "lr" else "Vertical (Top to Bottom)"

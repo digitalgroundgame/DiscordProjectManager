@@ -7,6 +7,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project, Squad
@@ -687,7 +688,7 @@ class PmHubView(BaseView):
                 guild_id=interaction.guild.id,
                 project_id=target_project.id,
                 orientation="lr",
-                member_resolver=interaction.guild,
+                member_resolver=lambda uid: resolve_discord_member_name(uid, interaction.guild),
             )
             file = discord.File(fp=buf, filename="tech_tree.png")
             embed = discord.Embed(

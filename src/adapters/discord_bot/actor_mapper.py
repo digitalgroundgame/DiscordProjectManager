@@ -74,12 +74,15 @@ class DiscordMemberDirectory(MemberDirectoryPort):
         self.bot = bot
 
     async def get_member_principal(self, guild_id: int, user_id: int) -> ActorPrincipal | None:
-        guild = self.bot.get_guild(guild_id) if hasattr(self.bot, "get_guild") else None
-        if not guild and hasattr(self.bot, "fetch_guild"):
-            try:
-                guild = await self.bot.fetch_guild(guild_id)
-            except Exception:
-                guild = None
+        if getattr(self.bot, "id", None) == guild_id and hasattr(self.bot, "get_member"):
+            guild = self.bot
+        else:
+            guild = self.bot.get_guild(guild_id) if hasattr(self.bot, "get_guild") else None
+            if not guild and hasattr(self.bot, "fetch_guild"):
+                try:
+                    guild = await self.bot.fetch_guild(guild_id)
+                except Exception:
+                    guild = None
 
         if not guild:
             return None

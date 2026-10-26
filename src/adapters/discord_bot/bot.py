@@ -7,6 +7,7 @@ from uuid import UUID
 import discord
 from discord.ext import commands
 
+from src.adapters.discord_bot.actor_mapper import DiscordMemberDirectory
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.menu_manager import MenuSessionManager, get_menu_manager
@@ -72,14 +73,18 @@ class DggPmBot(commands.Bot):
         self.guild_lead_user_repo = guild_lead_user_repo
         self._background_tasks: set[asyncio.Task] = set()
         self._disconnected_at: float | None = None
+        self.member_directory = DiscordMemberDirectory(self)
         if auth_service is not None:
             self.auth_service = auth_service
+            if self.auth_service.member_directory is None:
+                self.auth_service.member_directory = self.member_directory
         elif project_service and self.squad_service:
             self.auth_service = AuthService(
                 project_service,
                 self.squad_service,
                 guild_lead_role_repo=guild_lead_role_repo,
                 guild_lead_user_repo=guild_lead_user_repo,
+                member_directory=self.member_directory,
             )
         else:
             self.auth_service = None
