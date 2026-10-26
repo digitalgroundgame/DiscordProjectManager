@@ -44,7 +44,9 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
 
 ## Hexagonal Architecture & Boundary Rules
 
-See [ADR 0007: 4-Layer Hexagonal Architecture](docs/adr/0007-hexagonal-architecture.md) for full rationale and design.
+- **Unified System Spec**: Read [`docs/SPEC.md`](docs/SPEC.md) when planning features, writing specs, or running `Spec` reviews across domain, ports, services, or adapters.
+- **Domain Glossary**: Read [`CONTEXT.md`](CONTEXT.md) when naming entities, methods, or user-facing messages to enforce Ubiquitous Language.
+- **Architecture Decision Records**: See [ADR 0007: 4-Layer Hexagonal Architecture](docs/adr/0007-hexagonal-architecture.md) and [`docs/adr/`](docs/adr/) for design rationale.
 
 1. **Layer Dependency Rule**:
    ```text
