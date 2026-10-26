@@ -29,8 +29,9 @@ from src.domain.tech_tree import (
 )
 from src.ports.renderer import TechTreeRendererPort
 from src.ports.repositories import ITaskRepo
-from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.unit_of_work import IUnitOfWork
 from src.ports.workspace import SyncWorkspaceResult, TaskWorkspacePort, TaskWorkspaceRef
+from src.services.base import TransactionalService
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 
@@ -83,7 +84,32 @@ def parse_inline_dependencies(text: str | None) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
-class TaskService:
+def _build_task_payload(task: Task, **extras: Any) -> dict[str, Any]:
+    """Helper constructing standardized transactional outbox payloads for task events."""
+    payload: dict[str, Any] = {
+        "task_id": str(task.id),
+        "short_id": task.short_id,
+        "title": task.title,
+        "body": task.body,
+        "status": task.status.value,
+        "priority": task.priority.value,
+        "guild_id": task.guild_id,
+        "project_id": str(task.project_id) if task.project_id else None,
+        "creator_discord_id": task.creator_discord_id,
+        "assignee_discord_id": task.assignee_discord_id,
+        "watchers": list(task.watchers),
+        "due_at": task.due_at.isoformat() if task.due_at else None,
+        "version": task.version,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "discord_thread_id": task.discord_thread_id,
+        "discord_message_id": task.discord_message_id,
+    }
+    payload.update(extras)
+    return payload
+
+
+class TaskService(TransactionalService):
     def __init__(
         self,
         task_repo: ITaskRepo,
@@ -103,15 +129,12 @@ class TaskService:
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
         """Manages an atomic transaction scope via UnitOfWork if configured, or fallback if omitted."""
-        if self.uow is not None:
-            async with self.uow as active_uow:
-                yield active_uow
-        else:
-            yield NullUnitOfWork(
-                tasks=self.task_repo,
-                projects=self.project_service.project_repo,
-                outbox=self.outbox_service.outbox_repo,
-            )
+        async with super()._transaction(
+            tasks=self.task_repo,
+            projects=self.project_service.project_repo,
+            outbox=self.outbox_service.outbox_repo,
+        ) as active_uow:
+            yield active_uow
 
     async def create_task(
         self,
@@ -192,43 +215,28 @@ class TaskService:
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_CREATED,
                 idempotency_key=f"task_created:{saved_task.id}",
-                payload={
-                    "task_id": str(saved_task.id),
-                    "short_id": saved_task.short_id,
-                    "title": saved_task.title,
-                    "body": saved_task.body,
-                    "status": saved_task.status.value,
-                    "priority": saved_task.priority.value,
-                    "guild_id": saved_task.guild_id,
-                    "project_id": str(saved_task.project_id) if saved_task.project_id else None,
-                    "creator_discord_id": saved_task.creator_discord_id,
-                    "assignee_discord_id": saved_task.assignee_discord_id,
-                    "watchers": saved_task.watchers,
-                    "due_at": saved_task.due_at.isoformat() if saved_task.due_at else None,
-                    "version": saved_task.version,
-                    "created_at": saved_task.created_at.isoformat() if saved_task.created_at else None,
-                },
+                payload=_build_task_payload(saved_task),
                 outbox_repo=uow.outbox,
             )
 
-        # Link any prerequisites specified explicitly or found in body tags
-        target_prereqs = list(explicit_prereqs)
-        if not target_prereqs and saved_task.body:
-            target_prereqs = parse_inline_dependencies(saved_task.body)
-        for prereq_key in target_prereqs:
-            try:
-                await self.add_dependency(
-                    guild_id=guild_id,
-                    task_short_id=saved_task.short_id,
-                    depends_on_short_id=prereq_key,
-                    actor_discord_id=creator_discord_id,
-                )
-            except Exception:
-                if prereq_key in explicit_prereqs:
-                    raise
-                pass
+            # Link any prerequisites specified explicitly or found in body tags (atomically within transaction)
+            target_prereqs = list(explicit_prereqs)
+            if not target_prereqs and saved_task.body:
+                target_prereqs = parse_inline_dependencies(saved_task.body)
+            for prereq_key in target_prereqs:
+                try:
+                    await self.add_dependency(
+                        guild_id=guild_id,
+                        task_short_id=saved_task.short_id,
+                        depends_on_short_id=prereq_key,
+                        actor_discord_id=creator_discord_id,
+                    )
+                except Exception:
+                    if prereq_key in explicit_prereqs:
+                        raise
+                    pass
 
-        return saved_task
+            return saved_task
 
     async def provision_task_workspace(
         self,
@@ -407,28 +415,14 @@ class TaskService:
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_STATUS_CHANGED,
                 idempotency_key=f"task_status:{task_id}:v{updated_task.version}",
-                payload={
-                    "task_id": str(task_id),
-                    "short_id": updated_task.short_id,
-                    "title": updated_task.title,
-                    "body": updated_task.body,
-                    "priority": updated_task.priority.value,
-                    "guild_id": updated_task.guild_id,
-                    "project_id": str(updated_task.project_id) if updated_task.project_id else None,
-                    "old_status": old_status.value,
-                    "new_status": new_status.value,
-                    "actor_discord_id": actor_discord_id,
-                    "creator_discord_id": updated_task.creator_discord_id,
-                    "assignee_discord_id": updated_task.assignee_discord_id,
-                    "watchers": updated_task.watchers,
-                    "due_at": updated_task.due_at.isoformat() if updated_task.due_at else None,
-                    "completed_at": updated_task.completed_at.isoformat() if updated_task.completed_at else None,
-                    "version": updated_task.version,
-                    "created_at": updated_task.created_at.isoformat() if updated_task.created_at else None,
-                    "notes": notes,
-                    "discord_thread_id": updated_task.discord_thread_id,
-                    "discord_message_id": updated_task.discord_message_id,
-                },
+                payload=_build_task_payload(
+                    updated_task,
+                    old_status=old_status.value,
+                    new_status=new_status.value,
+                    actor_discord_id=actor_discord_id,
+                    completed_at=updated_task.completed_at.isoformat() if updated_task.completed_at else None,
+                    notes=notes,
+                ),
                 outbox_repo=uow.outbox,
             )
 
@@ -460,29 +454,14 @@ class TaskService:
                         await self.outbox_service.enqueue_event(
                             event_type=EventType.TASK_UNBLOCKED,
                             idempotency_key=f"task_unblocked:{dep_task.id}:by:{task_id}:v{updated_task.version}",
-                            payload={
-                                "task_id": str(dep_task.id),
-                                "short_id": dep_task.short_id,
-                                "title": dep_task.title,
-                                "body": dep_task.body,
-                                "status": dep_task.status.value,
-                                "priority": dep_task.priority.value,
-                                "guild_id": dep_task.guild_id,
-                                "project_id": str(dep_task.project_id) if dep_task.project_id else None,
-                                "actor_discord_id": actor_discord_id,
-                                "creator_discord_id": dep_task.creator_discord_id,
-                                "assignee_discord_id": dep_task.assignee_discord_id,
-                                "watchers": dep_task.watchers,
-                                "due_at": dep_task.due_at.isoformat() if dep_task.due_at else None,
-                                "version": dep_task.version,
-                                "created_at": dep_task.created_at.isoformat() if dep_task.created_at else None,
-                                "discord_thread_id": dep_task.discord_thread_id,
-                                "discord_message_id": dep_task.discord_message_id,
-                                "unblocked_by_task_id": str(task_id),
-                                "unblocked_by_short_id": updated_task.short_id,
-                                "unblocked_by_title": updated_task.title,
-                                "prerequisites": [{"short_id": pt.short_id, "title": pt.title} for pt in prereq_tasks],
-                            },
+                            payload=_build_task_payload(
+                                dep_task,
+                                actor_discord_id=actor_discord_id,
+                                unblocked_by_task_id=str(task_id),
+                                unblocked_by_short_id=updated_task.short_id,
+                                unblocked_by_title=updated_task.title,
+                                prerequisites=[{"short_id": pt.short_id, "title": pt.title} for pt in prereq_tasks],
+                            ),
                             outbox_repo=uow.outbox,
                         )
 
@@ -510,27 +489,13 @@ class TaskService:
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_NOTE_ADDED,
                 idempotency_key=f"task_note:{saved_history.id}",
-                payload={
-                    "task_id": str(task_id),
-                    "short_id": task.short_id,
-                    "title": task.title,
-                    "body": task.body,
-                    "priority": task.priority.value,
-                    "guild_id": task.guild_id,
-                    "project_id": str(task.project_id) if task.project_id else None,
-                    "actor_discord_id": actor_discord_id,
-                    "creator_discord_id": task.creator_discord_id,
-                    "assignee_discord_id": task.assignee_discord_id,
-                    "watchers": task.watchers,
-                    "due_at": task.due_at.isoformat() if task.due_at else None,
-                    "version": task.version,
-                    "created_at": task.created_at.isoformat() if task.created_at else None,
-                    "note": note_text.strip(),
-                    "status": task.status.value,
-                    "is_completed": task.status == TaskStatus.COMPLETED,
-                    "discord_thread_id": task.discord_thread_id,
-                    "discord_message_id": task.discord_message_id,
-                },
+                payload=_build_task_payload(
+                    task,
+                    actor_discord_id=actor_discord_id,
+                    note=note_text.strip(),
+                    notes=note_text.strip(),
+                    is_completed=task.status == TaskStatus.COMPLETED,
+                ),
                 outbox_repo=uow.outbox,
             )
 
@@ -578,29 +543,14 @@ class TaskService:
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_UPDATED,
                 idempotency_key=f"task_assignee:{task_id}:v{updated_task.version}",
-                payload={
-                    "task_id": str(task_id),
-                    "short_id": updated_task.short_id,
-                    "title": updated_task.title,
-                    "body": updated_task.body,
-                    "priority": updated_task.priority.value,
-                    "guild_id": updated_task.guild_id,
-                    "project_id": str(updated_task.project_id) if updated_task.project_id else None,
-                    "actor_discord_id": actor_discord_id,
-                    "creator_discord_id": updated_task.creator_discord_id,
-                    "old_assignee_id": old_assignee,
-                    "new_assignee_id": new_assignee_id,
-                    "assignee_discord_id": new_assignee_id,
-                    "watchers": updated_task.watchers,
-                    "due_at": updated_task.due_at.isoformat() if updated_task.due_at else None,
-                    "version": updated_task.version,
-                    "created_at": updated_task.created_at.isoformat() if updated_task.created_at else None,
-                    "status": updated_task.status.value,
-                    "is_completed": updated_task.status == TaskStatus.COMPLETED,
-                    "update_type": "assignee",
-                    "discord_thread_id": updated_task.discord_thread_id,
-                    "discord_message_id": updated_task.discord_message_id,
-                },
+                payload=_build_task_payload(
+                    updated_task,
+                    actor_discord_id=actor_discord_id,
+                    old_assignee_id=old_assignee,
+                    new_assignee_id=new_assignee_id,
+                    is_completed=updated_task.status == TaskStatus.COMPLETED,
+                    update_type="assignee",
+                ),
                 outbox_repo=uow.outbox,
             )
 
@@ -639,29 +589,14 @@ class TaskService:
             await self.outbox_service.enqueue_event(
                 event_type=EventType.TASK_UPDATED,
                 idempotency_key=f"task_priority:{task_id}:v{updated_task.version}",
-                payload={
-                    "task_id": str(task_id),
-                    "short_id": updated_task.short_id,
-                    "title": updated_task.title,
-                    "body": updated_task.body,
-                    "guild_id": updated_task.guild_id,
-                    "project_id": str(updated_task.project_id) if updated_task.project_id else None,
-                    "actor_discord_id": actor_discord_id,
-                    "creator_discord_id": updated_task.creator_discord_id,
-                    "old_priority": old_priority.value,
-                    "new_priority": new_priority.value,
-                    "priority": new_priority.value,
-                    "assignee_discord_id": updated_task.assignee_discord_id,
-                    "watchers": updated_task.watchers,
-                    "due_at": updated_task.due_at.isoformat() if updated_task.due_at else None,
-                    "version": updated_task.version,
-                    "created_at": updated_task.created_at.isoformat() if updated_task.created_at else None,
-                    "status": updated_task.status.value,
-                    "is_completed": updated_task.status == TaskStatus.COMPLETED,
-                    "update_type": "priority",
-                    "discord_thread_id": updated_task.discord_thread_id,
-                    "discord_message_id": updated_task.discord_message_id,
-                },
+                payload=_build_task_payload(
+                    updated_task,
+                    actor_discord_id=actor_discord_id,
+                    old_priority=old_priority.value,
+                    new_priority=new_priority.value,
+                    is_completed=updated_task.status == TaskStatus.COMPLETED,
+                    update_type="priority",
+                ),
                 outbox_repo=uow.outbox,
             )
 
@@ -749,30 +684,15 @@ class TaskService:
                 await self.outbox_service.enqueue_event(
                     event_type=EventType.TASK_UPDATED,
                     idempotency_key=f"task_details:{task_id}:v{updated_task.version}",
-                    payload={
-                        "task_id": str(task_id),
-                        "short_id": updated_task.short_id,
-                        "title": updated_task.title,
-                        "body": updated_task.body,
-                        "priority": updated_task.priority.value,
-                        "guild_id": updated_task.guild_id,
-                        "project_id": str(updated_task.project_id) if updated_task.project_id else None,
-                        "actor_discord_id": actor_discord_id,
-                        "creator_discord_id": updated_task.creator_discord_id,
-                        "assignee_discord_id": updated_task.assignee_discord_id,
-                        "watchers": updated_task.watchers,
-                        "old_watchers": current_task.watchers,
-                        "due_at": updated_task.due_at.isoformat() if updated_task.due_at else None,
-                        "version": updated_task.version,
-                        "created_at": updated_task.created_at.isoformat() if updated_task.created_at else None,
-                        "changes": changes,
-                        "diffs": diffs,
-                        "status": updated_task.status.value,
-                        "is_completed": updated_task.status == TaskStatus.COMPLETED,
-                        "update_type": "details",
-                        "discord_thread_id": updated_task.discord_thread_id,
-                        "discord_message_id": updated_task.discord_message_id,
-                    },
+                    payload=_build_task_payload(
+                        updated_task,
+                        actor_discord_id=actor_discord_id,
+                        old_watchers=current_task.watchers,
+                        changes=changes,
+                        diffs=diffs,
+                        is_completed=updated_task.status == TaskStatus.COMPLETED,
+                        update_type="details",
+                    ),
                     outbox_repo=uow.outbox,
                 )
 
