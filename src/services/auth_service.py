@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -10,6 +12,7 @@ from src.domain.actor import ActorPrincipal
 from src.domain.enums import TaskStatus
 from src.domain.exceptions import PermissionDeniedError
 from src.domain.models import Project, Task
+from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 
 if TYPE_CHECKING:
     from src.ports.member_directory import MemberDirectoryPort
@@ -30,12 +33,25 @@ class AuthService:
         guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
         guild_lead_user_repo: IGuildLeadUserRepository | None = None,
         member_directory: MemberDirectoryPort | None = None,
+        uow: IUnitOfWork | None = None,
     ):
         self.project_service = project_service
         self.squad_service = squad_service
         self.guild_lead_role_repo = guild_lead_role_repo
         self.guild_lead_user_repo = guild_lead_user_repo
         self.member_directory = member_directory
+        self.uow = uow
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
+        if self.uow is not None:
+            async with self.uow as active_uow:
+                yield active_uow
+        else:
+            yield NullUnitOfWork(
+                guild_lead_roles=self.guild_lead_role_repo,
+                guild_lead_users=self.guild_lead_user_repo,
+            )
 
     @staticmethod
     def to_principal(user: ActorPrincipal | Any, guild_id: int | None = None) -> ActorPrincipal:
@@ -75,14 +91,16 @@ class AuthService:
 
     async def add_guild_lead_role(self, guild_id: int, discord_role_id: int) -> None:
         """Registers a Discord role as an authorized Team Lead role for the guild."""
-        if self.guild_lead_role_repo:
-            await self.guild_lead_role_repo.add_lead_role(guild_id, discord_role_id)
+        async with self._transaction() as uow:
+            if uow.guild_lead_roles:
+                await uow.guild_lead_roles.add_lead_role(guild_id, discord_role_id)
 
     async def remove_guild_lead_role(self, guild_id: int, discord_role_id: int) -> bool:
         """Removes a Discord role from authorized Team Lead roles for the guild."""
-        if self.guild_lead_role_repo:
-            return await self.guild_lead_role_repo.remove_lead_role(guild_id, discord_role_id)
-        return False
+        async with self._transaction() as uow:
+            if uow.guild_lead_roles:
+                return await uow.guild_lead_roles.remove_lead_role(guild_id, discord_role_id)
+            return False
 
     async def list_guild_lead_roles(self, guild_id: int) -> set[int]:
         """Returns all authorized Team Lead role IDs for the guild."""
@@ -92,14 +110,16 @@ class AuthService:
 
     async def add_guild_lead_user(self, guild_id: int, user_discord_id: int) -> None:
         """Registers a Discord user as an authorized Team Lead for the guild."""
-        if self.guild_lead_user_repo:
-            await self.guild_lead_user_repo.add_lead_user(guild_id, user_discord_id)
+        async with self._transaction() as uow:
+            if uow.guild_lead_users:
+                await uow.guild_lead_users.add_lead_user(guild_id, user_discord_id)
 
     async def remove_guild_lead_user(self, guild_id: int, user_discord_id: int) -> bool:
         """Removes a Discord user from authorized Team Leads for the guild."""
-        if self.guild_lead_user_repo:
-            return await self.guild_lead_user_repo.remove_lead_user(guild_id, user_discord_id)
-        return False
+        async with self._transaction() as uow:
+            if uow.guild_lead_users:
+                return await uow.guild_lead_users.remove_lead_user(guild_id, user_discord_id)
+            return False
 
     async def list_guild_lead_users(self, guild_id: int) -> set[int]:
         """Returns all authorized Team Lead user IDs for the guild."""
