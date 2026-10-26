@@ -10,6 +10,7 @@ from discord.ext import commands
 from src.adapters.discord_bot.cogs.admin_cog import AdminCommandsMixin
 from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.cogs.project_cog import ProjectCommandsMixin
+from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
 from src.adapters.discord_bot.cogs.task_cog import TaskCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
@@ -64,6 +65,7 @@ project_autocomplete = AutocompleteMixin.project_autocomplete
 class PmCog(
     TaskCommandsMixin,
     ProjectCommandsMixin,
+    SquadCommandsMixin,
     AdminCommandsMixin,
     AutocompleteMixin,
     commands.GroupCog,
