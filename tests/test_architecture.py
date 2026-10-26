@@ -142,15 +142,9 @@ def test_driving_adapters_do_not_import_db_adapter() -> None:
     )
 
     # Known temporary exceptions tracked by migration issues:
-    # - src/adapters/api/app.py: Tracked by Issue #61 (Arch 4.1)
     # - src/adapters/discord_bot/views/hub_menu.py: Tracked by Issue #62 (Arch 4.2)
     # - src/adapters/discord_bot/views/forum_helpers.py: Tracked by Issue #62 (Arch 4.2)
     known_exceptions = {
-        ("src/adapters/api/app.py", "sqlalchemy"),
-        ("src/adapters/api/app.py", "sqlalchemy.ext.asyncio"),
-        ("src/adapters/api/app.py", "src.adapters.db.postgres_repo"),
-        ("src/adapters/api/app.py", "src.adapters.db.session"),
-        ("src/adapters/api/app.py", "src.adapters.db.tables"),
         ("src/adapters/discord_bot/views/hub_menu.py", "src.adapters.db.postgres_repo"),
         ("src/adapters/discord_bot/views/forum_helpers.py", "src.adapters.db.postgres_repo"),
     }
