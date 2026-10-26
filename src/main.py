@@ -65,12 +65,12 @@ async def run_app() -> None:
 
     uow = SqlAlchemyUnitOfWork(async_session_factory)
     tree_renderer = PillowTechTreeRenderer()
-    project_service = ProjectService(project_repo)
-    squad_service = SquadService(squad_repo)
+    project_service = ProjectService(project_repo, uow=uow)
+    squad_service = SquadService(squad_repo, uow=uow)
     outbox_service = OutboxService(outbox_repo)
     task_service = TaskService(task_repo, project_service, outbox_service, uow=uow, tree_renderer=tree_renderer)
-    user_service = UserService(user_pref_repo)
-    calendar_service = CalendarService(calendar_token_repo, task_repo)
+    user_service = UserService(user_pref_repo, uow=uow)
+    calendar_service = CalendarService(calendar_token_repo, task_repo, uow=uow)
 
     # 3. Wire Discord Bot & Notifier
     bot = DggPmBot(

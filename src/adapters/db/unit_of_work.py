@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.adapters.db.postgres_repo import (
+from src.adapters.db.repos import (
     PostgresGuildLeadRoleRepository,
     PostgresGuildLeadUserRepository,
     PostgresOutboxRepo,

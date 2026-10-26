@@ -108,6 +108,10 @@ class ITaskRepo(ABC):
         """Soft-deletes or unarchives a task."""
 
     @abstractmethod
+    async def set_archived_by_project(self, project_id: UUID, is_archived: bool, session: Any | None = None) -> int:
+        """Sets the archived status for all tasks belonging to a project."""
+
+    @abstractmethod
     async def delete(self, task_id: UUID, session: Any | None = None) -> bool:
         """Permanently deletes a task record, cascading dependencies, watchers, and history."""
 

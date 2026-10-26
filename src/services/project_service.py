@@ -66,6 +66,19 @@ class ProjectService:
             if discord_role_id and discord_role_id not in role_ids:
                 role_ids.insert(0, discord_role_id)
 
+            # Auto-provision any missing squads for the specified role IDs
+            if uow.squads:
+                for rid in role_ids:
+                    squad = await uow.squads.get_by_role_id(guild_id, rid)
+                    if not squad:
+                        await uow.squads.create(
+                            Squad(
+                                guild_id=guild_id,
+                                name=f"Squad-{rid}",
+                                discord_role_id=rid,
+                            )
+                        )
+
             project = Project(
                 guild_id=guild_id,
                 name=name.strip(),
@@ -108,11 +121,17 @@ class ProjectService:
 
     async def archive_project(self, project_id: UUID) -> Project | None:
         async with self._transaction() as uow:
-            return await uow.projects.set_archived(project_id, is_archived=True)
+            project = await uow.projects.set_archived(project_id, is_archived=True)
+            if project and uow.tasks:
+                await uow.tasks.set_archived_by_project(project_id, is_archived=True)
+            return project
 
     async def unarchive_project(self, project_id: UUID) -> Project | None:
         async with self._transaction() as uow:
-            return await uow.projects.set_archived(project_id, is_archived=False)
+            project = await uow.projects.set_archived(project_id, is_archived=False)
+            if project and uow.tasks:
+                await uow.tasks.set_archived_by_project(project_id, is_archived=False)
+            return project
 
     async def update_project_channel(self, project_id: UUID, discord_channel_id: int | None) -> Project | None:
         async with self._transaction() as uow:
@@ -121,6 +140,19 @@ class ProjectService:
     async def set_project_role(self, project_id: UUID, discord_role_id: int | None) -> Project | None:
         """Updates or clears the mapped contributor Discord role for a project."""
         async with self._transaction() as uow:
+            project = await uow.projects.get_by_id(project_id)
+            if not project:
+                return None
+            if discord_role_id is not None and uow.squads:
+                squad = await uow.squads.get_by_role_id(project.guild_id, discord_role_id)
+                if not squad:
+                    await uow.squads.create(
+                        Squad(
+                            guild_id=project.guild_id,
+                            name=f"Squad-{discord_role_id}",
+                            discord_role_id=discord_role_id,
+                        )
+                    )
             return await uow.projects.update_role_id(project_id, discord_role_id)
 
     async def set_project_lead(self, project_id: UUID, lead_discord_id: int | None) -> Project | None:
