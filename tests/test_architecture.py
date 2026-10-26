@@ -141,13 +141,8 @@ def test_driving_adapters_do_not_import_db_adapter() -> None:
         "sqlalchemy",
     )
 
-    # Known temporary exceptions tracked by migration issues:
-    # - src/adapters/discord_bot/views/hub_menu.py: Tracked by Issue #62 (Arch 4.2)
-    # - src/adapters/discord_bot/views/forum_helpers.py: Tracked by Issue #62 (Arch 4.2)
-    known_exceptions = {
-        ("src/adapters/discord_bot/views/hub_menu.py", "src.adapters.db.postgres_repo"),
-        ("src/adapters/discord_bot/views/forum_helpers.py", "src.adapters.db.postgres_repo"),
-    }
+    # Zero exceptions in driving adapters (api, discord_bot)
+    known_exceptions: set[tuple[str, str]] = set()
 
     violating_files: list[tuple[str, str]] = []
 

@@ -37,10 +37,34 @@ class AuthService:
     ):
         self.project_service = project_service
         self.squad_service = squad_service
-        self.guild_lead_role_repo = guild_lead_role_repo
-        self.guild_lead_user_repo = guild_lead_user_repo
+        self._guild_lead_role_repo = guild_lead_role_repo
+        self._guild_lead_user_repo = guild_lead_user_repo
         self.member_directory = member_directory
         self.uow = uow
+
+    @property
+    def guild_lead_role_repo(self) -> IGuildLeadRoleRepository | None:
+        if self._guild_lead_role_repo is not None:
+            return self._guild_lead_role_repo
+        if self.uow is not None:
+            return getattr(self.uow, "guild_lead_roles", None)
+        return None
+
+    @guild_lead_role_repo.setter
+    def guild_lead_role_repo(self, val: IGuildLeadRoleRepository | None) -> None:
+        self._guild_lead_role_repo = val
+
+    @property
+    def guild_lead_user_repo(self) -> IGuildLeadUserRepository | None:
+        if self._guild_lead_user_repo is not None:
+            return self._guild_lead_user_repo
+        if self.uow is not None:
+            return getattr(self.uow, "guild_lead_users", None)
+        return None
+
+    @guild_lead_user_repo.setter
+    def guild_lead_user_repo(self, val: IGuildLeadUserRepository | None) -> None:
+        self._guild_lead_user_repo = val
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:

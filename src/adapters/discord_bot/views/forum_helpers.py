@@ -397,44 +397,25 @@ async def ensure_pinned_hub_post(
 
     view = None
     if project_service and task_service:
-        if not squad_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
-            try:
-                from src.adapters.db.postgres_repo import PostgresSquadRepo
-                from src.services.squad_service import SquadService
-
-                squad_service = SquadService(PostgresSquadRepo(task_service.uow.session_factory))
-            except Exception as e:
-                logger.debug("Could not auto-create squad_service for hub: %s", e)
-
-        if not user_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
-            try:
-                from src.adapters.db.postgres_repo import PostgresUserPreferenceRepo
-                from src.services.user_service import UserService
-
-                user_service = UserService(PostgresUserPreferenceRepo(task_service.uow.session_factory))
-            except Exception as e:
-                logger.debug("Could not auto-create user_service for hub: %s", e)
-
         uow = getattr(task_service, "uow", None)
-        sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
-        if not auth_service and squad_service and sf:
-            try:
-                from src.adapters.db.postgres_repo import (
-                    PostgresGuildLeadRoleRepository,
-                    PostgresGuildLeadUserRepository,
-                )
-                from src.services.auth_service import AuthService
+        if not squad_service and uow and getattr(uow, "squads", None):
+            from src.services.squad_service import SquadService
 
-                lead_role_repo = PostgresGuildLeadRoleRepository(sf)
-                lead_user_repo = PostgresGuildLeadUserRepository(sf)
-                auth_service = AuthService(
-                    project_service,
-                    squad_service,
-                    guild_lead_role_repo=lead_role_repo,
-                    guild_lead_user_repo=lead_user_repo,
-                )
-            except Exception as e:
-                logger.debug("Could not auto-create auth_service for hub: %s", e)
+            squad_service = SquadService(uow.squads, uow=uow)
+
+        if not user_service and uow and getattr(uow, "user_prefs", None):
+            from src.services.user_service import UserService
+
+            user_service = UserService(uow.user_prefs, uow=uow)
+
+        if not auth_service and squad_service:
+            from src.services.auth_service import AuthService
+
+            auth_service = AuthService(
+                project_service,
+                squad_service,
+                uow=uow,
+            )
 
         if squad_service:
             view = PmHubView(
