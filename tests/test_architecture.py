@@ -107,6 +107,84 @@ def test_domain_layer_isolation() -> None:
     )
 
 
+def test_services_layer_isolation() -> None:
+    """Application services must depend only on Domain and Ports, never vendor SDKs or concrete adapters."""
+    forbidden_prefixes = (
+        "discord",
+        "sqlalchemy",
+        "fastapi",
+        "PIL",
+        "uvicorn",
+        "src.adapters",
+    )
+
+    # Known temporary exceptions tracked by migration issues:
+    # - ("auth_service.py", "discord"): Tracked by Issue #53 (Arch 1.1)
+    # - ("tree_render.py", "PIL"): Tracked by Issue #59 (Arch 3.1)
+    known_exceptions = {
+        ("auth_service.py", "discord"),
+        ("tree_render.py", "PIL"),
+        ("tree_render.py", "PIL.Image"),
+        ("tree_render.py", "PIL.ImageDraw"),
+        ("tree_render.py", "PIL.ImageFont"),
+    }
+
+    violating_files: list[tuple[str, str]] = []
+
+    for py_file in SERVICES_DIR.glob("*.py"):
+        for _, mod in _extract_imported_modules(py_file):
+            for prefix in forbidden_prefixes:
+                if mod == prefix or mod.startswith(f"{prefix}."):
+                    if (py_file.name, mod) not in known_exceptions:
+                        violating_files.append((py_file.name, mod))
+
+    assert not violating_files, (
+        "Hexagonal architecture violation: framework/adapter imported in src/services/:\n"
+        + "\n".join(f"  - {filename} imports '{mod}'" for filename, mod in violating_files)
+    )
+
+
+def test_driving_adapters_do_not_import_db_adapter() -> None:
+    """Driving adapters (api, discord_bot) must not directly import concrete DB adapters or SQLAlchemy."""
+    forbidden_prefixes = (
+        "src.adapters.db",
+        "sqlalchemy",
+    )
+
+    # Known temporary exceptions tracked by migration issues:
+    # - src/adapters/api/app.py: Tracked by Issue #61 (Arch 4.1)
+    # - src/adapters/discord_bot/views/hub_menu.py: Tracked by Issue #62 (Arch 4.2)
+    # - src/adapters/discord_bot/views/forum_helpers.py: Tracked by Issue #62 (Arch 4.2)
+    known_exceptions = {
+        ("src/adapters/api/app.py", "sqlalchemy"),
+        ("src/adapters/api/app.py", "sqlalchemy.ext.asyncio"),
+        ("src/adapters/api/app.py", "src.adapters.db.postgres_repo"),
+        ("src/adapters/api/app.py", "src.adapters.db.session"),
+        ("src/adapters/api/app.py", "src.adapters.db.tables"),
+        ("src/adapters/discord_bot/views/hub_menu.py", "src.adapters.db.postgres_repo"),
+        ("src/adapters/discord_bot/views/forum_helpers.py", "src.adapters.db.postgres_repo"),
+    }
+
+    violating_files: list[tuple[str, str]] = []
+
+    for driving_subdir in ("api", "discord_bot"):
+        target_dir = ADAPTERS_DIR / driving_subdir
+        if not target_dir.is_dir():
+            continue
+        for py_file in target_dir.rglob("*.py"):
+            rel_path = str(py_file.relative_to(SRC_DIR.parent))
+            for _, mod in _extract_imported_modules(py_file):
+                for prefix in forbidden_prefixes:
+                    if mod == prefix or mod.startswith(f"{prefix}."):
+                        if (rel_path, mod) not in known_exceptions:
+                            violating_files.append((rel_path, mod))
+
+    assert not violating_files, (
+        "Hexagonal architecture violation: driving adapter directly imports DB adapter/ORM:\n"
+        + "\n".join(f"  - {path} imports '{mod}'" for path, mod in violating_files)
+    )
+
+
 def test_no_unittest_mock_in_production_code() -> None:
     """Production code under src/ must never import unittest.mock (use protocol test doubles in tests/fakes/)."""
     # Known temporary violations tracked by Issue #64 (Arch 4.4):

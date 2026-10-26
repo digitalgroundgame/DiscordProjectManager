@@ -20,12 +20,12 @@ Bootstrap -> Adapters (Driving / Driven) -> Application (Ports / Services) -> Do
    - **Strict Invariant**: Zero outward dependencies. Must NEVER import `discord`, `sqlalchemy`, `fastapi`, `PIL`, `src.ports`, `src.services`, or `src.adapters`.
 
 2. **Application / Ports Layer (`src/ports/` & `src/services/`)**:
-   - `src/ports/`: Abstract protocols for secondary/driven adapters (`IUnitOfWork`, repository interfaces, `TaskWorkspacePort`, `ProjectWorkspacePort`, `TechTreeRenderer`, `NotifierPort`) and primary/driving navigation (`DiscordViewRouter`).
+   - `src/ports/`: Platform-agnostic protocols for secondary/driven adapters (`IUnitOfWork`, repository interfaces, `TaskWorkspacePort`, `ProjectWorkspacePort`, `TechTreeRenderer`, `INotificationDispatcher`, `MemberDirectoryPort`) and system queries (`SystemMetricsQueryPort`).
    - `src/services/`: Application use cases coordinating business workflows. Every mutating service operation executes within an atomic transaction boundary using `async with uow:` (no reads outside the UoW session).
    - **Strict Invariant**: Depends ONLY on `src/domain/` and sibling `src/ports/`. Must NEVER import from `src.adapters`, concrete ORM models, or vendor SDKs (`discord`, `sqlalchemy`, `fastapi`).
 
 3. **Adapters Layer (`src/adapters/`)**:
-   - **Driving Adapters**: Receive external triggers and adapt them into domain requests. Includes Discord UI views, modals, and cogs (`src/adapters/discord_bot/`), FastAPI endpoints (`src/adapters/api/`), and CLI commands (`src/cli.py`).
+   - **Driving Adapters**: Receive external triggers and adapt them into domain requests. Includes Discord UI views, modals, cogs, and intra-adapter navigation (`DiscordViewRouter` in `src/adapters/discord_bot/router.py`), FastAPI endpoints (`src/adapters/api/`), and CLI commands (`src/cli.py`).
    - **Driven Adapters**: Implement outbound ports defined by the application layer. Includes SQLAlchemy persistence (`src/adapters/db/`), Pillow/Mermaid rendering (`src/adapters/rendering/`), and transactional outbox dispatchers (`src/adapters/worker/`).
    - **Strict Invariant**: UI views and endpoints communicate with the system exclusively through Application services and Ports, never performing direct cross-adapter calls into database sessions.
 
