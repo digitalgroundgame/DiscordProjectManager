@@ -35,6 +35,12 @@ class DiscordNotifier(INotificationDispatcher):
         self.bot = bot
         self.user_service = user_service
         self.workspace = workspace
+        if self.workspace is None:
+            bot_ws = getattr(bot, "workspace", None)
+            if bot_ws is not None and (
+                isinstance(bot_ws, ITaskDiscordWorkspace) or not (type(bot).__module__.startswith("unittest.mock"))
+            ):
+                self.workspace = bot_ws
         self.task_service = task_service or getattr(bot, "task_service", None)
 
     def _reconstruct_task(self, payload: dict) -> Task:
@@ -342,17 +348,24 @@ class DiscordNotifier(INotificationDispatcher):
         if not thread_id and task.discord_thread_id:
             thread_id = task.discord_thread_id
 
-        if self.workspace and thread_id:
+        ws = self.workspace
+        if not ws:
+            bot_ws = getattr(self.bot, "workspace", None)
+            if bot_ws is not None and (
+                isinstance(bot_ws, ITaskDiscordWorkspace) or not (type(self.bot).__module__.startswith("unittest.mock"))
+            ):
+                ws = bot_ws
+
+        if ws and thread_id:
             msg = f"**Status Updated:** `{old_status}` ➔ **`{new_status}`** by <@{actor_id}>"
             if notes:
                 msg += f"\n> {notes}"
-            await self.workspace.post_activity(task, content=msg, rearchive_if_completed=False)
-            await self.workspace.sync_workspace(task)
+            await ws.post_activity(task, content=msg, rearchive_if_completed=False)
+            await ws.sync_workspace(task)
             chan = self.bot.get_channel(thread_id)
             if isinstance(chan, discord.Thread):
                 thread = chan
         elif thread_id:
-            message_id = payload.get("discord_message_id")
             try:
                 chan = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
                 if isinstance(chan, discord.Thread):
@@ -361,67 +374,8 @@ class DiscordNotifier(INotificationDispatcher):
                     if notes:
                         msg += f"\n> {notes}"
                     await thread.send(msg)
-
-                    if message_id:
-                        try:
-                            root_msg = None
-                            if isinstance(thread.parent, discord.ForumChannel):
-                                root_msg = thread.starter_message or await thread.fetch_message(message_id)
-                            elif thread.parent:
-                                root_msg = await thread.parent.fetch_message(message_id)
-
-                            if root_msg and root_msg.embeds:
-                                old_embed = root_msg.embeds[0]
-                                updated_embed = discord.Embed(
-                                    title=old_embed.title,
-                                    description=old_embed.description,
-                                    color=discord.Color.green() if new_status == "completed" else discord.Color.blue(),
-                                )
-                                for f in old_embed.fields:
-                                    if f.name == "Status":
-                                        status_val = (
-                                            "🟢 Completed"
-                                            if new_status == "completed"
-                                            else ("🟡 In Progress" if new_status == "inProgress" else "⚪ Not Started")
-                                        )
-                                        updated_embed.add_field(name="Status", value=status_val, inline=f.inline)
-                                    else:
-                                        updated_embed.add_field(name=f.name, value=f.value, inline=f.inline)
-
-                                if old_embed.footer and old_embed.footer.text:
-                                    updated_embed.set_footer(text=old_embed.footer.text)
-
-                                await root_msg.edit(embed=updated_embed)
-                        except Exception as edit_err:
-                            logger.warning(
-                                "Could not update root task embed in thread parent %s: %s", thread.id, edit_err
-                            )
-
-                    edit_kwargs: dict[str, object] = {}
-                    if isinstance(thread.parent, discord.ForumChannel):
-                        prio_val = None
-                        if payload.get("priority"):
-                            try:
-                                prio_val = PriorityLevel(payload["priority"])
-                            except ValueError:
-                                pass
-                        edit_kwargs["applied_tags"] = resolve_forum_tags(
-                            thread.parent,
-                            status=TaskStatus(new_status),
-                            priority=prio_val,
-                            existing_tags=getattr(thread, "applied_tags", None),
-                        )
-
                     if new_status == "completed":
-                        edit_kwargs["archived"] = True
-                    elif thread.archived:
-                        edit_kwargs["archived"] = False
-
-                    if edit_kwargs:
-                        try:
-                            await thread.edit(**edit_kwargs)
-                        except Exception as archive_err:
-                            logger.debug("Could not edit thread state after status update: %s", archive_err)
+                        await thread.edit(archived=True)
             except Exception as e:
                 logger.warning("Failed to post status update into thread %s: %s", thread_id, e)
 

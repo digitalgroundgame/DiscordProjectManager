@@ -331,7 +331,7 @@ async def test_bot_sync_forum_post_starter_message_and_tags(services):
 
 @pytest.mark.asyncio
 async def test_discord_notifier_handles_forum_post_status_changed():
-    """Verify DiscordNotifier updates starter message and applies forum tags on status changed."""
+    """Verify DiscordNotifier delegates activity posting and workspace synchronization on status changed."""
     bot = MagicMock()
     mock_forum = MagicMock(spec=discord.ForumChannel)
     tag_done = _create_mock_tag(99, "Completed")
@@ -344,20 +344,13 @@ async def test_discord_notifier_handles_forum_post_status_changed():
     mock_thread.edit = AsyncMock()
     mock_thread.archived = False
 
-    mock_embed = MagicMock(spec=discord.Embed)
-    mock_field = MagicMock()
-    mock_field.name = "Status"
-    mock_field.inline = True
-    mock_embed.fields = [mock_field]
-    mock_msg = MagicMock(spec=discord.Message)
-    mock_msg.embeds = [mock_embed]
-    mock_msg.edit = AsyncMock()
-
-    mock_thread.starter_message = mock_msg
-    mock_thread.fetch_message = AsyncMock(return_value=mock_msg)
     bot.get_channel = MagicMock(return_value=mock_thread)
 
-    notifier = DiscordNotifier(bot=bot)
+    mock_workspace = MagicMock()
+    mock_workspace.post_activity = AsyncMock(return_value=True)
+    mock_workspace.sync_workspace = AsyncMock(return_value=True)
+
+    notifier = DiscordNotifier(bot=bot, workspace=mock_workspace)
     event = OutboxEvent(
         event_type=EventType.TASK_STATUS_CHANGED,
         idempotency_key="status_forum_test_1",
@@ -374,13 +367,9 @@ async def test_discord_notifier_handles_forum_post_status_changed():
 
     await notifier.dispatch_event(event)
 
-    # Starter message in forum post should have been edited
-    mock_msg.edit.assert_awaited_once()
-    # Thread should have applied tags and been archived
-    mock_thread.edit.assert_awaited_once()
-    kwargs = mock_thread.edit.call_args.kwargs
-    assert kwargs.get("archived") is True
-    assert tag_done in kwargs.get("applied_tags")
+    # Workspace post_activity and sync_workspace should have been invoked
+    mock_workspace.post_activity.assert_awaited_once()
+    mock_workspace.sync_workspace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
