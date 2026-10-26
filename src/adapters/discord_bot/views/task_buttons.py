@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import inspect
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -124,12 +124,8 @@ class TaskQuickControlsView(BaseView):
             return self.workspace
         if self.bot is not None:
             ws = getattr(self.bot, "workspace", None)
-            if ws is not None:
-                from unittest.mock import AsyncMock
-
-                save_fn = getattr(ws, "save_task_controls", None)
-                if asyncio.iscoroutinefunction(save_fn) or isinstance(save_fn, AsyncMock):
-                    return ws
+            if ws is not None and inspect.iscoroutinefunction(getattr(ws, "save_task_controls", None)):
+                return ws
         if self.task_service:
             from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 
