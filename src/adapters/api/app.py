@@ -34,11 +34,6 @@ def get_calendar_service() -> CalendarService:
     raise HTTPException(status_code=503, detail="Calendar service is not configured")
 
 
-def get_db_session():
-    """Deprecated backwards-compatibility stub. Direct DB sessions are no longer used in API handlers."""
-    return None
-
-
 def require_metrics_permission(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> None:

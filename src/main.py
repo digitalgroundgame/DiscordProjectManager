@@ -12,11 +12,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 import discord  # noqa: E402
 import uvicorn  # noqa: E402, F401
 
-from src.adapters.db.session import init_db  # noqa: E402
-from src.adapters.discord_bot.bot import DggPmBot  # noqa: E402
-from src.adapters.discord_bot.discord_notifier import DiscordNotifier  # noqa: E402
 from src.adapters.discord_bot.gateway_supervisor import start_bot_with_retry  # noqa: E402
-from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.bootstrap.container import create_container  # noqa: E402
 
 logging.basicConfig(
@@ -34,37 +30,12 @@ async def run_app() -> None:
     logger.info("Initializing dgg-pm platform...")
 
     # 2. Initialize Database schema
-    await init_db(engine=container.engine)
+    await container.init_db()
     logger.info("Database schema initialized.")
 
-    # 3. Instantiate bot, notifier, worker wired to container components
-    bot = DggPmBot(
-        task_service=container.task_service,
-        project_service=container.project_service,
-        squad_service=container.squad_service,
-        user_service=container.user_service,
-        calendar_service=container.calendar_service,
-        outbox_service=container.outbox_service,
-        guild_lead_role_repo=container.guild_lead_role_repo,
-        guild_lead_user_repo=container.guild_lead_user_repo,
-        settings=container.settings,
-        menu_manager=container.menu_manager,
-    )
-    notifier = DiscordNotifier(
-        bot,
-        user_service=container.user_service,
-        workspace=bot.workspace,
-        task_service=container.task_service,
-    )
-    worker = OutboxWorker(
-        outbox_repo=container.outbox_repo,
-        notifier=notifier,
-        poll_interval=container.settings.OUTBOX_POLL_INTERVAL_SECONDS,
-        batch_size=container.settings.OUTBOX_BATCH_SIZE,
-        max_retries=container.settings.OUTBOX_MAX_RETRIES,
-        backoff_cap_seconds=container.settings.OUTBOX_BACKOFF_CAP_SECONDS,
-        max_retention_hours=container.settings.OUTBOX_MAX_RETENTION_HOURS,
-    )
+    # 3. Retrieve pre-wired bot and worker from container
+    bot = container.bot
+    worker = container.worker
     uvicorn_server = container.uvicorn_server
     settings = container.settings
 
