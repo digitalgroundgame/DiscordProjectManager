@@ -166,11 +166,7 @@ def test_driving_adapters_do_not_import_db_adapter() -> None:
 
 def test_no_unittest_mock_in_production_code() -> None:
     """Production code under src/ must never import unittest.mock (use protocol test doubles in tests/fakes/)."""
-    # Known temporary violations tracked by Issue #64 (Arch 4.4):
-    known_mock_exceptions = {
-        "src/adapters/discord_bot/menu_manager.py",
-        "src/adapters/discord_bot/views/task_buttons.py",
-    }
+    known_mock_exceptions: set[str] = set()
 
     violating_files: list[tuple[str, str]] = []
 
