@@ -13,3 +13,9 @@ class TechTreeRenderer(Protocol[T_RenderOutput]):
     def render(self, tree: Any, **kwargs: Any) -> T_RenderOutput:
         """Renders a TechTree domain instance into output format T_RenderOutput."""
         ...
+
+
+# Backwards compatibility and standard naming alias
+TechTreeRendererPort = TechTreeRenderer
+
+__all__ = ["TechTreeRenderer", "TechTreeRendererPort"]

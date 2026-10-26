@@ -116,14 +116,8 @@ def test_services_layer_isolation() -> None:
         "src.adapters",
     )
 
-    # Known temporary exceptions tracked by migration issues:
-    # - ("tree_render.py", "PIL"): Tracked by Issue #59 (Arch 3.1)
-    known_exceptions = {
-        ("tree_render.py", "PIL"),
-        ("tree_render.py", "PIL.Image"),
-        ("tree_render.py", "PIL.ImageDraw"),
-        ("tree_render.py", "PIL.ImageFont"),
-    }
+    # Zero exceptions in application services layer: pure domain & port dependencies only
+    known_exceptions: set[tuple[str, str]] = set()
 
     violating_files: list[tuple[str, str]] = []
 

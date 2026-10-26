@@ -28,6 +28,7 @@ from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 from src.adapters.discord_bot.bot import DggPmBot  # noqa: E402
 from src.adapters.discord_bot.discord_notifier import DiscordNotifier  # noqa: E402
 from src.adapters.discord_bot.gateway_supervisor import start_bot_with_retry  # noqa: E402
+from src.adapters.rendering import PillowTechTreeRenderer  # noqa: E402
 from src.adapters.worker.outbox_worker import OutboxWorker  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.services.calendar_service import CalendarService  # noqa: E402
@@ -63,10 +64,11 @@ async def run_app() -> None:
     calendar_token_repo = PostgresUserCalendarTokenRepo(async_session_factory)
 
     uow = SqlAlchemyUnitOfWork(async_session_factory)
+    tree_renderer = PillowTechTreeRenderer()
     project_service = ProjectService(project_repo)
     squad_service = SquadService(squad_repo)
     outbox_service = OutboxService(outbox_repo)
-    task_service = TaskService(task_repo, project_service, outbox_service, uow=uow)
+    task_service = TaskService(task_repo, project_service, outbox_service, uow=uow, tree_renderer=tree_renderer)
     user_service = UserService(user_pref_repo)
     calendar_service = CalendarService(calendar_token_repo, task_repo)
 

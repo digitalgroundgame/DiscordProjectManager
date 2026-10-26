@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+import src.adapters.rendering  # noqa: F401
 from src.adapters.db.postgres_repo import (
     PostgresOutboxRepo,
     PostgresProjectRepo,
