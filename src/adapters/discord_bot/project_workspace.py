@@ -588,15 +588,10 @@ class DiscordProjectWorkspaceAdapter(ProjectWorkspacePort):
                         warnings.append(f"Failed to sync task {task.short_id}: {e}")
                 else:
                     try:
-                        ref = await task_ws.provision_workspace(
-                            task,
-                            project=project,
+                        task, ref = await self.task_service.provision_task_workspace(
+                            task.id,
                             target_container=resolved_channel,
-                        )
-                        await self.task_service.update_discord_message_ids(
-                            task_id=task.id,
-                            discord_message_id=ref.message_id,
-                            discord_thread_id=ref.thread_id,
+                            workspace=task_ws,
                         )
                         tasks_recreated += 1
 

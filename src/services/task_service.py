@@ -29,6 +29,7 @@ from src.domain.tech_tree import (
 )
 from src.ports.repositories import ITaskRepo
 from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.workspace import SyncWorkspaceResult, TaskWorkspacePort, TaskWorkspaceRef
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 
@@ -88,11 +89,13 @@ class TaskService:
         project_service: ProjectService,
         outbox_service: OutboxService,
         uow: IUnitOfWork | None = None,
+        workspace: TaskWorkspacePort | None = None,
     ):
         self.task_repo = task_repo
         self.project_service = project_service
         self.outbox_service = outbox_service
         self.uow = uow
+        self.workspace = workspace
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
@@ -223,6 +226,137 @@ class TaskService:
                 pass
 
         return saved_task
+
+    async def provision_task_workspace(
+        self,
+        task_id: UUID,
+        *,
+        target_container: int | Any = None,
+        preferred_channel_id: int | None = None,
+        workspace: TaskWorkspacePort | None = None,
+    ) -> tuple[Task, TaskWorkspaceRef | None]:
+        """Provisions an execution workspace (e.g. Discord Thread) for an existing task."""
+        task = await self.get_by_id(task_id)
+        if not task:
+            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+        effective_ws = workspace or self.workspace
+        if not effective_ws:
+            return task, None
+
+        project = None
+        if task.project_id:
+            project = await self.project_service.get_by_id(task.project_id)
+
+        ref = await effective_ws.provision_workspace(
+            task,
+            project=project,
+            target_container=target_container,
+            preferred_channel_id=preferred_channel_id,
+        )
+
+        if ref:
+            await self.update_discord_message_ids(
+                task.id,
+                discord_message_id=ref.message_id,
+                discord_thread_id=ref.thread_id,
+            )
+            updated = await self.get_by_id(task.id)
+            if updated:
+                task = updated
+
+        return task, ref
+
+    async def create_task_with_workspace(
+        self,
+        *,
+        guild_id: int,
+        title: str,
+        creator_discord_id: int,
+        project_name: str | None = None,
+        project_id: UUID | None = None,
+        assignee_discord_id: int | None = None,
+        due_at: datetime | None = None,
+        priority: PriorityLevel = PriorityLevel.NORMAL,
+        body: str | None = None,
+        watchers: list[int] | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        prerequisite_short_ids: list[str] | str | None = None,
+        target_container: int | Any = None,
+        preferred_channel_id: int | None = None,
+        workspace: TaskWorkspacePort | None = None,
+    ) -> tuple[Task, TaskWorkspaceRef | None]:
+        """Creates a task and provisions its execution workspace in one cohesive application workflow."""
+        task = await self.create_task(
+            guild_id=guild_id,
+            title=title,
+            creator_discord_id=creator_discord_id,
+            project_id=project_id,
+            project_name=project_name,
+            assignee_discord_id=assignee_discord_id,
+            due_at=due_at,
+            priority=priority,
+            body=body,
+            watchers=watchers,
+            metadata_json=metadata_json,
+            prerequisite_short_ids=prerequisite_short_ids,
+        )
+
+        effective_ws = workspace or self.workspace
+        if not effective_ws:
+            return task, None
+
+        task, ref = await self.provision_task_workspace(
+            task.id,
+            target_container=target_container,
+            preferred_channel_id=preferred_channel_id,
+            workspace=effective_ws,
+        )
+
+        # Synchronize any prerequisite workspace starter cards so dependency lists stay up to date
+        if prerequisite_short_ids:
+            explicit_prereqs = parse_prerequisite_short_ids(prerequisite_short_ids)
+            for p_key in explicit_prereqs:
+                p_task = await self.get_by_short_id(guild_id, p_key)
+                if p_task:
+                    try:
+                        await effective_ws.sync_workspace(p_task)
+                    except Exception:
+                        pass
+
+        return task, ref
+
+    async def sync_task_workspace(
+        self,
+        task_id: UUID,
+        *,
+        sync_title: bool = False,
+        sync_tags: bool = True,
+        sync_archive: bool = True,
+        sync_starter_card: bool = True,
+        workspace: TaskWorkspacePort | None = None,
+    ) -> SyncWorkspaceResult | bool:
+        """Synchronizes an execution workspace starter card and tags with current domain state."""
+        task = await self.get_by_id(task_id)
+        if not task:
+            raise TaskNotFoundError(f"Task with ID {task_id} does not exist.")
+
+        effective_ws = workspace or self.workspace
+        if not effective_ws:
+            return False
+
+        project = None
+        if task.project_id:
+            project = await self.project_service.get_by_id(task.project_id)
+
+        return await effective_ws.sync_workspace(
+            task,
+            project=project,
+            sync_title=sync_title,
+            sync_tags=sync_tags,
+            sync_archive=sync_archive,
+            sync_starter_card=sync_starter_card,
+        )
 
     async def update_status(
         self,
