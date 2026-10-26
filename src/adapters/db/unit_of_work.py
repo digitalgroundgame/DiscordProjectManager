@@ -36,14 +36,17 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
         self._session: AsyncSession | None = None
-        self.tasks: ITaskRepo = None  # type: ignore[assignment]
-        self.projects: IProjectRepo = None  # type: ignore[assignment]
-        self.squads: ISquadRepo = None  # type: ignore[assignment]
-        self.outbox: IOutboxRepo = None  # type: ignore[assignment]
-        self.user_prefs: IUserPreferenceRepo = None  # type: ignore[assignment]
-        self.guild_lead_roles: IGuildLeadRoleRepository = None  # type: ignore[assignment]
-        self.guild_lead_users: IGuildLeadUserRepository = None  # type: ignore[assignment]
-        self.calendar_tokens: IUserCalendarTokenRepo = None  # type: ignore[assignment]
+        self._bind_repos(session_factory)
+
+    def _bind_repos(self, session_or_factory: AsyncSession | async_sessionmaker[AsyncSession]) -> None:
+        self.tasks: ITaskRepo = PostgresTaskRepo(session_or_factory)
+        self.projects: IProjectRepo = PostgresProjectRepo(session_or_factory)
+        self.squads: ISquadRepo = PostgresSquadRepo(session_or_factory)
+        self.outbox: IOutboxRepo = PostgresOutboxRepo(session_or_factory)
+        self.user_prefs: IUserPreferenceRepo = PostgresUserPreferenceRepo(session_or_factory)
+        self.guild_lead_roles: IGuildLeadRoleRepository = PostgresGuildLeadRoleRepository(session_or_factory)
+        self.guild_lead_users: IGuildLeadUserRepository = PostgresGuildLeadUserRepository(session_or_factory)
+        self.calendar_tokens: IUserCalendarTokenRepo = PostgresUserCalendarTokenRepo(session_or_factory)
 
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
@@ -51,14 +54,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
 
     async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
-        self.tasks = PostgresTaskRepo(self._session)
-        self.projects = PostgresProjectRepo(self._session)
-        self.squads = PostgresSquadRepo(self._session)
-        self.outbox = PostgresOutboxRepo(self._session)
-        self.user_prefs = PostgresUserPreferenceRepo(self._session)
-        self.guild_lead_roles = PostgresGuildLeadRoleRepository(self._session)
-        self.guild_lead_users = PostgresGuildLeadUserRepository(self._session)
-        self.calendar_tokens = PostgresUserCalendarTokenRepo(self._session)
+        self._bind_repos(self._session)
         return self
 
     async def __aexit__(
@@ -79,6 +75,7 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
         finally:
             await self._session.close()
             self._session = None
+            self._bind_repos(self._session_factory)
 
     async def commit(self) -> None:
         if self._session is not None:
