@@ -182,7 +182,7 @@ class AuthService:
             if user_id in lead_user_ids:
                 return True
 
-        # If user is missing roles, attempt to resolve member from directory or guild
+        # If user is missing roles, attempt to resolve member from directory
         member = user
         has_roles = False
         if isinstance(member, ActorPrincipal) and member.role_ids:
@@ -190,27 +190,11 @@ class AuthService:
         elif hasattr(member, "roles") and getattr(member, "roles", None):
             has_roles = True
 
-        if not has_roles:
-            if self.member_directory and user_id:
-                resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
-                if resolved:
-                    member = resolved
-                    has_roles = bool(resolved.role_ids)
-
-            if not has_roles:
-                target_guild = guild or getattr(user, "guild", None)
-                if target_guild:
-                    if hasattr(target_guild, "get_member") and user_id:
-                        m = target_guild.get_member(user_id)
-                        if m:
-                            member = m
-                    if (not hasattr(member, "roles") or not getattr(member, "roles", None)) and hasattr(
-                        target_guild, "fetch_member"
-                    ):
-                        try:
-                            member = await target_guild.fetch_member(user_id)
-                        except Exception:
-                            pass
+        if not has_roles and self.member_directory and user_id:
+            resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
+            if resolved:
+                member = resolved
+                has_roles = bool(resolved.role_ids)
 
         # 3. Check configured Team Lead roles
         if self.guild_lead_role_repo:
@@ -242,7 +226,7 @@ class AuthService:
         if not await self.can_manage_projects(user, guild_id=guild_id, guild=guild):
             raise PermissionDeniedError(
                 "You do not have permission to manage projects or squads. "
-                "You must be a Discord Server Manager, an authorized Team Lead, or hold an authorized Team Lead role.",
+                "You must be a Discord Server Manager, an authorized Squad Lead, or hold an authorized Lead role.",
                 user_id=user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None),
                 guild_id=guild_id,
             )
@@ -460,7 +444,7 @@ class AuthService:
             user_id = user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None)
             if not project_id:
                 raise PermissionDeniedError(
-                    "You do not have permission to create standalone tasks. "
+                    "You do not have permission to create standalone tasks (tasks outside an active project). "
                     "You must be a Squad Lead or a server manager, or create the task inside an active project.",
                     user_id=user_id,
                 )
@@ -551,7 +535,7 @@ class AuthService:
             if isinstance(roles, (list, tuple, set)):
                 target_role_ids = {r.id for r in roles if hasattr(r, "id")}
 
-        # If roles not on object, resolve via member_directory or guild duck-typing
+        # If roles not on object, resolve via member_directory
         if target_role_ids is None and user_id:
             target_guild_id = project.guild_id or (guild.id if (guild and hasattr(guild, "id")) else None)
             if self.member_directory and target_guild_id:
@@ -559,26 +543,14 @@ class AuthService:
                 if principal:
                     target_role_ids = set(principal.role_ids)
 
-            if target_role_ids is None and guild:
-                member = None
-                if hasattr(guild, "get_member"):
-                    member = guild.get_member(user_id)
-                if member is None and hasattr(guild, "fetch_member"):
-                    try:
-                        member = await guild.fetch_member(user_id)
-                    except Exception:
-                        member = None
-                if member:
-                    target_role_ids = {r.id for r in getattr(member, "roles", []) if hasattr(r, "id")}
+        project_roles = await self.get_project_role_ids(project)
+        if not project_roles:
+            return True
 
         if target_role_ids is None:
             return False
 
-        project_roles = await self.get_project_role_ids(project)
-        if project_roles:
-            return any(rid in target_role_ids for rid in project_roles)
-
-        return True
+        return any(rid in target_role_ids for rid in project_roles)
 
     async def require_task_assignee_eligibility(
         self,
@@ -601,22 +573,20 @@ class AuthService:
             if project:
                 project_roles = await self.get_project_role_ids(project)
                 for rid in sorted(project_roles):
-                    role = guild.get_role(rid) if (guild and hasattr(guild, "get_role")) else None
-                    if role:
-                        role_names.append(f"@{role.name}")
-                    elif self.squad_service:
+                    if self.squad_service:
                         squad = await self.squad_service.get_by_role_id(project.guild_id, rid)
                         if squad:
                             role_names.append(f"@{squad.name}")
                         else:
-                            role_names.append(f"<@&{rid}>")
+                            role_names.append(f"Role({rid})")
                     else:
-                        role_names.append(f"<@&{rid}>")
+                        role_names.append(f"Role({rid})")
 
             roles_str = ", ".join(role_names) if role_names else "a squad role"
             proj_str = f"project '{project.name}'" if project else "this project"
+            user_label = f"User {user_id}" if user_id else "User"
             raise PermissionDeniedError(
-                f"<@{user_id}> does not hold an eligible squad Discord role for {proj_str}. "
+                f"{user_label} does not hold an eligible squad Discord role for {proj_str}. "
                 f"Required role(s): {roles_str}. Only members with these roles or the Project Lead can be assigned.",
                 user_id=user_id,
                 required_role_ids=project_roles,

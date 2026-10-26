@@ -207,13 +207,15 @@ class TestMemberResolution:
         assert tree["M-2"].assignee_name == "Dev #5555"
 
     def test_discord_guild_mock_resolver(self):
+        from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+
         mock_member = MagicMock()
         mock_member.display_name = "Ford Prefect"
         mock_guild = MagicMock()
         mock_guild.get_member.return_value = mock_member
 
         t1 = _make_task("M-3", assignee_id=7777)
-        tree = TechTree.build([t1], member_resolver=mock_guild)
+        tree = TechTree.build([t1], member_resolver=lambda uid: resolve_discord_member_name(uid, mock_guild))
         assert tree["M-3"].assignee_name == "Ford Prefect"
 
 

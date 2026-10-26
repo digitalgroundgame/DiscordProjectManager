@@ -174,6 +174,7 @@ async def test_service_render_project_tree_integration(services):
 async def test_render_project_tree_assignee_name_resolution(services):
     from unittest.mock import MagicMock
 
+    from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
     from src.services.task_service import resolve_member_name
 
     proj_srv = services["project"]
@@ -190,7 +191,7 @@ async def test_render_project_tree_assignee_name_resolution(services):
     mock_member.display_name = "PJ_Lead"
     mock_guild = MagicMock(spec=discord.Guild)
     mock_guild.get_member.return_value = mock_member
-    assert resolve_member_name(user_id, mock_guild) == "PJ_Lead"
+    assert resolve_discord_member_name(user_id, mock_guild) == "PJ_Lead"
 
     # 2. Test get_project_tree_data with member_resolver
     project = await proj_srv.create_project(guild_id=guild_id, name="Assignee Test", prefix="ASG")
@@ -207,7 +208,10 @@ async def test_render_project_tree_assignee_name_resolution(services):
     assert nodes_raw[0]["assignee"] == f"User {user_id}"
 
     # With resolver: resolves to human-readable username
-    nodes_resolved, _ = await task_srv.get_project_tree_data(guild_id, project.id, member_resolver=mock_guild)
+    def resolver(uid):
+        return resolve_discord_member_name(uid, mock_guild)
+
+    nodes_resolved, _ = await task_srv.get_project_tree_data(guild_id, project.id, member_resolver=resolver)
     assert nodes_resolved[0]["assignee"] == "PJ_Lead"
 
     # Render tree with member_resolver
@@ -215,7 +219,7 @@ async def test_render_project_tree_assignee_name_resolution(services):
         guild_id=guild_id,
         project_id=project.id,
         orientation="lr",
-        member_resolver=mock_guild,
+        member_resolver=resolver,
     )
     assert isinstance(buf, io.BytesIO)
     img = Image.open(buf)

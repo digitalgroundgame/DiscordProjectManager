@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
+from src.adapters.discord_bot.actor_mapper import DiscordMemberDirectory
 from src.adapters.discord_bot.bot import DggPmBot
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.views.task_modals import TaskEditModal, TaskNoteModal
@@ -672,11 +673,13 @@ async def test_project_lead_authorization(services):
 
     # 3. Check assignment eligibility
     mock_guild = MagicMock()
+    mock_guild.id = guild_id
     mock_guild.get_member.side_effect = lambda uid: {
         lead_id: lead_member,
         contributor_id: contributor_member,
         outsider_id: outsider_member,
     }.get(uid)
+    auth_srv.member_directory = DiscordMemberDirectory(mock_guild)
 
     assert await auth_srv.can_assign_task_to_user(mock_guild, lead_id, project.id) is True
     assert await auth_srv.can_assign_task_to_user(mock_guild, contributor_id, project.id) is True
@@ -1092,8 +1095,10 @@ async def test_can_assign_task_to_user_uncached_member_fallback_fetch(services):
     uncached_member = _make_mock_member(uncached_user_id, role_ids=[5555])
 
     mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
     mock_guild.get_member = MagicMock(return_value=None)
     mock_guild.fetch_member = AsyncMock(return_value=uncached_member)
+    auth_srv.member_directory = DiscordMemberDirectory(mock_guild)
 
     # Calling with uncached user ID should fall back to fetch_member and return True
     eligible = await auth_srv.can_assign_task_to_user(mock_guild, uncached_user_id, project.id)
@@ -1120,7 +1125,9 @@ async def test_can_assign_task_to_user_fetch_member_error_handling(services):
 
     user_id = 2002
     mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = guild_id
     mock_guild.get_member = MagicMock(return_value=None)
+    auth_srv.member_directory = DiscordMemberDirectory(mock_guild)
 
     # 1. NotFound error
     mock_guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "User not found"))
@@ -1149,30 +1156,25 @@ async def test_require_task_assignee_eligibility_error_message_details(services)
     ineligible_user_id = 2003
     ineligible_member = _make_mock_member(ineligible_user_id, role_ids=[9999])
 
-    role_7001 = MagicMock(spec=discord.Role)
-    role_7001.id = 7001
-    role_7001.name = "Engineering"
-
-    role_7002 = MagicMock(spec=discord.Role)
-    role_7002.id = 7002
-    role_7002.name = "Design"
+    await squad_srv.create_squad(guild_id=guild_id, name="Engineering", discord_role_id=7001)
+    await squad_srv.create_squad(guild_id=guild_id, name="Design", discord_role_id=7002)
 
     mock_guild = MagicMock(spec=discord.Guild)
     mock_guild.id = guild_id
     mock_guild.get_member = MagicMock(return_value=ineligible_member)
-    mock_guild.get_role.side_effect = lambda rid: {
-        7001: role_7001,
-        7002: role_7002,
-    }.get(rid)
 
     with pytest.raises(PermissionDeniedError) as exc_info:
         await auth_srv.require_task_assignee_eligibility(mock_guild, ineligible_member, project.id)
 
     err_msg = str(exc_info.value)
-    assert f"<@{ineligible_user_id}>" in err_msg
+    assert exc_info.value.user_id == ineligible_user_id
+    assert exc_info.value.required_role_ids == {7001, 7002}
+    assert str(ineligible_user_id) in err_msg
+    assert "<@" not in err_msg
+    assert "<@&" not in err_msg
     assert "Project Apollo" in err_msg
-    assert "@Engineering" in err_msg
-    assert "@Design" in err_msg
+    assert "@Squad-7001" in err_msg
+    assert "@Squad-7002" in err_msg
     assert "Project Lead" in err_msg
 
 
@@ -1574,6 +1576,7 @@ async def test_can_manage_projects_resolves_member_when_user_is_discord_user(ser
     guild = MagicMock(spec=discord.Guild)
     guild.id = guild_id
     guild.get_member.return_value = mock_member
+    auth_srv.member_directory = DiscordMemberDirectory(guild)
 
     can_manage = await auth_srv.can_manage_projects(user, guild_id=guild_id, guild=guild)
     assert can_manage is True

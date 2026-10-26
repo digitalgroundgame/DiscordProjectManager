@@ -26,12 +26,15 @@ from src.adapters.db.session import (
     set_engine_and_session_factory,
 )
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
+from src.adapters.discord_bot.actor_mapper import DiscordMemberDirectory
 from src.adapters.discord_bot.bot import DggPmBot
 from src.adapters.discord_bot.discord_notifier import DiscordNotifier
 from src.adapters.discord_bot.menu_manager import MenuSessionManager, set_menu_manager
 from src.adapters.rendering import PillowTechTreeRenderer
 from src.adapters.worker.outbox_worker import OutboxWorker
 from src.config import Settings, get_settings, set_settings
+from src.ports.member_directory import MemberDirectoryPort
+from src.services.auth_service import AuthService
 from src.services.calendar_service import CalendarService
 from src.services.observability_service import ObservabilityService
 from src.services.outbox_service import OutboxService
@@ -76,6 +79,8 @@ class AppContainer:
         worker: OutboxWorker,
         api_app: FastAPI,
         uvicorn_server: uvicorn.Server,
+        auth_service: AuthService | None = None,
+        member_directory: MemberDirectoryPort | None = None,
     ) -> None:
         self.settings = settings
         self.engine = engine
@@ -105,6 +110,8 @@ class AppContainer:
         self.worker = worker
         self.api_app = api_app
         self.uvicorn_server = uvicorn_server
+        self.auth_service = auth_service
+        self.member_directory = member_directory
 
     async def init_db(self, max_retries: int = 15, retry_interval: float = 1.0) -> None:
         """Initialize database schema with migrations if enabled."""
@@ -190,7 +197,7 @@ def create_container(
     api_app.state.observability_service = observability_service
     api_app.state.settings = resolved_settings
 
-    # 4. Discord Bot & Notifier Wiring
+    # 4. Discord Bot, Member Directory & Auth Service Wiring
     bot = DggPmBot(
         task_service=task_service,
         project_service=project_service,
@@ -203,6 +210,22 @@ def create_container(
         settings=resolved_settings,
         menu_manager=resolved_menu_manager,
     )
+    member_directory = DiscordMemberDirectory(bot)
+    auth_service = AuthService(
+        project_service=project_service,
+        squad_service=squad_service,
+        guild_lead_role_repo=guild_lead_role_repo,
+        guild_lead_user_repo=guild_lead_user_repo,
+        member_directory=member_directory,
+        uow=uow,
+    )
+    bot.auth_service = auth_service
+    bot.member_directory = member_directory
+    if bot.workspace:
+        bot.workspace.auth_service = auth_service
+    if bot.project_workspace:
+        bot.project_workspace.auth_service = auth_service
+
     notifier = DiscordNotifier(
         bot,
         user_service=user_service,
@@ -259,4 +282,6 @@ def create_container(
         worker=worker,
         api_app=api_app,
         uvicorn_server=uvicorn_server,
+        auth_service=auth_service,
+        member_directory=member_directory,
     )

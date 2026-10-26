@@ -59,3 +59,8 @@ def resolve_discord_member_name(user_id: int | None, resolver: Any = None) -> st
             pass
 
     return None
+
+
+resolve_member_name = resolve_discord_member_name
+
+__all__ = ["MemberResolver", "resolve_discord_member_name", "resolve_member_name"]

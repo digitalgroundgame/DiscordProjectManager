@@ -51,7 +51,7 @@ class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
         async with self._get_session() as session:
             stmt = select(SquadTable).where(SquadTable.id == squad_id)
             res = await session.execute(stmt)
-            row = res.scalar_one_or_none()
+            row = res.scalars().first()
             return _to_domain_squad(row) if row else None
 
     async def get_by_name(self, guild_id: int, name: str) -> Squad | None:
@@ -61,7 +61,7 @@ class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
                 func.upper(SquadTable.name) == name.strip().upper(),
             )
             res = await session.execute(stmt)
-            row = res.scalar_one_or_none()
+            row = res.scalars().first()
             return _to_domain_squad(row) if row else None
 
     async def get_by_role_id(self, guild_id: int, role_id: int) -> Squad | None:
@@ -71,7 +71,7 @@ class PostgresSquadRepo(BasePostgresRepo, ISquadRepo):
                 SquadTable.discord_role_id == role_id,
             )
             res = await session.execute(stmt)
-            row = res.scalar_one_or_none()
+            row = res.scalars().first()
             return _to_domain_squad(row) if row else None
 
     async def add_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
