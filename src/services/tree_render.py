@@ -650,3 +650,12 @@ class MermaidTechTreeRenderer:
             lines.append(f"    {src} --> {dst}")
 
         return "\n".join(lines)
+
+
+# Register defaults onto pure domain TechTree
+from src.domain.tech_tree import TechTree  # noqa: E402
+
+TechTree.register_default_renderers(
+    png_renderer=PillowTechTreeRenderer(),
+    mermaid_renderer=MermaidTechTreeRenderer(),
+)

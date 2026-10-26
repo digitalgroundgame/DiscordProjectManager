@@ -86,11 +86,8 @@ def test_domain_layer_isolation() -> None:
         "src.ports",
     )
 
-    # Known temporary exceptions tracked by migration issues:
-    # - ("tech_tree.py", "src.services.tree_render"): Tracked by Issue #54 (Arch 1.2)
-    known_exceptions = {
-        ("tech_tree.py", "src.services.tree_render"),
-    }
+    # Zero domain exceptions allowed: pure enterprise entities & policies
+    known_exceptions: set[tuple[str, str]] = set()
 
     violating_files: list[tuple[str, str]] = []
 
