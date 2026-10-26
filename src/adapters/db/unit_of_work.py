@@ -48,12 +48,44 @@ class _UnitOfWorkTransactionContext:
         self.calendar_tokens: IUserCalendarTokenRepo = PostgresUserCalendarTokenRepo(session)
 
 
+class _ContextRepoDescriptor:
+    """Descriptor resolving the active task-local transaction repository or fallback instance."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._fallback_attr = f"_fallback_{name}"
+
+    def __get__(self, instance: SqlAlchemyUnitOfWork | None, owner: Any = None) -> Any:
+        if instance is None:
+            return self
+        ctx = instance._context_var.get()
+        if ctx is not None:
+            return getattr(ctx, self._name)
+        return getattr(instance, self._fallback_attr)
+
+    def __set__(self, instance: SqlAlchemyUnitOfWork, value: Any) -> None:
+        ctx = instance._context_var.get()
+        if ctx is not None:
+            setattr(ctx, self._name, value)
+        else:
+            setattr(instance, self._fallback_attr, value)
+
+
 class SqlAlchemyUnitOfWork(IUnitOfWork):
     """SQLAlchemy async implementation of the Unit of Work pattern.
 
     Uses task-local ContextVar isolation so concurrent coroutines receive distinct
     sessions and nested 'async with uow:' blocks participate in a single re-entrant transaction.
     """
+
+    tasks: ITaskRepo = _ContextRepoDescriptor("tasks")  # type: ignore[assignment]
+    projects: IProjectRepo = _ContextRepoDescriptor("projects")  # type: ignore[assignment]
+    squads: ISquadRepo = _ContextRepoDescriptor("squads")  # type: ignore[assignment]
+    outbox: IOutboxRepo = _ContextRepoDescriptor("outbox")  # type: ignore[assignment]
+    user_prefs: IUserPreferenceRepo = _ContextRepoDescriptor("user_prefs")  # type: ignore[assignment]
+    guild_lead_roles: IGuildLeadRoleRepository = _ContextRepoDescriptor("guild_lead_roles")  # type: ignore[assignment]
+    guild_lead_users: IGuildLeadUserRepository = _ContextRepoDescriptor("guild_lead_users")  # type: ignore[assignment]
+    calendar_tokens: IUserCalendarTokenRepo = _ContextRepoDescriptor("calendar_tokens")  # type: ignore[assignment]
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
@@ -73,110 +105,6 @@ class SqlAlchemyUnitOfWork(IUnitOfWork):
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         return self._session_factory
-
-    @property
-    def tasks(self) -> ITaskRepo:
-        ctx = self._context_var.get()
-        return ctx.tasks if ctx is not None else self._fallback_tasks
-
-    @tasks.setter
-    def tasks(self, value: ITaskRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.tasks = value
-        else:
-            self._fallback_tasks = value
-
-    @property
-    def projects(self) -> IProjectRepo:
-        ctx = self._context_var.get()
-        return ctx.projects if ctx is not None else self._fallback_projects
-
-    @projects.setter
-    def projects(self, value: IProjectRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.projects = value
-        else:
-            self._fallback_projects = value
-
-    @property
-    def squads(self) -> ISquadRepo:
-        ctx = self._context_var.get()
-        return ctx.squads if ctx is not None else self._fallback_squads
-
-    @squads.setter
-    def squads(self, value: ISquadRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.squads = value
-        else:
-            self._fallback_squads = value
-
-    @property
-    def outbox(self) -> IOutboxRepo:
-        ctx = self._context_var.get()
-        return ctx.outbox if ctx is not None else self._fallback_outbox
-
-    @outbox.setter
-    def outbox(self, value: IOutboxRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.outbox = value
-        else:
-            self._fallback_outbox = value
-
-    @property
-    def user_prefs(self) -> IUserPreferenceRepo:
-        ctx = self._context_var.get()
-        return ctx.user_prefs if ctx is not None else self._fallback_user_prefs
-
-    @user_prefs.setter
-    def user_prefs(self, value: IUserPreferenceRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.user_prefs = value
-        else:
-            self._fallback_user_prefs = value
-
-    @property
-    def guild_lead_roles(self) -> IGuildLeadRoleRepository:
-        ctx = self._context_var.get()
-        return ctx.guild_lead_roles if ctx is not None else self._fallback_guild_lead_roles
-
-    @guild_lead_roles.setter
-    def guild_lead_roles(self, value: IGuildLeadRoleRepository) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.guild_lead_roles = value
-        else:
-            self._fallback_guild_lead_roles = value
-
-    @property
-    def guild_lead_users(self) -> IGuildLeadUserRepository:
-        ctx = self._context_var.get()
-        return ctx.guild_lead_users if ctx is not None else self._fallback_guild_lead_users
-
-    @guild_lead_users.setter
-    def guild_lead_users(self, value: IGuildLeadUserRepository) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.guild_lead_users = value
-        else:
-            self._fallback_guild_lead_users = value
-
-    @property
-    def calendar_tokens(self) -> IUserCalendarTokenRepo:
-        ctx = self._context_var.get()
-        return ctx.calendar_tokens if ctx is not None else self._fallback_calendar_tokens
-
-    @calendar_tokens.setter
-    def calendar_tokens(self, value: IUserCalendarTokenRepo) -> None:
-        ctx = self._context_var.get()
-        if ctx is not None:
-            ctx.calendar_tokens = value
-        else:
-            self._fallback_calendar_tokens = value
 
     async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         ctx = self._context_var.get()

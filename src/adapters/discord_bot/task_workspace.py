@@ -313,12 +313,12 @@ class DiscordTaskWorkspaceAdapter(TaskWorkspacePort):
                         prerequisites=prereqs,
                         dependents=dependents,
                     )
-                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                    if hasattr(interaction, "response") and interaction.response.is_done() is not True:
                         await _maybe_await(
                             interaction.response.edit_message(content=content, embed=new_embed, view=new_view)
                         )
                 else:
-                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                    if hasattr(interaction, "response") and interaction.response.is_done() is not True:
                         await _maybe_await(
                             interaction.response.edit_message(content=content, embed=None, view=new_view)
                         )
@@ -329,7 +329,7 @@ class DiscordTaskWorkspaceAdapter(TaskWorkspacePort):
                     prerequisites=prereqs,
                     dependents=dependents,
                 )
-                if hasattr(interaction, "response") and not interaction.response.is_done():
+                if hasattr(interaction, "response") and interaction.response.is_done() is not True:
                     await _maybe_await(interaction.response.edit_message(embed=new_embed, view=new_view))
 
     async def post_activity(

@@ -143,8 +143,8 @@ async def test_task_service_rollback_on_outbox_failure(async_engine: AsyncEngine
 
 
 @pytest.mark.asyncio
-async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine: AsyncEngine):
-    """Test that if an explicit prerequisite fails, TaskService rolls back task persistence atomically."""
+async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine: AsyncEngine, monkeypatch):
+    """Test that if an explicit prerequisite fails or introduces a cycle after task creation, TaskService rolls back."""
     session_factory = async_sessionmaker(
         bind=async_engine,
         class_=AsyncSession,
@@ -152,7 +152,7 @@ async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine
     )
     uow: IUnitOfWork = SqlAlchemyUnitOfWork(session_factory)
 
-    from src.domain.exceptions import TaskNotFoundError
+    from src.domain.exceptions import TaskNotFoundError, ValidationError
     from src.services.outbox_service import OutboxService
     from src.services.project_service import ProjectService
     from src.services.task_service import TaskService
@@ -165,7 +165,7 @@ async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine
         p = await proj_svc.create_project(guild_id=77777, name="Atomic Mission", prefix="ATM")
         await uow.commit()
 
-    # Attempt to create task with a non-existent prerequisite
+    # 1. Attempt to create task with a non-existent prerequisite
     with pytest.raises(TaskNotFoundError, match="Prerequisite task 'ATM-999' was not found"):
         await task_svc.create_task(
             guild_id=77777,
@@ -175,11 +175,49 @@ async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine
             prerequisite_short_ids=["ATM-999"],
         )
 
-    # In a fresh transaction, verify task was NOT persisted due to atomic rollback
     async with uow:
         tasks, count = await uow.tasks.list_tasks(guild_id=77777, project_id=p.id)
         assert count == 0
         assert len(tasks) == 0
+
+    # 2. Create a valid base task ATM-1, then force a cycle/validation failure inside add_dependency
+    # AFTER uow.tasks.create(task) has already flushed ATM-2 into the session.
+    base_task = await task_svc.create_task(
+        guild_id=77777,
+        title="Base Prerequisite Task",
+        creator_discord_id=1234,
+        project_id=p.id,
+    )
+    assert base_task.short_id == "ATM-1"
+
+    orig_add_dep = task_svc.add_dependency
+
+    async def fail_with_cycle_on_second(
+        guild_id: int,
+        task_short_id: str,
+        depends_on_short_id: str,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        if depends_on_short_id == "ATM-1":
+            raise ValidationError("Circular dependency detected between ATM-2 and ATM-1")
+        return await orig_add_dep(guild_id, task_short_id, depends_on_short_id, actor_discord_id)
+
+    monkeypatch.setattr(task_svc, "add_dependency", fail_with_cycle_on_second)
+
+    with pytest.raises(ValidationError, match="Circular dependency detected"):
+        await task_svc.create_task(
+            guild_id=77777,
+            title="Task Whose Prerequisite Cycle Fails Post-Insert",
+            creator_discord_id=1234,
+            project_id=p.id,
+            prerequisite_short_ids=["ATM-1"],
+        )
+
+    # Verify ATM-2 was rolled back and only ATM-1 exists in the database
+    async with uow:
+        tasks, count = await uow.tasks.list_tasks(guild_id=77777, project_id=p.id)
+        assert count == 1
+        assert [t.short_id for t in tasks] == ["ATM-1"]
 
 
 @pytest.mark.asyncio

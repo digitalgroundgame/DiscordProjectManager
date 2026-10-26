@@ -1,4 +1,4 @@
-"""Team Leads Administration View for dgg-pm."""
+"""Guild Lead Roles & Squad Leads Administration View for dgg-pm."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ logger = logging.getLogger("dgg_pm.views.admin_team_leads")
 
 
 class TeamLeadsAdminView(BaseView):
-    """View allowing Server Managers to assign, view, and remove Team Leads (roles and members) for the guild."""
+    """View allowing Server Managers to assign, view, and remove guild-level Lead roles and members."""
 
     def __init__(
         self,

@@ -951,7 +951,7 @@ async def test_auth_service_standalone_task_permissions_option_b(services):
 
     with pytest.raises(PermissionDeniedError) as exc_info:
         await auth_srv.require_task_creation(regular_member, None)
-    assert "You do not have permission to create standalone tasks" in str(exc_info.value)
+    assert "You do not have permission to create tasks outside an active project" in str(exc_info.value)
 
     # 4. TaskMenuView UI gating: regular member does not see standalone_btn
     regular_view = TaskMenuView(

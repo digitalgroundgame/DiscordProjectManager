@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from src.domain.standard_mappings import to_rfc5545_vcalendar
-from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 if TYPE_CHECKING:
     from src.ports.repositories import ITaskRepo, IUserCalendarTokenRepo
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dgg_pm.services.calendar")
 
 
-class CalendarService:
+class CalendarService(TransactionalService):
     """Application service for managing user iCalendar subscription feeds and token lifecycles."""
 
     def __init__(
@@ -32,11 +33,11 @@ class CalendarService:
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
-        if self.uow is not None:
-            async with self.uow as active_uow:
-                yield active_uow
-        else:
-            yield NullUnitOfWork(calendar_tokens=self.token_repo, tasks=self.task_repo)
+        async with super()._transaction(
+            calendar_tokens=self.token_repo,
+            tasks=self.task_repo,
+        ) as active_uow:
+            yield active_uow
 
     async def get_or_create_token(self, user_discord_id: int) -> str:
         """Retrieves existing calendar token for a user or creates a new cryptographically secure token."""
@@ -93,20 +94,20 @@ class CalendarService:
             format_type=format_type,
         )
 
-    @staticmethod
     def build_feed_urls(
-        self_or_token: CalendarService | str,
-        token_or_base: str | None = None,
+        self,
+        token: str = "",
         base_url: str | None = None,
     ) -> dict[str, str]:
         """Builds webcal:// and https:// URLs for calendar subscription given a token."""
-        if isinstance(self_or_token, CalendarService):
-            token = token_or_base or ""
-            raw_base = (base_url or self_or_token.base_url or "http://localhost:8000").rstrip("/")
+        if isinstance(self, str):
+            resolved_token = self
+            default_base = token or "http://localhost:8000"
         else:
-            token = self_or_token
-            raw_base = (base_url or token_or_base or "http://localhost:8000").rstrip("/")
-        feed_path = f"/calendar/{token}.ics"
+            resolved_token = token
+            default_base = self.base_url or "http://localhost:8000"
+        raw_base = (base_url or default_base).rstrip("/")
+        feed_path = f"/calendar/{resolved_token}.ics"
         http_url = f"{raw_base}{feed_path}"
 
         # Build webcal:// protocol scheme URL
@@ -117,7 +118,7 @@ class CalendarService:
         else:
             webcal_base = f"webcal://{raw_base}"
         webcal_url = f"{webcal_base}{feed_path}"
-        subscribe_url = f"{raw_base}/calendar/{token}/subscribe"
+        subscribe_url = f"{raw_base}/calendar/{resolved_token}/subscribe"
 
         return {
             "https_url": http_url,

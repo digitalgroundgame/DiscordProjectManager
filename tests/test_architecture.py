@@ -227,35 +227,40 @@ assert getattr(TechTree, "_default_mermaid_renderer", None) is None
     )
 
 
-def test_postgres_project_repo_create_and_update_role_do_not_query_squad_table() -> None:
-    """PostgresProjectRepo.create and update_role_id must not reference or query SquadTable (Issue #84)."""
+def test_project_repo_does_not_query_other_aggregates() -> None:
+    """PostgresProjectRepo must not import or reference SquadTable or TaskTable (Issues #84, #87)."""
     repo_file = ADAPTERS_DIR / "db" / "repos" / "project_repo.py"
     assert repo_file.is_file(), f"File not found: {repo_file}"
 
     tree = ast.parse(repo_file.read_text(encoding="utf-8"), filename=str(repo_file))
-    target_methods = {"create", "update_role_id"}
+    forbidden_tables = {"SquadTable", "TaskTable"}
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name in target_methods:
-            for child in ast.walk(node):
-                if isinstance(child, ast.Name) and child.id == "SquadTable":
-                    raise AssertionError(
-                        f"PostgresProjectRepo.{node.name} directly references SquadTable at line {child.lineno}"
-                    )
+        if isinstance(node, ast.Name) and node.id in forbidden_tables:
+            raise AssertionError(f"PostgresProjectRepo references {node.id} at line {node.lineno}")
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in forbidden_tables:
+                    raise AssertionError(f"PostgresProjectRepo imports {alias.name} at line {node.lineno}")
+
+
+def test_postgres_project_repo_create_and_update_role_do_not_query_squad_table() -> None:
+    """Backwards-compatible alias verifying PostgresProjectRepo does not reference SquadTable."""
+    test_project_repo_does_not_query_other_aggregates()
 
 
 def test_discord_bot_adapter_modules_do_not_exceed_600_lines() -> None:
-    """Every module under src/adapters/discord_bot/ must strictly observe the 600-line ceiling (AGENTS.md)."""
-    discord_bot_dir = ADAPTERS_DIR / "discord_bot"
-    assert discord_bot_dir.is_dir(), f"Directory not found: {discord_bot_dir}"
+    """Every module under src/adapters/discord_bot/ and src/services/ must observe the 600-line ceiling (AGENTS.md)."""
+    target_dirs = [ADAPTERS_DIR / "discord_bot", SERVICES_DIR]
 
     oversized_files: list[tuple[str, int]] = []
-    for py_file in discord_bot_dir.rglob("*.py"):
-        line_count = len(py_file.read_text(encoding="utf-8").splitlines())
-        if line_count > 600:
-            oversized_files.append((str(py_file.relative_to(SRC_DIR.parent)), line_count))
+    for target_dir in target_dirs:
+        assert target_dir.is_dir(), f"Directory not found: {target_dir}"
+        for py_file in target_dir.rglob("*.py"):
+            line_count = len(py_file.read_text(encoding="utf-8").splitlines())
+            if line_count > 600:
+                oversized_files.append((str(py_file.relative_to(SRC_DIR.parent)), line_count))
 
-    assert not oversized_files, (
-        "Modularity violation: Discord adapter modules exceed 600 lines (AGENTS.md):\n"
-        + "\n".join(f"  - {path}: {count} lines" for path, count in oversized_files)
+    assert not oversized_files, "Modularity violation: modules exceed 600 lines (AGENTS.md):\n" + "\n".join(
+        f"  - {path}: {count} lines" for path, count in oversized_files
     )

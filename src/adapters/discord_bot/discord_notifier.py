@@ -36,11 +36,9 @@ class DiscordNotifier(NotifierTaskHandlersMixin, INotificationDispatcher):
         self.bot = bot
         self.user_service = user_service
         self.workspace = workspace
-        if self.workspace is None:
+        if self.workspace is None and "workspace" in vars(bot):
             bot_ws = getattr(bot, "workspace", None)
-            if bot_ws is not None and (
-                isinstance(bot_ws, ITaskDiscordWorkspace) or not (type(bot).__module__.startswith("unittest.mock"))
-            ):
+            if isinstance(bot_ws, ITaskDiscordWorkspace):
                 self.workspace = bot_ws
         self.task_service = task_service or getattr(bot, "task_service", None)
 
@@ -350,11 +348,9 @@ class DiscordNotifier(NotifierTaskHandlersMixin, INotificationDispatcher):
             thread_id = task.discord_thread_id
 
         ws = self.workspace
-        if not ws:
+        if not ws and "workspace" in vars(self.bot):
             bot_ws = getattr(self.bot, "workspace", None)
-            if bot_ws is not None and (
-                isinstance(bot_ws, ITaskDiscordWorkspace) or not (type(self.bot).__module__.startswith("unittest.mock"))
-            ):
+            if isinstance(bot_ws, ITaskDiscordWorkspace):
                 ws = bot_ws
 
         if ws and thread_id:
