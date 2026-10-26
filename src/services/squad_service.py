@@ -8,21 +8,19 @@ from src.domain.enums import SquadRoleType
 from src.domain.exceptions import SquadAlreadyExistsError
 from src.domain.models import Squad, SquadMember
 from src.ports.repositories import ISquadRepo
-from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 
-class SquadService:
+class SquadService(TransactionalService):
     def __init__(self, squad_repo: ISquadRepo, uow: IUnitOfWork | None = None):
         self.squad_repo = squad_repo
         self.uow = uow
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
-        if self.uow is not None:
-            async with self.uow as active_uow:
-                yield active_uow
-        else:
-            yield NullUnitOfWork(squads=self.squad_repo)
+        async with super()._transaction(squads=self.squad_repo) as active_uow:
+            yield active_uow
 
     async def create_squad(
         self,

@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from src.domain.enums import NotificationPreference
 from src.domain.models import UserPreference
 from src.ports.repositories import IUserPreferenceRepo
-from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 logger = logging.getLogger("dgg_pm.services.user")
 
 
-class UserService:
+class UserService(TransactionalService):
     """Application service for managing user preferences and personal notification settings."""
 
     def __init__(self, user_pref_repo: IUserPreferenceRepo, uow: IUnitOfWork | None = None):
@@ -21,11 +22,8 @@ class UserService:
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
-        if self.uow is not None:
-            async with self.uow as active_uow:
-                yield active_uow
-        else:
-            yield NullUnitOfWork(user_prefs=self.repo)
+        async with super()._transaction(user_prefs=self.repo) as active_uow:
+            yield active_uow
 
     async def get_preference(self, guild_id: int, user_discord_id: int) -> NotificationPreference:
         """Retrieves user notification preference, defaulting to DM if unset."""

@@ -10,21 +10,19 @@ from uuid import UUID
 from src.domain.exceptions import ProjectAlreadyExistsError, ProjectNotFoundError
 from src.domain.models import Project, ProjectSquad, Squad
 from src.ports.repositories import IProjectRepo
-from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 
-class ProjectService:
+class ProjectService(TransactionalService):
     def __init__(self, project_repo: IProjectRepo, uow: IUnitOfWork | None = None):
         self.project_repo = project_repo
         self.uow = uow
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
-        if self.uow is not None:
-            async with self.uow as active_uow:
-                yield active_uow
-        else:
-            yield NullUnitOfWork(projects=self.project_repo)
+        async with super()._transaction(projects=self.project_repo) as active_uow:
+            yield active_uow
 
     @staticmethod
     def derive_default_prefix(name: str) -> str:
