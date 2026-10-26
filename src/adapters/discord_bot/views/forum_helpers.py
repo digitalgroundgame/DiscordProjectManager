@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import discord
 
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.domain.enums import PriorityLevel, TaskStatus
 
 if TYPE_CHECKING:
@@ -358,7 +359,6 @@ async def ensure_pinned_hub_post(
     auth_service: AuthService | None = None,
 ) -> tuple[bool, str]:
     """Ensures a pinned Project Management Hub post exists in the given Forum or Text channel."""
-    from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
     from src.domain.models import Project
 
     bound_projects: list[Project] = []
@@ -389,12 +389,6 @@ async def ensure_pinned_hub_post(
             except Exception as e:
                 logger.debug("Could not fetch squads for project %s in hub post: %s", bp.id, e)
 
-    embed = build_hub_welcome_embed(
-        channel_name=channel_name,
-        bound_projects=bound_projects,
-        project_squads_map=project_squads_map,
-    )
-
     view = None
     if project_service and task_service:
         uow = getattr(task_service, "uow", None)
@@ -417,14 +411,23 @@ async def ensure_pinned_hub_post(
                 uow=uow,
             )
 
-        if squad_service:
-            view = PmHubView(
-                project_service=project_service,
-                squad_service=squad_service,
-                task_service=task_service,
-                user_service=user_service,
-                auth_service=auth_service,
-            )
+    if squad_service and project_service and task_service:
+        embed, view = DiscordViewRouter.build_hub_view(
+            project_service=project_service,
+            squad_service=squad_service,
+            task_service=task_service,
+            user_service=user_service,
+            auth_service=auth_service,
+            channel_name=channel_name,
+            bound_projects=bound_projects,
+            project_squads_map=project_squads_map,
+        )
+    else:
+        embed = DiscordViewRouter.build_hub_embed(
+            channel_name=channel_name,
+            bound_projects=bound_projects,
+            project_squads_map=project_squads_map,
+        )
 
     if isinstance(channel, discord.ForumChannel):
         # 1. Setup standard tags first

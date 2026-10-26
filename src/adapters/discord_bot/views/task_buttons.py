@@ -8,6 +8,7 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.exceptions import PermissionDeniedError
@@ -273,9 +274,7 @@ class TaskQuickControlsView(BaseView):
         self.add_item(self.watchers_select)
 
     async def _on_edit_text_clicked(self, interaction: discord.Interaction) -> None:
-        from src.adapters.discord_bot.views.task_modals import TaskQuickEditTitleModal
-
-        modal = TaskQuickEditTitleModal(self)
+        modal = DiscordViewRouter.build_task_quick_edit_title_modal(self)
         await interaction.response.send_modal(modal)
 
     async def update_text_content(
@@ -340,9 +339,7 @@ class TaskQuickControlsView(BaseView):
     async def _on_due_selected(self, interaction: discord.Interaction) -> None:
         val = self.due_select.values[0]
         if val == "custom":
-            from src.adapters.discord_bot.views.task_builder import TaskCustomDueModal
-
-            modal = TaskCustomDueModal(self)
+            modal = DiscordViewRouter.build_task_custom_due_modal(self)
             await interaction.response.send_modal(modal)
             return
 

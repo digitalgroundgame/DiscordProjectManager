@@ -8,8 +8,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseModal
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
+from src.adapters.discord_bot.views.task_embed import build_task_embed, build_thread_workspace_content
 from src.domain.enums import TaskStatus
 from src.domain.models import Task
 from src.services.task_service import TaskService
@@ -173,12 +175,8 @@ class TaskEditModal(BaseModal):
                 watchers=watchers,
             )
 
-            # Lazy import to prevent circular dependency
-            from src.adapters.discord_bot.views.task_buttons import TaskActionView
-            from src.adapters.discord_bot.views.task_embed import build_task_embed, build_thread_workspace_content
-
             new_embed = build_task_embed(updated_task)
-            new_view = TaskActionView(
+            new_view = DiscordViewRouter.build_task_action_view(
                 task_id=self.task_id,
                 current_status=updated_task.status,
                 current_priority=updated_task.priority,

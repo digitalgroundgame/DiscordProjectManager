@@ -10,6 +10,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.workspace_protocol import (
@@ -652,9 +653,6 @@ class ProjectChannelSelectView(BaseView):
 
     async def _on_back_clicked(self, interaction: discord.Interaction) -> None:
         if self.return_to == "dashboard" and interaction.guild:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-            from src.domain.enums import NotificationPreference
-
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
             _, count = (
                 await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
@@ -662,22 +660,19 @@ class ProjectChannelSelectView(BaseView):
             current_pref = (
                 await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
                 if self.user_service
-                else NotificationPreference.DM
+                else None
             )
-            view = PmDashboardView(
-                self.project_service,
-                self.squad_service,
-                self.task_service,
-                self.user_service,
-                initial_interaction=interaction,
-            )
-            embed = build_pm_dashboard_embed(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
                 guild=interaction.guild,
                 user=interaction.user,
+                project_service=self.project_service,
+                squad_service=self.squad_service,
+                task_service=self.task_service,
+                user_service=self.user_service,
+                initial_interaction=interaction,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
-                is_server_manager=view.is_server_manager,
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         else:
@@ -2720,15 +2715,13 @@ class ProjectMenuView(BaseView):
                 color=discord.Color.from_rgb(16, 152, 247),
             )
             embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(self.task_service, target_proj, current_orientation="lr", auth_service=auth_service)
+            view = DiscordViewRouter.build_tech_tree_viewer(
+                self.task_service, target_proj, current_orientation="lr", auth_service=auth_service
+            )
             await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)
             return
 
-        from src.adapters.discord_bot.views.tree_view import TechTreeProjectSelectView
-
-        view = TechTreeProjectSelectView(
+        view = DiscordViewRouter.build_tech_tree_project_select(
             self.task_service, self.project_service, accessible_projects, orientation="lr", auth_service=auth_service
         )
         await interaction.response.send_message(
@@ -2739,9 +2732,6 @@ class ProjectMenuView(BaseView):
 
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
         if self.return_to == "dashboard" and interaction.guild:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-            from src.domain.enums import NotificationPreference
-
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
             _, count = (
                 await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
@@ -2749,36 +2739,30 @@ class ProjectMenuView(BaseView):
             current_pref = (
                 await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
                 if self.user_service
-                else NotificationPreference.DM
+                else None
             )
-            view = PmDashboardView(
-                self.project_service,
-                self.squad_service,
-                self.task_service,
-                self.user_service,
-                initial_interaction=interaction,
-            )
-            embed = build_pm_dashboard_embed(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
                 guild=interaction.guild,
                 user=interaction.user,
+                project_service=self.project_service,
+                squad_service=self.squad_service,
+                task_service=self.task_service,
+                user_service=self.user_service,
+                initial_interaction=interaction,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
-                is_server_manager=view.is_server_manager,
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         else:
-            from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
-
             if self.task_service:
-                view = PmHubView(
+                embed, view = DiscordViewRouter.build_hub_view(
                     self.project_service,
                     self.squad_service,
                     self.task_service,
                     self.user_service,
                     auth_service=self.auth_service,
                 )
-                embed = build_hub_welcome_embed()
                 await interaction.response.edit_message(content=None, embed=embed, view=view)
 
     async def _on_new_project_clicked(self, interaction: discord.Interaction) -> None:
