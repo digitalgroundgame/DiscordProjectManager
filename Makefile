@@ -51,6 +51,10 @@ test-cov: ## Run test suite with coverage report
 test-e2e: ## Run in-process E2E user journey test suite
 	$(UV) run --all-extras pytest -v tests/e2e/
 
+.PHONY: test-postgres
+test-postgres: ## Run PostgreSQL integration and migration test suite against live container
+	$(UV) run --all-extras pytest -v -m postgres tests/
+
 .PHONY: lint
 lint: ## Run ruff linter
 	$(UV) run ruff check .
