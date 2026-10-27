@@ -196,6 +196,7 @@ class DiscordProjectWorkspaceAdapter(ProjectWorkspacePort):
                     squad_service=self.squad_service,
                     task_service=self.task_service,
                     user_service=self.user_service,
+                    auth_service=self.auth_service,
                     project_name=project.name,
                 )
                 if not hub_ok:
@@ -282,6 +283,7 @@ class DiscordProjectWorkspaceAdapter(ProjectWorkspacePort):
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
+                auth_service=self.auth_service,
                 project_name=proj_name,
             )
             if not hub_ok:
@@ -341,6 +343,7 @@ class DiscordProjectWorkspaceAdapter(ProjectWorkspacePort):
                     squad_service=self.squad_service,
                     task_service=self.task_service,
                     user_service=self.user_service,
+                    auth_service=self.auth_service,
                     project_name=updated_project.name,
                 )
                 if not hub_ok:
