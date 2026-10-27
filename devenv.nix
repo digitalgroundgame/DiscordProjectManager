@@ -38,6 +38,9 @@
   };
 
   enterShell = ''
+    if [ -d .git ]; then
+      git config core.hooksPath .githooks
+    fi
     if [ -f .env ]; then
       set -a
       source .env

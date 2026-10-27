@@ -18,6 +18,7 @@ help: ## Display this help screen
 .PHONY: install
 install: ## Sync dependencies and create venv via uv
 	$(UV) sync --all-extras
+	@if [ -d .git ]; then git config core.hooksPath .githooks; echo "Configured git hooks path: .githooks"; fi
 
 .PHONY: sync
 sync: install ## Alias for install
