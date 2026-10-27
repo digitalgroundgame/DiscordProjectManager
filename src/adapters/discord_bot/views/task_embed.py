@@ -61,10 +61,12 @@ def build_task_embed(
         prefix_title = f"[ARCHIVED] {prefix_title}"
 
     jump_url = get_task_jump_url(task)
-    desc_text = task.body or "*No additional description provided.*"
+    desc_text = task.body.strip() if task.body and task.body.strip() else "*No additional description provided.*"
+    if len(desc_text) > 3000:
+        desc_text = desc_text[:2997] + "..."
 
     embed = discord.Embed(
-        title=prefix_title,
+        title=prefix_title[:256],
         url=jump_url,
         description=f"### Overview\n{desc_text}",
         color=color,
@@ -102,13 +104,20 @@ def build_task_embed(
             all_done = all(p.status == TaskStatus.COMPLETED for p in prerequisites)
             dep_status = "*Ready*" if all_done else "*Blocked by prerequisites*"
             prereqs_str = ", ".join(f"`[{p.short_id}]`" for p in prerequisites)
+            if len(prereqs_str) > 850:
+                prereqs_str = prereqs_str[:840] + f"... (+{len(prerequisites)} total)"
             dep_lines.append(f"• **Prerequisites**: {prereqs_str} ({dep_status})")
         if dependents:
             deps_str = ", ".join(f"`[{d.short_id}]`" for d in dependents)
+            if len(deps_str) > 850:
+                deps_str = deps_str[:840] + f"... (+{len(dependents)} total)"
             dep_lines.append(f"• **Unlocks**: {deps_str}")
+        dep_val = "\n".join(dep_lines)
+        if len(dep_val) > 1024:
+            dep_val = dep_val[:1000] + "\n... [truncated]"
         embed.add_field(
             name="Dependencies",
-            value="\n".join(dep_lines),
+            value=dep_val,
             inline=False,
         )
 
@@ -125,11 +134,16 @@ def build_task_embed(
 
     if task.watchers:
         watchers_str = ", ".join(f"<@{uid}>" for uid in task.watchers)
+        if len(watchers_str) > 800:
+            watchers_str = watchers_str[:780] + f"... (+{len(task.watchers)} total)"
         time_lines.append(f"• **Watchers**: {watchers_str}")
 
+    time_val = "\n".join(time_lines)
+    if len(time_val) > 1024:
+        time_val = time_val[:1000] + "\n... [truncated]"
     embed.add_field(
         name="Timeline & Details",
-        value="\n".join(time_lines),
+        value=time_val,
         inline=False,
     )
 
@@ -140,8 +154,8 @@ def build_task_embed(
 def build_thread_workspace_content(task: Task) -> str:
     """Builds the message content for the task workspace inside a discussion thread."""
     description = task.body.strip() if task.body and task.body.strip() else "*No additional description provided.*"
-    if len(description) > 1500:
-        description = description[:1497] + "..."
+    if len(description) > 1200:
+        description = description[:1197] + "..."
 
     assignee_str = f"<@{task.assignee_discord_id}>" if task.assignee_discord_id else "*Unassigned*"
     priority_str = f"`{PRIORITY_LABELS.get(task.priority, task.priority.value.title())}`"
@@ -154,17 +168,23 @@ def build_thread_workspace_content(task: Task) -> str:
         meta_parts.append("⏰ Overdue")
     if task.watchers:
         watchers_str = " ".join(f"<@{uid}>" for uid in task.watchers)
+        if len(watchers_str) > 300:
+            watchers_str = watchers_str[:280] + f"... (+{len(task.watchers)} total)"
         meta_parts.append(f"**Watchers**: {watchers_str}")
 
     meta_line = " • ".join(meta_parts)
-    return f"{description}\n\n{meta_line}"
+    full_content = f"{description}\n\n{meta_line}"
+    if len(full_content) > 1950:
+        full_content = full_content[:1947] + "..."
+    return full_content
 
 
 def build_task_history_embed(task: Task, history: list[TaskHistory]) -> discord.Embed:
     """Builds an embed listing the chronological audit history of a task."""
     jump_url = get_task_jump_url(task)
+    prefix_title = f"Audit Trail • [{task.short_id}] {task.title}"
     embed = discord.Embed(
-        title=f"Audit Trail • [{task.short_id}] {task.title}",
+        title=prefix_title[:256],
         url=jump_url,
         color=discord.Color.dark_grey(),
     )
@@ -175,7 +195,12 @@ def build_task_history_embed(task: Task, history: list[TaskHistory]) -> discord.
     lines = [
         "### Activity History",
     ]
-    for h in history:
+    recent_history = history[-25:] if len(history) > 25 else history
+    omitted = len(history) - len(recent_history)
+    if omitted > 0:
+        lines.append(f"*... ({omitted} older entries omitted)*")
+
+    for h in recent_history:
         ts = int(h.created_at.astimezone(UTC).timestamp())
         actor = f"<@{h.actor_discord_id}>"
         time_str = f"<t:{ts}:R>"
@@ -192,10 +217,15 @@ def build_task_history_embed(task: Task, history: list[TaskHistory]) -> discord.
                 new_assignee = h.diff_payload.get("new_value")
                 if new_assignee:
                     note_text = f"Assigned to <@{new_assignee}>"
+            if len(note_text) > 120:
+                note_text = note_text[:117] + "..."
             detail += f'\n  *"{note_text}"*'
 
         lines.append(f"• **{time_str}** by {actor}:{detail}")
 
-    embed.description = "\n".join(lines)
-    embed.set_footer(text=f"dgg-pm • Audit Trail • Task {task.short_id}")
+    desc = "\n".join(lines)
+    if len(desc) > 4000:
+        desc = desc[:3950] + "\n... [truncated]"
+    embed.description = desc
+    embed.set_footer(text=f"dgg-pm • Audit Trail • Task {task.short_id}"[:2048])
     return embed

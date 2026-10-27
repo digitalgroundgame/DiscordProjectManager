@@ -60,10 +60,15 @@ def build_hub_welcome_embed(
             for p in bound_projects:
                 squads = (project_squads_map or {}).get(p.id)
                 role_line = _format_squad_roles(squads)
-                desc_text = f"> *{p.description}*\n" if p.description else ""
+                p_desc = p.description or ""
+                if len(p_desc) > 80:
+                    p_desc = p_desc[:77] + "..."
+                desc_text = f"> *{p_desc}*\n" if p_desc else ""
                 project_blocks.append(f"**[{p.prefix}] {p.name}**\n> {role_line}\n{desc_text}".rstrip())
 
             projects_summary = "\n\n".join(project_blocks)
+            if len(projects_summary) > 3000:
+                projects_summary = projects_summary[:2950] + f"\n\n... *(and {len(bound_projects) - 15} more projects)*"
             desc = (
                 f"### Bound Projects in this Channel\n\n"
                 f"{projects_summary}\n\n"
