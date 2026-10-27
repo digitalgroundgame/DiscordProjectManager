@@ -46,6 +46,10 @@ test: ## Run the pytest test suite (in-memory SQLite, fast)
 test-cov: ## Run test suite with coverage report
 	$(UV) run --all-extras pytest -n 4 --cov=src --cov-report=term-missing tests/
 
+.PHONY: test-e2e
+test-e2e: ## Run in-process E2E user journey test suite
+	$(UV) run --all-extras pytest -v tests/e2e/
+
 .PHONY: lint
 lint: ## Run ruff linter
 	$(UV) run ruff check .
