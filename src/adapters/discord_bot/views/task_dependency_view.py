@@ -31,8 +31,11 @@ def build_dependency_embed(task: Task, prerequisites: list[Task], dependents: li
         lines = []
         for p in prerequisites:
             status_icon = "🟢" if p.is_completed else ("🟡" if p.status == TaskStatus.IN_PROGRESS else "⚪")
-            lines.append(f"{status_icon} **`[{p.short_id}]`** {p.title}")
-        embed.add_field(name=f"Prerequisites ({len(prerequisites)})", value="\n".join(lines), inline=False)
+            lines.append(f"{status_icon} **`[{p.short_id}]`** {p.title[:60]}")
+        prereqs_val = "\n".join(lines)
+        if len(prereqs_val) > 1024:
+            prereqs_val = prereqs_val[:980] + f"\n... (+{len(prerequisites)} total)"
+        embed.add_field(name=f"Prerequisites ({len(prerequisites)})", value=prereqs_val, inline=False)
     else:
         embed.add_field(
             name="Prerequisites (0)",
@@ -44,10 +47,13 @@ def build_dependency_embed(task: Task, prerequisites: list[Task], dependents: li
         lines = []
         for d in dependents:
             status_icon = "🟢" if d.is_completed else ("🟡" if d.status == TaskStatus.IN_PROGRESS else "⚪")
-            lines.append(f"{status_icon} **`[{d.short_id}]`** {d.title}")
+            lines.append(f"{status_icon} **`[{d.short_id}]`** {d.title[:60]}")
+        deps_val = "\n".join(lines) + "\n*(These tasks require this task to finish first)*"
+        if len(deps_val) > 1024:
+            deps_val = deps_val[:980] + f"\n... (+{len(dependents)} total)"
         embed.add_field(
             name=f"Unlocks ({len(dependents)})",
-            value="\n".join(lines) + "\n*(These tasks require this task to finish first)*",
+            value=deps_val,
             inline=False,
         )
 

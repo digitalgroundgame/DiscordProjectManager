@@ -42,6 +42,9 @@ build-backend = "setuptools.build_meta"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "postgres: marks tests requiring a running PostgreSQL database",
+]
 
 [tool.ruff]
 line-length = 120
