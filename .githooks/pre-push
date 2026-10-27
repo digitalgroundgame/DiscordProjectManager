@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Git pre-push hook to ensure E2E user journey tests pass before pushing.
+# Can be bypassed in emergency with `git push --no-verify`.
+
+set -e
+
+echo "🔍 Running pre-push E2E validation suite (make test-e2e)..."
+
+if command -v direnv >/dev/null 2>&1; then
+    direnv exec . uv run --all-extras pytest -v tests/e2e/
+elif command -v uv >/dev/null 2>&1; then
+    uv run --all-extras pytest -v tests/e2e/
+else
+    pytest -v tests/e2e/
+fi
+
+echo "✅ Pre-push E2E validation passed."
