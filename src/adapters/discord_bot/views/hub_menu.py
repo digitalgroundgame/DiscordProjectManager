@@ -144,7 +144,7 @@ class PmHubView(BaseView):
             if isinstance(parent, discord.ForumChannel):
                 target_channel = parent
 
-        auth_srv = AuthService(self.project_service, self.squad_service) if self.squad_service else None
+        auth_srv = self.auth_service
         can_create_standalone = await auth_srv.can_create_task_in_project(interaction.user, None) if auth_srv else True
 
         allowed_projects = []

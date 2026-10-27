@@ -217,6 +217,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                             squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
+                            auth_service=self.auth_service,
                         )
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project archive: %s", he)
@@ -266,6 +267,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                             squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
+                            auth_service=self.auth_service,
                         )
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project unarchive: %s", he)

@@ -350,6 +350,7 @@ class PmCog(
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
+                auth_service=self.auth_service,
             )
             await interaction.followup.send(msg, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager

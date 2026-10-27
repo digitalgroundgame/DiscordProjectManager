@@ -190,6 +190,7 @@ async def rebuild_project_workspace(
                 squad_service=adapter.squad_service,
                 task_service=adapter.task_service,
                 user_service=adapter.user_service,
+                auth_service=adapter.auth_service,
                 project_name=project.name,
             )
             hub_rebuilt = hub_ok
