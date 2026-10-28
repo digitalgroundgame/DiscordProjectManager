@@ -12,6 +12,7 @@ from src.domain.models import (
     SquadMember,
     Task,
     TaskHistory,
+    UserCalendarToken,
     UserPreference,
 )
 
@@ -82,8 +83,16 @@ class ITaskRepo(ABC):
         overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
+        count_total: bool = True,
     ) -> tuple[list[Task], int]:
-        """Lists tasks with filters. Returns (tasks, total_count)."""
+        """Lists tasks with filters. Returns (tasks, total_count). If count_total is False, total_count is -1."""
+
+    @abstractmethod
+    async def list_user_calendar_tasks(
+        self,
+        user_discord_id: int,
+    ) -> list[Task]:
+        """Fetches active, non-archived tasks assigned to user across all non-archived projects."""
 
     @abstractmethod
     async def search_for_autocomplete(
@@ -98,6 +107,10 @@ class ITaskRepo(ABC):
     @abstractmethod
     async def set_archived(self, task_id: UUID, is_archived: bool, session: Any | None = None) -> Task | None:
         """Soft-deletes or unarchives a task."""
+
+    @abstractmethod
+    async def set_archived_by_project(self, project_id: UUID, is_archived: bool, session: Any | None = None) -> int:
+        """Sets the archived status for all tasks belonging to a project."""
 
     @abstractmethod
     async def delete(self, task_id: UUID, session: Any | None = None) -> bool:
@@ -176,8 +189,13 @@ class IProjectRepo(ABC):
         """Updates the bound Discord channel ID for a project."""
 
     @abstractmethod
-    async def update_role_id(self, project_id: UUID, discord_role_id: int | None) -> Project | None:
-        """Updates the mapped contributor Discord role ID for a project."""
+    async def update_role_id(
+        self,
+        project_id: UUID,
+        discord_role_id: int | None,
+        squad_id: UUID | None = None,
+    ) -> Project | None:
+        """Updates the mapped contributor Discord role ID for a project and optionally links the squad."""
 
     @abstractmethod
     async def update_lead_id(self, project_id: UUID, lead_discord_id: int | None) -> Project | None:
@@ -327,3 +345,21 @@ class IGuildLeadUserRepository(ABC):
     @abstractmethod
     async def list_lead_user_ids(self, guild_id: int) -> set[int]:
         """Lists all authorized Team Lead Discord user IDs for the guild."""
+
+
+class IUserCalendarTokenRepo(ABC):
+    @abstractmethod
+    async def get_by_user_id(self, user_discord_id: int) -> UserCalendarToken | None:
+        """Fetches calendar token record for a user."""
+
+    @abstractmethod
+    async def get_by_token(self, token: str) -> UserCalendarToken | None:
+        """Fetches calendar token record by token string."""
+
+    @abstractmethod
+    async def create_or_regenerate_token(self, user_discord_id: int, token: str) -> UserCalendarToken:
+        """Creates or regenerates a calendar token for a user."""
+
+    @abstractmethod
+    async def revoke_token(self, user_discord_id: int) -> bool:
+        """Revokes (deletes) a calendar token for a user. Returns True if revoked, False if not found."""

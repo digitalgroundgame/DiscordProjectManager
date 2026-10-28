@@ -1,13 +1,16 @@
 import asyncio
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
 import discord
 from discord.ext import commands
 
+from src.adapters.discord_bot.actor_mapper import DiscordMemberDirectory
 from src.adapters.discord_bot.cogs.pm_cog import PmCog
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import MenuSessionManager, get_menu_manager
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 from src.adapters.discord_bot.views.hub_menu import PmHubView
@@ -15,10 +18,11 @@ from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
     ITaskDiscordWorkspace,
 )
-from src.config import settings
+from src.config import Settings, get_settings
 from src.domain.models import Task
 from src.ports.repositories import IGuildLeadRoleRepository, IGuildLeadUserRepository
 from src.services.auth_service import AuthService
+from src.services.calendar_service import CalendarService
 from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -41,6 +45,9 @@ class DggPmBot(commands.Bot):
         guild_lead_role_repo: IGuildLeadRoleRepository | None = None,
         guild_lead_user_repo: IGuildLeadUserRepository | None = None,
         auth_service: AuthService | None = None,
+        calendar_service: CalendarService | None = None,
+        settings: Settings | None = None,
+        menu_manager: MenuSessionManager | None = None,
     ):
         intents = discord.Intents.default()
         intents.guilds = True
@@ -52,24 +59,32 @@ class DggPmBot(commands.Bot):
             intents=intents,
             help_command=None,
         )
+        self.settings = settings
+        self.menu_manager = menu_manager or get_menu_manager()
         self.task_service = task_service
         self.project_service = project_service
         self.squad_service = squad_service
         self.user_service = user_service
+        self.calendar_service = calendar_service
         self.outbox_service = outbox_service or (
             getattr(task_service, "outbox_service", None) if task_service else None
         )
         self.guild_lead_role_repo = guild_lead_role_repo
         self.guild_lead_user_repo = guild_lead_user_repo
         self._background_tasks: set[asyncio.Task] = set()
+        self._disconnected_at: float | None = None
+        self.member_directory = DiscordMemberDirectory(self)
         if auth_service is not None:
             self.auth_service = auth_service
+            if self.auth_service.member_directory is None:
+                self.auth_service.member_directory = self.member_directory
         elif project_service and self.squad_service:
             self.auth_service = AuthService(
                 project_service,
                 self.squad_service,
                 guild_lead_role_repo=guild_lead_role_repo,
                 guild_lead_user_repo=guild_lead_user_repo,
+                member_directory=self.member_directory,
             )
         else:
             self.auth_service = None
@@ -131,6 +146,7 @@ class DggPmBot(commands.Bot):
                 task_service=self.task_service,
                 auth_service=self.auth_service,
                 user_service=self.user_service,
+                calendar_service=self.calendar_service,
                 outbox_service=self.outbox_service,
                 workspace=self.workspace,
                 project_workspace=self.project_workspace,
@@ -151,9 +167,10 @@ class DggPmBot(commands.Bot):
             )
 
         # Sync application slash commands if configured
-        if settings.SYNC_COMMANDS_ON_STARTUP:
+        active_settings = self.settings or get_settings()
+        if active_settings.SYNC_COMMANDS_ON_STARTUP:
             try:
-                await self.sync_slash_commands(guild_id=settings.DISCORD_GUILD_ID)
+                await self.sync_slash_commands(guild_id=active_settings.DISCORD_GUILD_ID)
             except discord.errors.Forbidden as exc:
                 if exc.code == 50001:  # Missing Access
                     logger.critical(
@@ -167,8 +184,8 @@ class DggPmBot(commands.Bot):
                         "  2. DISCORD_GUILD_ID in your .env does not match your server's actual ID.\n"
                         "  3. The bot was invited without the 'applications.commands' OAuth2 scope.\n"
                         "================================================================================",
-                        settings.DISCORD_GUILD_ID or "(Global)",
-                        settings.DISCORD_GUILD_ID or "(Global)",
+                        active_settings.DISCORD_GUILD_ID or "(Global)",
+                        active_settings.DISCORD_GUILD_ID or "(Global)",
                     )
                 else:
                     logger.error("Forbidden (403) while syncing slash commands (code %s): %s", exc.code, exc)
@@ -228,11 +245,71 @@ class DggPmBot(commands.Bot):
                 lines.append(f"• `{group}` ({len(subs)}): {', '.join(f'`{s}`' for s in subs)}")
         return "\n".join(lines)
 
-    async def on_ready(self) -> None:
+    async def on_connect(self) -> None:
+        """Invoked when the client has successfully established a connection to the Discord Gateway."""
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "pending"
+        )
         logger.info(
-            "Logged in as %s (ID: %s) across %d guilds",
+            "Connected to Discord Gateway (shard: %s, initial latency: %s)",
+            getattr(self, "shard_id", None),
+            lat_str,
+        )
+
+    async def on_disconnect(self) -> None:
+        """Invoked when the client has disconnected from the Discord Gateway."""
+        self._disconnected_at = time.monotonic()
+        logger.warning("Disconnected from Discord Gateway. Waiting for automatic reconnect/resume...")
+
+    async def on_resumed(self) -> None:
+        """Invoked when the client has successfully resumed an existing gateway session."""
+        downtime_str = ""
+        if self._disconnected_at is not None:
+            downtime = time.monotonic() - self._disconnected_at
+            self._disconnected_at = None
+            downtime_str = f", downtime: {downtime:.2f}s"
+        else:
+            self._disconnected_at = None
+
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "unknown"
+        )
+        session_id = getattr(getattr(self, "ws", None), "session_id", "unknown")
+        logger.info(
+            "Discord Gateway session resumed successfully (session ID: %s, shard: %s%s, gateway latency: %s)",
+            session_id,
+            getattr(self, "shard_id", None),
+            downtime_str,
+            lat_str,
+        )
+        if self.outbox_service:
+            task = asyncio.create_task(
+                self._reconcile_failed_outbox_events(),
+                name="Reconcile-Failed-Outbox-On-Resume",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+    async def on_ready(self) -> None:
+        self._disconnected_at = None
+        latency = getattr(self, "latency", float("inf"))
+        lat_str = (
+            f"{latency * 1000:.1f}ms"
+            if latency != float("inf") and not (isinstance(latency, float) and latency != latency)
+            else "unknown"
+        )
+        logger.info(
+            "Logged in as %s (ID: %s, shard: %s, gateway latency: %s) across %d guilds",
             self.user,
             self.user.id if self.user else "N/A",
+            getattr(self, "shard_id", None),
+            lat_str,
             len(self.guilds),
         )
         await self.change_presence(
@@ -254,7 +331,8 @@ class DggPmBot(commands.Bot):
         try:
             if not self.outbox_service:
                 return 0
-            lookback = max_age_hours if max_age_hours is not None else settings.OUTBOX_RECLAIM_LOOKBACK_HOURS
+            active_settings = self.settings or get_settings()
+            lookback = max_age_hours if max_age_hours is not None else active_settings.OUTBOX_RECLAIM_LOOKBACK_HOURS
             count = await self.outbox_service.reclaim_failed_events(max_age_hours=lookback)
             if count > 0:
                 logger.info(

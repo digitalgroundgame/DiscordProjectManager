@@ -129,13 +129,13 @@ class TaskNotFoundError(TechTreeError):
 # Member Resolution Protocol & Adapter Helper
 # ---------------------------------------------------------------------------
 
-MemberResolver = Callable[[int], str | None] | Mapping[int, str] | Any
+MemberResolver = Callable[[int], str | None] | Mapping[int, str]
 
 
 def resolve_member_name(user_id: int | None, resolver: Any = None) -> str | None:
-    """Resolves a Discord user snowflake ID to a display name or username.
+    """Resolves a user ID to a display name or username.
 
-    Supports dictionaries, callables, discord.Guild, discord.Client, or interaction objects.
+    Supports dictionaries/mappings and callables in the pure domain layer.
     """
     if not user_id or resolver is None:
         return None
@@ -146,34 +146,7 @@ def resolve_member_name(user_id: int | None, resolver: Any = None) -> str | None
         if val:
             return str(val)
 
-    # 2. Discord Guild or object with get_member
-    if hasattr(resolver, "get_member") and not isinstance(resolver, type):
-        try:
-            member = resolver.get_member(user_id)
-            if member:
-                name = getattr(member, "display_name", None) or getattr(member, "name", None)
-                if isinstance(name, str):
-                    return name
-                elif name and not isinstance(name, type) and hasattr(name, "__str__"):
-                    return str(name)
-        except Exception:
-            pass
-
-    # 3. Discord Client or interaction with client / get_user
-    client = getattr(resolver, "client", None) if not hasattr(resolver, "get_user") else resolver
-    if client and hasattr(client, "get_user") and not isinstance(client, type):
-        try:
-            user = client.get_user(user_id)
-            if user:
-                name = getattr(user, "display_name", None) or getattr(user, "name", None)
-                if isinstance(name, str):
-                    return name
-                elif name and not isinstance(name, type) and hasattr(name, "__str__"):
-                    return str(name)
-        except Exception:
-            pass
-
-    # 4. Custom Callable: fn(user_id) -> str
+    # 2. Custom Callable: fn(user_id) -> str
     if callable(resolver):
         try:
             val = resolver(user_id)
@@ -591,28 +564,31 @@ class TechTree:
 
         return nodes, edges
 
-    def render(self, renderer: TechTreeRenderer[T_RenderOutput], **kwargs: Any) -> T_RenderOutput:
+    def render(self, renderer: TechTreeRenderer[T_RenderOutput] | Any, **kwargs: Any) -> T_RenderOutput:
         """Renders the Tech Tree using an injected rendering adapter."""
         return renderer.render(self, **kwargs)
 
     def to_png(
         self,
+        renderer: Any | None = None,
         title: str = "Project Tech Tree",
         subtitle: str | None = None,
         orientation: str = "lr",
     ) -> io.BytesIO:
-        """Renders the Tech Tree into a Discord-native PNG byte buffer."""
-        from src.services.tree_render import PillowTechTreeRenderer
-
-        renderer = PillowTechTreeRenderer()
-        return renderer.render(self, title=title, subtitle=subtitle, mode=orientation)
+        """Renders the Tech Tree into a PNG byte buffer using an injected renderer."""
+        if renderer is None:
+            raise ValueError("No PNG renderer provided. Pass renderer=... to to_png or use tree.render(renderer).")
+        mode = orientation.value if hasattr(orientation, "value") else str(orientation)
+        return renderer.render(self, title=title, subtitle=subtitle, mode=mode)
 
     def to_mermaid(
         self,
+        renderer: Any | None = None,
         orientation: str = "lr",
     ) -> str:
         """Renders the Tech Tree into a Mermaid markdown graph for Discord text messages."""
-        from src.services.tree_render import MermaidTechTreeRenderer
-
-        renderer = MermaidTechTreeRenderer()
+        if renderer is None:
+            raise ValueError(
+                "No Mermaid renderer provided. Pass renderer=... to to_mermaid or use tree.render(renderer)."
+            )
         return renderer.render(self, orientation=orientation)

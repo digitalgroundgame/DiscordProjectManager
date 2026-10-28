@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -56,6 +60,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     DEBUG: bool = False
 
+    # Public Base URL for calendar feeds, webhooks, and reverse-proxy setups
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+
     # If set, /metrics requires `Authorization: Bearer <API_METRICS_TOKEN>`.
     # When empty, /metrics is left open for local/dev use.
     API_METRICS_TOKEN: str = ""
@@ -79,10 +86,31 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def compute_sync_commands_on_startup(self) -> "Settings":
+    def compute_sync_commands_on_startup(self) -> Settings:
         if self.SYNC_COMMANDS_ON_STARTUP is None:
             self.SYNC_COMMANDS_ON_STARTUP = self.ENVIRONMENT.lower() == "development"
         return self
 
 
-settings = Settings()
+_settings: Settings | None = None
+
+
+def get_settings() -> Settings:
+    """Return the cached active Settings instance, creating it lazily if needed."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def set_settings(s: Settings | None) -> None:
+    """Explicitly assign the active Settings instance for composition root or testing."""
+    global _settings
+    _settings = s
+
+
+def __getattr__(name: str) -> Any:
+    """Provide lazy backwards compatibility for 'from src.config import settings'."""
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

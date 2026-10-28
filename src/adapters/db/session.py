@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from alembic import command
 from alembic.config import Config
@@ -16,24 +20,88 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.adapters.db.tables import Base
-from src.config import settings
+from src.config import get_settings
 
 logger = logging.getLogger("dgg_pm.db")
 
-# Global async engine
-engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True,
-    pool_pre_ping=True,
-)
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
-# Async session factory
-async_session_factory = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+
+def create_engine_and_session_factory(
+    database_url: str | None = None,
+    echo: bool = False,
+    pool_pre_ping: bool = True,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    """Build a standalone AsyncEngine and async_sessionmaker."""
+    url = database_url or get_settings().DATABASE_URL
+    eng: AsyncEngine = create_async_engine(
+        url,
+        echo=echo,
+        future=True,
+        pool_pre_ping=pool_pre_ping,
+    )
+    factory = async_sessionmaker(
+        bind=eng,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    return eng, factory
+
+
+def get_engine() -> AsyncEngine:
+    """Return the cached default AsyncEngine, creating it lazily if needed."""
+    global _engine, _session_factory
+    if _engine is None:
+        _engine, _session_factory = create_engine_and_session_factory()
+    return _engine
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the cached default sessionmaker, creating it lazily if needed."""
+    global _engine, _session_factory
+    if _session_factory is None:
+        _engine, _session_factory = create_engine_and_session_factory()
+    return _session_factory
+
+
+def set_engine_and_session_factory(
+    eng: AsyncEngine | None,
+    factory: async_sessionmaker[AsyncSession] | None,
+) -> None:
+    """Assign explicit engine and sessionmaker from composition root or tests."""
+    global _engine, _session_factory
+    _engine = eng
+    _session_factory = factory
+
+
+def _resolve_engine(provided: AsyncEngine | None = None) -> AsyncEngine:
+    if provided is not None:
+        return provided
+    module_dict = sys.modules[__name__].__dict__
+    if "engine" in module_dict and module_dict["engine"] is not None:
+        return module_dict["engine"]
+    return get_engine()
+
+
+def _resolve_session_factory(
+    provided: async_sessionmaker[AsyncSession] | None = None,
+) -> async_sessionmaker[AsyncSession]:
+    if provided is not None:
+        return provided
+    module_dict = sys.modules[__name__].__dict__
+    if "async_session_factory" in module_dict and module_dict["async_session_factory"] is not None:
+        return module_dict["async_session_factory"]
+    return get_session_factory()
+
+
+def __getattr__(name: str) -> Any:
+    """Provide lazy backwards compatibility for 'from src.adapters.db.session import engine, async_session_factory'."""
+    if name == "engine":
+        return get_engine()
+    if name == "async_session_factory":
+        return get_session_factory()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_alembic_config() -> Config:
@@ -46,16 +114,21 @@ def get_alembic_config() -> Config:
     return cfg
 
 
-async def run_migrations(max_retries: int = 15, retry_interval: float = 1.0) -> None:
+async def run_migrations(
+    engine: AsyncEngine | None = None,
+    max_retries: int = 15,
+    retry_interval: float = 1.0,
+) -> None:
     """Applies Alembic migrations to head with connection retries, auto-stamp support, and drift verification."""
     cfg = get_alembic_config()
+    target_engine = _resolve_engine(engine)
 
     for attempt in range(1, max_retries + 1):
         try:
             # Note: Pre-flight table inspection uses the app's shared engine, while Alembic's
             # env.py creates its own connection pool during command execution. This results in two
             # connection pools touching the database in quick succession during startup.
-            async with engine.connect() as conn:
+            async with target_engine.connect() as conn:
                 tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
                 has_app_tables = "projects" in tables or "tasks" in tables
                 has_alembic_table = "alembic_version" in tables
@@ -106,28 +179,43 @@ async def run_migrations(max_retries: int = 15, retry_interval: float = 1.0) -> 
             await asyncio.sleep(retry_interval)
 
 
-async def init_db(max_retries: int = 15, retry_interval: float = 1.0) -> None:
+async def init_db(
+    engine: AsyncEngine | None = None,
+    auto_run_migrations: bool | None = None,
+    max_retries: int = 15,
+    retry_interval: float = 1.0,
+) -> None:
     """Initializes the database schema with Alembic migrations if enabled, or creates tables."""
-    if engine.dialect.name == "sqlite":
-        async with engine.begin() as conn:
+    target_engine = _resolve_engine(engine)
+    if target_engine.dialect.name == "sqlite":
+        async with target_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         return
 
-    if settings.AUTO_RUN_MIGRATIONS:
-        await run_migrations(max_retries=max_retries, retry_interval=retry_interval)
+    should_migrate = auto_run_migrations if auto_run_migrations is not None else get_settings().AUTO_RUN_MIGRATIONS
+    if should_migrate:
+        await run_migrations(engine=target_engine, max_retries=max_retries, retry_interval=retry_interval)
     else:
         logger.info("AUTO_RUN_MIGRATIONS is disabled; skipping automatic migration on startup.")
 
 
-async def close_db() -> None:
+async def close_db(engine: AsyncEngine | None = None) -> None:
     """Disposes of the database connection pool."""
-    await engine.dispose()
+    global _engine
+    target_engine = _resolve_engine(engine) if (engine or _engine) else None
+    if target_engine is not None:
+        await target_engine.dispose()
+        if target_engine is _engine:
+            _engine = None
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession]:
+async def get_session(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> AsyncGenerator[AsyncSession]:
     """Context manager providing an isolated async database session."""
-    async with async_session_factory() as session:
+    factory = _resolve_session_factory(session_factory)
+    async with factory() as session:
         try:
             yield session
             await session.commit()

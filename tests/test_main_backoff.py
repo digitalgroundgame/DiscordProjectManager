@@ -9,6 +9,24 @@ import pytest
 from src.main import run_app
 
 
+def _make_mock_container(settings, mock_bot, mock_worker=None, mock_server=None):
+    container = MagicMock()
+    container.settings = settings
+    container.init_db = AsyncMock()
+    container.bot = mock_bot
+    if mock_worker is None:
+        mock_worker = MagicMock()
+        mock_worker.start = AsyncMock()
+        mock_worker.stop = MagicMock()
+    container.worker = mock_worker
+    if mock_server is None:
+        mock_server = MagicMock()
+        mock_server.serve = AsyncMock()
+    container.uvicorn_server = mock_server
+    container.close = AsyncMock()
+    return container
+
+
 @pytest.mark.asyncio
 async def test_main_backoff_login_failure_diagnostic(caplog):
     """Verify run_app logs clear diagnosis and triggers backoff on LoginFailure."""
@@ -22,11 +40,10 @@ async def test_main_backoff_login_failure_diagnostic(caplog):
     mock_bot = MagicMock()
     mock_bot.start = fail_bot
     mock_bot.is_closed.return_value = True
+    mock_container = _make_mock_container(settings, mock_bot)
 
     with (
-        patch("src.main.init_db", new_callable=AsyncMock),
-        patch("src.main.DggPmBot", return_value=mock_bot),
-        patch("src.main.uvicorn.Server.serve", new_callable=AsyncMock),
+        patch("src.main.create_container", return_value=mock_container),
         patch.object(settings, "DISCORD_BOT_TOKEN", "fake_token"),
         patch.object(settings, "STARTUP_CRASH_BACKOFF_SECONDS", 0.01),
         caplog.at_level(logging.CRITICAL, logger="dgg_pm.main"),
@@ -53,11 +70,10 @@ async def test_main_backoff_rate_limited_diagnostic(caplog):
     mock_bot = MagicMock()
     mock_bot.start = fail_bot
     mock_bot.is_closed.return_value = True
+    mock_container = _make_mock_container(settings, mock_bot)
 
     with (
-        patch("src.main.init_db", new_callable=AsyncMock),
-        patch("src.main.DggPmBot", return_value=mock_bot),
-        patch("src.main.uvicorn.Server.serve", new_callable=AsyncMock),
+        patch("src.main.create_container", return_value=mock_container),
         patch.object(settings, "DISCORD_BOT_TOKEN", "fake_token"),
         patch.object(settings, "STARTUP_CRASH_BACKOFF_SECONDS", 0.01),
         caplog.at_level(logging.CRITICAL, logger="dgg_pm.main"),
@@ -84,11 +100,10 @@ async def test_main_backoff_interrupted_by_stop_event():
     mock_bot = MagicMock()
     mock_bot.start = fail_bot
     mock_bot.is_closed.return_value = True
+    mock_container = _make_mock_container(settings, mock_bot)
 
     with (
-        patch("src.main.init_db", new_callable=AsyncMock),
-        patch("src.main.DggPmBot", return_value=mock_bot),
-        patch("src.main.uvicorn.Server.serve", new_callable=AsyncMock),
+        patch("src.main.create_container", return_value=mock_container),
         patch.object(settings, "DISCORD_BOT_TOKEN", "fake_token"),
         patch.object(settings, "STARTUP_CRASH_BACKOFF_SECONDS", 10.0),
     ):
@@ -159,12 +174,15 @@ async def test_run_app_resilient_to_transient_gateway_failure(caplog):
     def mock_add_signal(sig, handler):
         registered_handlers.append(handler)
 
+    mock_worker = MagicMock()
+    mock_worker.start = mock_worker_start
+    mock_worker.stop = mock_worker_stop
+    mock_server = MagicMock()
+    mock_server.serve = mock_serve
+    mock_container = _make_mock_container(settings, mock_bot, mock_worker=mock_worker, mock_server=mock_server)
+
     with (
-        patch("src.main.init_db", new_callable=AsyncMock),
-        patch("src.main.DggPmBot", return_value=mock_bot),
-        patch("src.main.OutboxWorker.start", side_effect=mock_worker_start),
-        patch("src.main.OutboxWorker.stop", side_effect=mock_worker_stop),
-        patch("uvicorn.Server.serve", side_effect=mock_serve),
+        patch("src.main.create_container", return_value=mock_container),
         patch.object(loop, "add_signal_handler", side_effect=mock_add_signal),
         patch.object(settings, "DISCORD_BOT_TOKEN", "fake_token"),
         patch.object(settings, "GATEWAY_RETRY_INITIAL_DELAY_SECONDS", 0.01),

@@ -1,44 +1,38 @@
-"""Unified /pm slash command group for DGG-PM."""
-
 from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from src.adapters.discord_bot.cogs.admin_cog import AdminCommandsMixin
+from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
+from src.adapters.discord_bot.cogs.project_cog import ProjectCommandsMixin
+from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
+from src.adapters.discord_bot.cogs.task_cog import TaskCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
-from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
+from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.views.calendar_feed_view import (
+    CalendarFeedView,
+    build_calendar_feed_embed,
+)
+from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.views.hub_menu import build_hub_welcome_embed
-from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
-from src.adapters.discord_bot.views.task_delete_view import (
-    TaskDeleteConfirmView,
-    build_task_delete_confirm_embed,
-)
-from src.adapters.discord_bot.views.task_embed import (
-    build_task_embed,
-    build_task_history_embed,
-)
-from src.adapters.discord_bot.views.task_list_view import TaskListView, build_page_embed
-from src.adapters.discord_bot.views.task_modals import parse_natural_date
 from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
     ITaskDiscordWorkspace,
-    ProjectProvisionSpec,
 )
-from src.domain.enums import NotificationPreference, PriorityLevel, TaskStatus
-from src.domain.models import Task
+from src.domain.enums import NotificationPreference
 from src.services.auth_service import AuthService
+from src.services.calendar_service import CalendarService
+from src.services.outbox_service import OutboxService
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
-
-if TYPE_CHECKING:
-    from src.services.outbox_service import OutboxService
-    from src.services.user_service import UserService
+from src.services.user_service import UserService
 
 logger = logging.getLogger("dgg_pm.cogs.pm")
 
@@ -51,16 +45,34 @@ def extract_user_ids(text: str | None) -> list[int]:
     return [int(uid) for uid in set(ids)]
 
 
-class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Project Management"):
-    """Unified /pm command group consolidating task, project, squad, and settings operations."""
+def extract_short_ids(text: str | None) -> list[str]:
+    """Extracts task short IDs (e.g. 'INF-1', 'PROJ-12') from a delimiter-separated string."""
+    if not text:
+        return []
+    tokens = re.split(r"[\s,;]+", text.strip())
+    results: list[str] = []
+    for token in tokens:
+        clean = token.strip().strip("`#[]()").upper()
+        if clean and "-" in clean and len(clean) <= 30:
+            if clean not in results:
+                results.append(clean)
+    return results
 
-    task_group = app_commands.Group(name="task", description="Task operations, assignments, and status")
-    project_group = app_commands.Group(name="project", description="Project container and channel operations")
-    admin_group = app_commands.Group(
-        name="admin",
-        description="Administrative commands and maintenance operations",
-        default_permissions=discord.Permissions(manage_guild=True),
-    )
+
+project_autocomplete = AutocompleteMixin.project_autocomplete
+
+
+class PmCog(
+    TaskCommandsMixin,
+    ProjectCommandsMixin,
+    SquadCommandsMixin,
+    AdminCommandsMixin,
+    AutocompleteMixin,
+    commands.GroupCog,
+    group_name="pm",
+    group_description="DGG-PM Project Management",
+):
+    """Unified /pm command group consolidating task, project, squad, and settings operations."""
 
     def __init__(
         self,
@@ -70,6 +82,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         task_service: TaskService | None = None,
         auth_service: AuthService | None = None,
         user_service: UserService | None = None,
+        calendar_service: CalendarService | None = None,
         outbox_service: OutboxService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
@@ -82,6 +95,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             AuthService(project_service, self.squad_service) if project_service else None
         )
         self.user_service = user_service
+        self.calendar_service = calendar_service or getattr(bot, "calendar_service", None)
         self.outbox_service = outbox_service or getattr(bot, "outbox_service", None)
         from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
         from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
@@ -111,61 +125,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         else:
             self.project_workspace = getattr(bot, "project_workspace", None)
 
-    # ==========================================
-    # Autocomplete Helpers
-    # ==========================================
-    async def project_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        if not interaction.guild:
-            return []
-        try:
-            projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
-            choices = [
-                app_commands.Choice(name=f"{p.name} ({p.prefix})", value=p.name)
-                for p in projects
-                if not current or current.lower() in p.name.lower() or current.lower() in p.prefix.lower()
-            ]
-            return choices[:25]
-        except Exception:
-            return []
-
-    async def task_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        if not interaction.guild:
-            return []
-        try:
-            tasks, _ = await self.task_service.list_tasks(
-                guild_id=interaction.guild.id,
-                search_query=current if current else None,
-                exclude_completed=False,
-                limit=25,
-            )
-            return [
-                app_commands.Choice(
-                    name=f"[{t.short_id}] {t.title}"[:100],
-                    value=t.short_id,
-                )
-                for t in tasks
-            ]
-        except Exception:
-            return []
-
-    async def squad_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        if not interaction.guild:
-            return []
-        try:
-            squads = await self.squad_service.list_squads(interaction.guild.id)
-            return [
-                app_commands.Choice(name=s.name, value=s.name)
-                for s in squads
-                if not current or current.lower() in s.name.lower()
-            ][:25]
-        except Exception:
-            return []
-
-    # ==========================================
     # Root /pm Commands
     # ==========================================
     @app_commands.command(name="menu", description="Open the Project Management Administration & Control Center.")
@@ -174,8 +133,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
             return
         try:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
             _, count = (
                 await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
@@ -197,19 +154,15 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             )
             is_server_admin = self.auth_service.is_server_manager(interaction.user) if self.auth_service else False
 
-            view = PmDashboardView(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
+                guild=interaction.guild,
+                user=interaction.user,
                 project_service=self.project_service,
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
                 auth_service=self.auth_service,
                 initial_interaction=interaction,
-                is_server_manager=can_manage,
-                is_server_admin=is_server_admin,
-            )
-            embed = build_pm_dashboard_embed(
-                guild=interaction.guild,
-                user=interaction.user,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=current_pref,
@@ -233,7 +186,10 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 "**Core Slash Commands (`/pm`):**\n"
                 "• `/pm menu`: Open the Project Management Control Center\n"
                 "• `/pm settings` or `/pm notifications`: Configure personal notification delivery\n"
-                "• `/pm task create [project] [title]`: Create a task & thread\n"
+                "• `/pm menu`: Open the Project Management Control Center\n"
+                "• `/pm settings` or `/pm notifications`: Configure personal notification delivery\n"
+                "• `/pm calendar`: Get personal RFC 5545 calendar feed URL (Google, Apple, Outlook)\n"
+                "• `/pm task create [project] [title] [depends_on]`: Create a task & thread\n"
                 "• `/pm task list [project] [user] [status]`: View paginated active tasks\n"
                 "• `/pm task assign [task] [assignee]`: Assign a task to a member\n"
                 "• `/pm task status [task] [status]`: Update task status\n"
@@ -274,17 +230,16 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                     ephemeral=True,
                 )
             else:
-                from src.adapters.discord_bot.views.settings_menu import UserSettingsView, build_settings_embed
-
                 current_pref = await self.user_service.get_preference(interaction.guild.id, interaction.user.id)
-                view = UserSettingsView(
-                    user_service=self.user_service,
+                embed, view = DiscordViewRouter.build_user_settings_view(
+                    user=interaction.user,
                     current_pref=current_pref,
+                    user_service=self.user_service,
                     project_service=self.project_service,
                     squad_service=self.squad_service,
                     task_service=self.task_service,
+                    calendar_service=self.calendar_service,
                 )
-                embed = build_settings_embed(interaction.user, current_pref)
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
             from src.adapters.discord_bot.menu_manager import menu_manager
@@ -339,6 +294,32 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
         await self._handle_settings(interaction, notify_preference=notify_preference)
 
     @app_commands.command(
+        name="calendar",
+        description="Get your private RFC 5545 calendar subscription feed URL for Google Calendar, Apple, Outlook.",
+    )
+    async def calendar(self, interaction: discord.Interaction) -> None:
+        """Personal iCalendar subscription feed link generator & management."""
+        if not self.calendar_service:
+            await interaction.response.send_message(
+                "❌ Calendar subscription service is currently unavailable.", ephemeral=True
+            )
+            return
+
+        try:
+            token = await self.calendar_service.get_or_create_token(interaction.user.id)
+            urls = self.calendar_service.build_feed_urls(token)
+            embed = build_calendar_feed_embed(interaction.user, urls)
+            view = CalendarFeedView(
+                calendar_service=self.calendar_service,
+                user_discord_id=interaction.user.id,
+                token=token,
+                initial_interaction=interaction,
+            )
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "retrieving calendar feed", logger, ephemeral=True)
+
+    @app_commands.command(
         name="post-hub",
         description="Post and pin an interactive Project Management Control Hub in a forum or text channel.",
     )
@@ -369,6 +350,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 squad_service=self.squad_service,
                 task_service=self.task_service,
                 user_service=self.user_service,
+                auth_service=self.auth_service,
             )
             await interaction.followup.send(msg, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
@@ -376,1626 +358,6 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
             menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
         except Exception as e:
             await send_interaction_error(interaction, e, "posting pinned PM hub", logger, ephemeral=True)
-
-    # ==========================================
-    # Admin Subgroup: /pm admin <cmd>
-    # ==========================================
-    @admin_group.command(
-        name="sync",
-        description="Synchronize application slash commands with Discord on demand.",
-    )
-    @app_commands.describe(
-        scope="Sync scope: 'guild' (current server, fast) or 'global' (all servers, slower propagation)",
-    )
-    @app_commands.choices(
-        scope=[
-            app_commands.Choice(name="Guild (Current Server)", value="guild"),
-            app_commands.Choice(name="Global (All Servers)", value="global"),
-        ]
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def admin_sync(
-        self,
-        interaction: discord.Interaction,
-        scope: str = "guild",
-    ) -> None:
-        """Synchronize slash commands to the current guild or globally."""
-        if scope == "guild" and not interaction.guild:
-            await interaction.response.send_message(
-                "❌ Guild sync must be run inside a Discord server.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            guild_id = interaction.guild.id if (scope == "guild" and interaction.guild) else None
-            await self.bot.sync_slash_commands(guild_id=guild_id)
-            summary_text = ""
-
-            if hasattr(self.bot, "format_command_tree_summary"):
-                summary_text = f"\n\n{self.bot.format_command_tree_summary()}"
-
-            if guild_id:
-                guild_name = interaction.guild.name if interaction.guild else str(guild_id)
-                await interaction.followup.send(
-                    f"✅ **Slash Commands Synchronized**\n"
-                    f"Successfully synced slash commands to **{guild_name}** (`{guild_id}`)."
-                    f"{summary_text}",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    f"✅ **Slash Commands Synchronized**\n"
-                    f"Successfully synced slash commands globally. "
-                    f"*(Note: Discord global commands may take up to an hour to propagate to all clients.)*"
-                    f"{summary_text}",
-                    ephemeral=True,
-                )
-
-        except discord.errors.Forbidden as exc:
-            if getattr(exc, "code", None) == 50001:
-                await interaction.followup.send(
-                    "❌ **Command Sync Failed (403 Missing Access)**\n"
-                    "The bot lacks access to sync application commands. "
-                    "Ensure the bot was invited with the `applications.commands` OAuth2 scope.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    f"❌ **Command Sync Failed (Forbidden)**: {exc}",
-                    ephemeral=True,
-                )
-        except Exception as exc:
-            logger.exception("Error during /pm admin sync: %s", exc)
-            await interaction.followup.send(
-                f"❌ **Command Sync Error**: {exc}",
-                ephemeral=True,
-            )
-
-    @admin_group.command(
-        name="retry-outbox",
-        description="Reclaim and retry dead-lettered outbox events that failed during an outage.",
-    )
-    @app_commands.describe(
-        hours="Lookback window in hours to reclaim failed events (default: 24.0)",
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def admin_retry_outbox(
-        self,
-        interaction: discord.Interaction,
-        hours: float = 24.0,
-    ) -> None:
-        """Reclaim recent FAILED outbox events and reset them to PENDING for redelivery."""
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            outbox_service = getattr(self, "outbox_service", None) or getattr(self.bot, "outbox_service", None)
-            if not outbox_service and self.task_service:
-                outbox_service = getattr(self.task_service, "outbox_service", None)
-
-            if not outbox_service:
-                await interaction.followup.send(
-                    "❌ Outbox service is not available on this bot instance.",
-                    ephemeral=True,
-                )
-                return
-
-            count = await outbox_service.reclaim_failed_events(max_age_hours=hours)
-            if count > 0:
-                await interaction.followup.send(
-                    f"✅ **Outbox Events Reclaimed**\n"
-                    f"Successfully reclaimed **{count}** failed outbox event(s) "
-                    f"from the past **{hours:.1f}** hour(s).\n"
-                    f"They have been reset to `PENDING` with retry count cleared and are now queued for dispatch.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    f"ℹ️ **No Failed Events Found**\n"
-                    f"There were no `FAILED` outbox events within the past **{hours:.1f}** hour(s) to reclaim.",
-                    ephemeral=True,
-                )
-        except Exception as exc:
-            logger.exception("Error during /pm admin retry-outbox: %s", exc)
-            await interaction.followup.send(
-                f"❌ **Outbox Reclaim Failed**: {exc}",
-                ephemeral=True,
-            )
-
-    @admin_group.command(
-        name="lead",
-        description="Authorize, revoke, or list Team Lead roles and individual members",
-    )
-    @app_commands.describe(
-        action="Action to perform (add, remove, or list authorized Team Leads)",
-        role="Discord role to authorize or revoke",
-        user="Discord member to authorize or revoke",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add Team Lead(s)", value="add"),
-            app_commands.Choice(name="Remove Team Lead(s)", value="remove"),
-            app_commands.Choice(name="List Team Leads", value="list"),
-        ]
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def admin_lead(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        role: discord.Role | None = None,
-        user: discord.Member | None = None,
-    ) -> None:
-        """Authorize or revoke Discord roles and individual members to create/manage projects and squads."""
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            guild_id = interaction.guild.id
-            if action in ("add", "remove"):
-                if not role and not user:
-                    await interaction.followup.send(
-                        "❌ Please specify a role, a member, or both to add/remove.",
-                        ephemeral=True,
-                    )
-                    return
-
-                if user and getattr(user, "bot", False):
-                    await interaction.followup.send(
-                        "❌ Bots cannot be authorized as Team Leads.",
-                        ephemeral=True,
-                    )
-                    return
-
-                messages: list[str] = []
-                if action == "add":
-                    if role:
-                        await self.auth_service.add_guild_lead_role(guild_id, role.id)
-                        messages.append(f"⭐ **Added Team Lead Role**: <@&{role.id}>")
-                    if user:
-                        await self.auth_service.add_guild_lead_user(guild_id, user.id)
-                        messages.append(f"⭐ **Added Team Lead Member**: <@{user.id}>")
-                    messages.append("They are now authorized to create and manage projects and squads.")
-                    await interaction.followup.send("\n".join(messages), ephemeral=True)
-                else:  # remove
-                    if role:
-                        removed_role = await self.auth_service.remove_guild_lead_role(guild_id, role.id)
-                        if removed_role:
-                            messages.append(f"✅ **Removed Team Lead Role**: <@&{role.id}>")
-                        else:
-                            messages.append(f"ℹ️ <@&{role.id}> was not registered as an authorized Team Lead role.")
-                    if user:
-                        removed_user = await self.auth_service.remove_guild_lead_user(guild_id, user.id)
-                        if removed_user:
-                            messages.append(f"✅ **Removed Team Lead Member**: <@{user.id}>")
-                        else:
-                            messages.append(f"ℹ️ <@{user.id}> was not registered as an authorized Team Lead member.")
-                    await interaction.followup.send("\n".join(messages), ephemeral=True)
-
-            elif action == "list":
-                role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
-                user_ids = await self.auth_service.list_guild_lead_users(guild_id)
-
-                if not role_ids and not user_ids:
-                    await interaction.followup.send(
-                        "ℹ️ **No Team Leads Configured**\n"
-                        "Only Discord Server Managers (users with `Manage Server` or `Administrator`) "
-                        "can create and manage projects.",
-                        ephemeral=True,
-                    )
-                    return
-
-                embed = discord.Embed(
-                    title="👥 Authorized Team Leads",
-                    description=(
-                        "The following Discord roles and individual members are authorized to create "
-                        "and manage projects and squads without requiring server-wide `Manage Server` permissions:\n"
-                    ),
-                    color=discord.Color.blue(),
-                )
-
-                if role_ids:
-                    role_lines = [f"• <@&{rid}> (`{rid}`)" for rid in sorted(role_ids)]
-                    embed.add_field(
-                        name=f"Configured Roles ({len(role_ids)})",
-                        value="\n".join(role_lines),
-                        inline=False,
-                    )
-                else:
-                    embed.add_field(
-                        name="Configured Roles (0)",
-                        value="*No roles configured*",
-                        inline=False,
-                    )
-
-                if user_ids:
-                    user_lines = [f"• <@{uid}> (`{uid}`)" for uid in sorted(user_ids)]
-                    embed.add_field(
-                        name=f"Configured Members ({len(user_ids)})",
-                        value="\n".join(user_lines),
-                        inline=False,
-                    )
-                else:
-                    embed.add_field(
-                        name="Configured Members (0)",
-                        value="*No individual members configured*",
-                        inline=False,
-                    )
-
-                await interaction.followup.send(embed=embed, ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "managing team leads", logger, ephemeral=True)
-
-    @admin_group.command(
-        name="lead-role",
-        description="Authorize or revoke an existing Discord Team Lead role to create and manage projects",
-    )
-    @app_commands.describe(
-        action="Action to perform (add, remove, or list authorized Team Lead roles)",
-        role="Discord role to authorize or revoke (required for add/remove)",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add Team Lead Role", value="add"),
-            app_commands.Choice(name="Remove Team Lead Role", value="remove"),
-            app_commands.Choice(name="List Team Lead Roles", value="list"),
-        ]
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def admin_lead_role(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        role: discord.Role | None = None,
-    ) -> None:
-        """Authorize or revoke an existing Discord role to create/manage projects and squads."""
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            guild_id = interaction.guild.id
-            if action == "add":
-                if not role:
-                    await interaction.followup.send("❌ Please specify a Discord role to add.", ephemeral=True)
-                    return
-                await self.auth_service.add_guild_lead_role(guild_id, role.id)
-                await interaction.followup.send(
-                    f"⭐ **Added Team Lead Role**: <@&{role.id}>\n"
-                    f"Members holding this role are now authorized to create and manage projects and squads.",
-                    ephemeral=True,
-                )
-            elif action == "remove":
-                if not role:
-                    await interaction.followup.send("❌ Please specify a Discord role to remove.", ephemeral=True)
-                    return
-                removed = await self.auth_service.remove_guild_lead_role(guild_id, role.id)
-                if removed:
-                    await interaction.followup.send(
-                        f"✅ **Removed Team Lead Role**: <@&{role.id}> is no longer authorized to manage projects.",
-                        ephemeral=True,
-                    )
-                else:
-                    await interaction.followup.send(
-                        f"ℹ️ <@&{role.id}> was not registered as an authorized Team Lead role.",
-                        ephemeral=True,
-                    )
-            elif action == "list":
-                role_ids = await self.auth_service.list_guild_lead_roles(guild_id)
-                if not role_ids:
-                    await interaction.followup.send(
-                        "ℹ️ **No Team Lead Roles Configured**\n"
-                        "Only Discord Server Managers (users with `Manage Server` or `Administrator`) "
-                        "can create and manage projects.",
-                        ephemeral=True,
-                    )
-                else:
-                    mentions = "\n".join(f"• <@&{rid}> (`{rid}`)" for rid in sorted(role_ids))
-                    embed = discord.Embed(
-                        title="👥 Authorized Team Lead Roles",
-                        description=(
-                            "Members holding any of the following Discord roles can create and manage "
-                            "projects and squads without requiring server-wide `Manage Server` permissions:\n\n"
-                            + mentions
-                        ),
-                        color=discord.Color.blue(),
-                    )
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "managing team lead roles", logger, ephemeral=True)
-
-    # ==========================================
-    # Task Subgroup: /pm task <cmd>
-    # ==========================================
-
-    @task_group.command(name="create", description="Create a new task and thread in a project container.")
-    @app_commands.describe(
-        project_name="Target project name",
-        title="Brief task summary",
-        assignee="Discord member to assign (must hold squad role)",
-        due="Natural due date (e.g. 'tomorrow 5pm')",
-        priority="Task priority level",
-        cc="Watcher members to notify (@mentions or IDs)",
-        description="Optional detailed markdown description",
-    )
-    @app_commands.choices(
-        priority=[
-            app_commands.Choice(name="High", value="high"),
-            app_commands.Choice(name="Normal", value="normal"),
-            app_commands.Choice(name="Low", value="low"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def task_create(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        title: str,
-        assignee: discord.Member | None = None,
-        due: str | None = None,
-        priority: str = "normal",
-        cc: str | None = None,
-        description: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            await self.auth_service.require_task_creation(interaction.user, project.id)
-            if assignee:
-                await self.auth_service.require_task_assignee_eligibility(interaction.guild, assignee, project.id)
-
-            due_at = parse_natural_date(due) if due else None
-            watchers = extract_user_ids(cc)
-            p_level = (
-                PriorityLevel(priority.lower())
-                if priority.lower() in PriorityLevel._value2member_map_
-                else PriorityLevel.NORMAL
-            )
-
-            task = await self.task_service.create_task(
-                guild_id=interaction.guild.id,
-                title=title,
-                creator_discord_id=interaction.user.id,
-                project_id=project.id,
-                assignee_discord_id=assignee.id if assignee else None,
-                due_at=due_at,
-                priority=p_level,
-                body=description,
-                watchers=watchers,
-            )
-
-            if self.workspace:
-                ref = await self.workspace.provision_workspace(
-                    task,
-                    project=project,
-                    target_container=interaction.channel,
-                    preferred_channel_id=interaction.channel_id,
-                )
-                await self.task_service.update_discord_message_ids(
-                    task.id,
-                    discord_message_id=ref.message_id,
-                    discord_thread_id=ref.thread_id,
-                )
-                if ref.channel_id != interaction.channel_id:
-                    await interaction.followup.send(
-                        f"✅ Created task **[{task.short_id}] {task.title}** in <#{ref.channel_id}>"
-                        + f" with thread <#{ref.thread_id}>"
-                    )
-                else:
-                    await interaction.followup.send(
-                        f"✅ Task **[{task.short_id}]** created in project **{project.name}**.",
-                        embed=build_task_embed(task, project_name=project.name),
-                    )
-            else:
-                await interaction.followup.send(
-                    f"✅ Task **[{task.short_id}]** created in project **{project.name}**.",
-                    embed=build_task_embed(task, project_name=project.name),
-                )
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"creating task in project '{project_name}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="list", description="Display filtered active tasks with interactive pagination.")
-    @app_commands.describe(
-        project_name="Filter by project name",
-        user="Filter by assignee",
-        status="Filter by execution status",
-        overdue="Filter for overdue tasks only",
-    )
-    @app_commands.choices(
-        status=[
-            app_commands.Choice(name="Active (In Progress & Not Started)", value="active"),
-            app_commands.Choice(name="In Progress", value="inProgress"),
-            app_commands.Choice(name="Not Started", value="notStarted"),
-            app_commands.Choice(name="Completed", value="completed"),
-            app_commands.Choice(name="All (including Completed)", value="all"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def task_list(
-        self,
-        interaction: discord.Interaction,
-        project_name: str | None = None,
-        user: discord.Member | None = None,
-        status: str | None = None,
-        overdue: bool = False,
-    ) -> None:
-        if not interaction.guild:
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            project_id = None
-            title_parts = []
-            if project_name:
-                project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-                if not project:
-                    await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                    return
-                project_id = project.id
-                title_parts.append(f"Project: {project.name}")
-
-            if user:
-                title_parts.append(f"Assignee: {user.display_name}")
-
-            if overdue:
-                title_parts.append("Status: ⏰ Overdue")
-
-            exclude_completed = False
-            filter_status = None
-            if status == "all":
-                filter_status = None
-                exclude_completed = False
-                if not overdue:
-                    title_parts.append("Status: All")
-            elif status in ("inProgress", "notStarted", "completed"):
-                filter_status = TaskStatus(status)
-                exclude_completed = False
-                if not overdue:
-                    title_parts.append(f"Status: {filter_status.value}")
-            else:
-                filter_status = None
-                exclude_completed = True
-                if status == "active" and not overdue:
-                    title_parts.append("Status: Active")
-
-            tasks, total_count = await self.task_service.list_tasks(
-                guild_id=interaction.guild.id,
-                project_id=project_id,
-                assignee_discord_id=user.id if user else None,
-                status=filter_status,
-                include_archived=False,
-                exclude_completed=exclude_completed,
-                overdue_only=overdue,
-                limit=100,
-            )
-
-            title_context = "Tasks (" + ", ".join(title_parts) + ")" if title_parts else "Active Tasks"
-            embed = build_page_embed(tasks, 0, total_count, title_context)
-            view = TaskListView(tasks, total_count, title_context)
-
-            await interaction.followup.send(embed=embed, view=view)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            await menu_manager.register_menu(interaction)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "listing tasks", logger, ephemeral=True)
-
-    async def _resolve_task_context(
-        self,
-        interaction: discord.Interaction,
-        task_short_id: str | None,
-    ) -> Task | None:
-        """Resolves target task either from explicitly provided short ID or implicitly from thread context."""
-        if not interaction.guild:
-            return None
-
-        if task_short_id:
-            task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task_short_id)
-            if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task_short_id}' not found.", ephemeral=True)
-                return None
-            return task_entity
-
-        # Implicit resolution from thread workspace channel ID
-        if interaction.channel_id:
-            task_entity = await self.task_service.get_by_thread_id(interaction.guild.id, interaction.channel_id)
-            if task_entity:
-                return task_entity
-
-        await interaction.followup.send(
-            "❌ No task specified and this command was not executed inside an active task thread workspace.\n"
-            "Please specify a task short ID (e.g. `APP-1`) or run this command inside the task's thread.",
-            ephemeral=True,
-        )
-        return None
-
-    @task_group.command(name="history", description="View the full audit trail and status history of a task.")
-    @app_commands.describe(task="Task identifier (search by short ID or title, or omit if inside thread)")
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_history(self, interaction: discord.Interaction, task: str | None = None) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            history = await self.task_service.get_history(task_entity.id)
-            embed = build_task_history_embed(task_entity, history)
-            await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"retrieving history for task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="assign", description="Assign or reassign a task to a squad member.")
-    @app_commands.describe(
-        task="Short ID of the task (e.g. APP-1, or omit if inside thread)",
-        assignee="Discord member to assign (or omit to unassign)",
-    )
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_assign(
-        self,
-        interaction: discord.Interaction,
-        task: str | None = None,
-        assignee: discord.Member | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, task_entity)
-            if assignee:
-                await self.auth_service.require_task_assignee_eligibility(
-                    interaction.guild, assignee, task_entity.project_id
-                )
-
-            new_assignee_id = assignee.id if assignee else None
-            updated_task = await self.task_service.update_assignee(
-                task_id=task_entity.id,
-                new_assignee_id=new_assignee_id,
-                actor_discord_id=interaction.user.id,
-            )
-
-            msg = (
-                f"👤 Assigned **[{updated_task.short_id}]** to <@{new_assignee_id}>."
-                if new_assignee_id
-                else f"👤 Unassigned **[{updated_task.short_id}]**."
-            )
-            embed = build_task_embed(updated_task)
-            if self.workspace:
-                await self.workspace.sync_workspace(updated_task)
-            elif hasattr(self.bot, "sync_root_task_message"):
-                res = self.bot.sync_root_task_message(updated_task)
-                if hasattr(res, "__await__"):
-                    await res
-
-            await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"assigning task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="status", description="Update the execution status of a task.")
-    @app_commands.describe(
-        status="New task status",
-        task="Short ID of the task (omit if inside thread)",
-        notes="Optional transition notes",
-        force="Bypass dependency guard if task has incomplete blockers",
-    )
-    @app_commands.choices(
-        status=[
-            app_commands.Choice(name="⏳ Not Started", value="not_started"),
-            app_commands.Choice(name="🟡 In Progress", value="in_progress"),
-            app_commands.Choice(name="✅ Completed", value="completed"),
-        ]
-    )
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_status(
-        self,
-        interaction: discord.Interaction,
-        status: str,
-        task: str | None = None,
-        notes: str | None = None,
-        force: bool = False,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, task_entity)
-            status_map = {
-                "not_started": TaskStatus.NOT_STARTED,
-                "notstarted": TaskStatus.NOT_STARTED,
-                "in_progress": TaskStatus.IN_PROGRESS,
-                "inprogress": TaskStatus.IN_PROGRESS,
-                "completed": TaskStatus.COMPLETED,
-            }
-            normalized_status = status.lower().replace("-", "_")
-            new_status = status_map.get(normalized_status)
-            if not new_status:
-                try:
-                    new_status = TaskStatus(status)
-                except ValueError:
-                    await interaction.followup.send(f"❌ Invalid status: '{status}'.", ephemeral=True)
-                    return
-
-            if new_status in (TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED):
-                unresolved = await self.task_service.get_unresolved_prerequisites(task_entity.id)
-                if unresolved:
-                    if not force:
-                        from src.adapters.discord_bot.views.task_blocked_view import (
-                            TaskBlockedConfirmView,
-                            build_task_blocked_confirm_embed,
-                        )
-
-                        embed = build_task_blocked_confirm_embed(task_entity, new_status, unresolved)
-                        view = TaskBlockedConfirmView(
-                            task=task_entity,
-                            target_status=new_status,
-                            incomplete_prereqs=unresolved,
-                            author_id=interaction.user.id,
-                            task_service=self.task_service,
-                            auth_service=self.auth_service,
-                            workspace=self.workspace,
-                            bot=self.bot,
-                            notes=notes,
-                        )
-                        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-                        return
-                    else:
-                        if self.auth_service:
-                            await self.auth_service.require_dependency_bypass(interaction.user, task_entity)
-                        blocker_ids = ", ".join(f"[{p.short_id}]" for p in unresolved)
-                        bypass_note = f"bypassed unresolved blockers: {blocker_ids}"
-                        notes = (
-                            f"{notes} ({bypass_note})"
-                            if notes
-                            else f"Status updated to {new_status.value} ({bypass_note})"
-                        )
-
-            updated_task = await self.task_service.update_status(
-                task_id=task_entity.id,
-                new_status=new_status,
-                expected_version=task_entity.version,
-                actor_discord_id=interaction.user.id,
-                notes=notes,
-            )
-
-            msg = f"🔄 Status updated to **{new_status.value.upper()}** for **[{updated_task.short_id}]**."
-            embed = build_task_embed(updated_task)
-            if self.workspace:
-                await self.workspace.sync_workspace(updated_task)
-            elif hasattr(self.bot, "sync_root_task_message"):
-                res = self.bot.sync_root_task_message(updated_task)
-                if hasattr(res, "__await__"):
-                    await res
-
-            await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"updating status for task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="update", description="Update a task's title, description, or due date.")
-    @app_commands.describe(
-        task="Short ID of the task to update (omit if inside thread)",
-        title="New task title",
-        description="New task description (use 'clear' to remove)",
-        due="New due date (e.g. 'tomorrow', 'in 3 days', 'clear')",
-    )
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_update(
-        self,
-        interaction: discord.Interaction,
-        task: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        due: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            if self.auth_service:
-                await self.auth_service.require_task_mutation(interaction.user, task_entity)
-
-            update_kwargs: dict[str, Any] = {}
-            if title is not None:
-                cleaned_title = title.strip()
-                if not cleaned_title:
-                    await interaction.followup.send("❌ Task title cannot be empty.", ephemeral=True)
-                    return
-                update_kwargs["title"] = cleaned_title
-
-            if description is not None:
-                desc_val = description.strip()
-                clear_body = desc_val == "" or desc_val.lower() in ("clear", "none", "remove")
-                update_kwargs["clear_body"] = clear_body
-                update_kwargs["body"] = None if clear_body else desc_val
-
-            if due is not None:
-                due_val = due.strip()
-                clear_due = due_val.lower() in ("clear", "none", "remove", "null", "unset")
-                update_kwargs["clear_due_at"] = clear_due
-                update_kwargs["due_at"] = None if clear_due else parse_natural_date(due_val)
-
-            if not update_kwargs:
-                await interaction.followup.send("ℹ️ No updates specified.", ephemeral=True)
-                return
-
-            updated_task = await self.task_service.update_details(
-                task_id=task_entity.id,
-                actor_discord_id=interaction.user.id,
-                **update_kwargs,
-            )
-
-            sync_res = None
-            if self.workspace:
-                sync_res = await self.workspace.sync_workspace(
-                    updated_task,
-                    sync_title=True,
-                    sync_starter_card=True,
-                )
-            elif hasattr(self.bot, "sync_task_thread"):
-                sync_res = await self.bot.sync_task_thread(updated_task, sync_title=True)
-            elif hasattr(self.bot, "sync_root_task_message"):
-                res = self.bot.sync_root_task_message(updated_task)
-                if hasattr(res, "__await__"):
-                    await res
-
-            title_deferred = hasattr(sync_res, "title_deferred") and sync_res.title_deferred
-            msg = f"✏️ Updated details for **[{updated_task.short_id}]**."
-            if title_deferred:
-                msg += (
-                    "\nℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
-                    "thread title will reflect changes shortly)."
-                )
-
-            embed = build_task_embed(updated_task)
-            await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"updating details for task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="archive", description="Archive a completed or obsolete task.")
-    @app_commands.describe(task="Short ID of the task to archive (omit if inside thread)")
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_archive(self, interaction: discord.Interaction, task: str | None = None) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, task_entity)
-            updated = await self.task_service.archive_task(
-                task_id=task_entity.id,
-                actor_discord_id=interaction.user.id,
-            )
-            if updated and self.workspace:
-                await self.workspace.sync_workspace(updated, sync_archive=True)
-            elif updated and hasattr(self.bot, "sync_task_thread"):
-                res = self.bot.sync_task_thread(updated, action="archive")
-                if hasattr(res, "__await__"):
-                    await res
-            await interaction.followup.send(f"📦 Archived task **[{updated.short_id}]** (`{updated.title}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"archiving task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="unarchive", description="Restore an archived task.")
-    @app_commands.describe(task="Short ID of the task to restore (omit if inside thread)")
-    async def task_unarchive(self, interaction: discord.Interaction, task: str | None = None) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, task_entity)
-            updated = await self.task_service.unarchive_task(
-                task_id=task_entity.id,
-                actor_discord_id=interaction.user.id,
-            )
-            if updated and self.workspace:
-                await self.workspace.sync_workspace(updated, sync_archive=True)
-            elif updated and hasattr(self.bot, "sync_task_thread"):
-                res = self.bot.sync_task_thread(updated, action="unarchive")
-                if hasattr(res, "__await__"):
-                    await res
-            await interaction.followup.send(f"📂 Restored task **[{updated.short_id}]** (`{updated.title}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"restoring task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="delete", description="Permanently delete a task with interactive confirmation.")
-    @app_commands.describe(task="Short ID of the task to delete (omit if inside thread)")
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_delete(self, interaction: discord.Interaction, task: str | None = None) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            await self.auth_service.require_task_deletion(interaction.user, task_entity)
-
-            prereqs, dependents = await self.task_service.get_task_dependencies(task_entity.id)
-            embed = build_task_delete_confirm_embed(
-                task_entity,
-                prerequisites=prereqs,
-                dependents=dependents,
-            )
-            view = TaskDeleteConfirmView(
-                task=task_entity,
-                author_id=interaction.user.id,
-                task_service=self.task_service,
-                auth_service=self.auth_service,
-                workspace=self.workspace,
-                bot=self.bot,
-            )
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"deleting task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(name="watchers", description="Manage watcher subscribers on a task.")
-    @app_commands.describe(
-        action="Action to perform",
-        task="Short ID of the task (omit if inside thread)",
-        member="Target Discord member",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add Watcher", value="add"),
-            app_commands.Choice(name="Remove Watcher", value="remove"),
-            app_commands.Choice(name="Clear All Watchers", value="clear"),
-        ]
-    )
-    @app_commands.autocomplete(task=task_autocomplete)
-    async def task_watchers(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        task: str | None = None,
-        member: discord.Member | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            task_entity = await self._resolve_task_context(interaction, task)
-            if not task_entity:
-                return
-
-            target_user_id = member.id if member else interaction.user.id
-            is_self_service = (action in ("add", "remove")) and (target_user_id == interaction.user.id)
-            if not is_self_service:
-                await self.auth_service.require_task_mutation(interaction.user, task_entity)
-
-            current_watchers = list(task_entity.watchers)
-            if action == "add":
-                if target_user_id not in current_watchers:
-                    current_watchers.append(target_user_id)
-            elif action == "remove":
-                if target_user_id in current_watchers:
-                    current_watchers.remove(target_user_id)
-            elif action == "clear":
-                current_watchers = []
-
-            updated_task = await self.task_service.update_details(
-                task_id=task_entity.id,
-                actor_discord_id=interaction.user.id,
-                watchers=current_watchers,
-            )
-
-            msg = f"👀 Updated watchers for **[{updated_task.short_id}]** ({len(updated_task.watchers)} total)."
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"updating watchers for task '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(
-        name="depend",
-        description="Add a prerequisite dependency: this task requires another task to finish first.",
-    )
-    @app_commands.describe(
-        depends_on="The prerequisite task that must finish first (e.g. INF-1)",
-        task="The dependent task that is blocked (omit if inside thread)",
-    )
-    @app_commands.autocomplete(task=task_autocomplete, depends_on=task_autocomplete)
-    async def task_depend(
-        self,
-        interaction: discord.Interaction,
-        depends_on: str,
-        task: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            target_task = await self._resolve_task_context(interaction, task)
-            if not target_task:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, target_task)
-
-            await self.task_service.add_dependency(
-                guild_id=interaction.guild.id,
-                task_short_id=target_task.short_id,
-                depends_on_short_id=depends_on,
-                actor_discord_id=interaction.user.id,
-            )
-            msg = (
-                f"🔗 Linked dependency: **`[{target_task.short_id}]`** "
-                f"now depends on **`[{depends_on}]`** finishing first."
-            )
-            await interaction.followup.send(msg, ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"linking dependency for '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    @task_group.command(
-        name="undepend",
-        description="Remove a prerequisite dependency from a task.",
-    )
-    @app_commands.describe(
-        depends_on="The prerequisite task to unblock/unlink (e.g. INF-1)",
-        task="The dependent task (omit if inside thread)",
-    )
-    @app_commands.autocomplete(task=task_autocomplete, depends_on=task_autocomplete)
-    async def task_undepend(
-        self,
-        interaction: discord.Interaction,
-        depends_on: str,
-        task: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            target_task = await self._resolve_task_context(interaction, task)
-            if not target_task:
-                return
-
-            await self.auth_service.require_task_mutation(interaction.user, target_task)
-
-            removed = await self.task_service.remove_dependency(
-                guild_id=interaction.guild.id,
-                task_short_id=target_task.short_id,
-                depends_on_short_id=depends_on,
-                actor_discord_id=interaction.user.id,
-            )
-            if removed:
-                msg = (
-                    f"🔓 Unlinked dependency: **`[{target_task.short_id}]`** no longer depends on **`[{depends_on}]`**."
-                )
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.followup.send(
-                    f"ℹ️ **`[{target_task.short_id}]`** did not depend on **`[{depends_on}]`**.",
-                    ephemeral=True,
-                )
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"unlinking dependency for '{task or 'current thread'}'", logger, ephemeral=True
-            )
-
-    # ==========================================
-    # Project Subgroup: /pm project <cmd>
-    @project_group.command(name="create", description="Create a project container, bind channel, and map squad role.")
-    @app_commands.describe(
-        name="Project Name (e.g. Mobile App)",
-        prefix="Short uppercase task prefix (e.g. MOB)",
-        role="Discord server role representing the squad working on this project",
-        role_2="Optional second Discord server role representing another squad",
-        role_3="Optional third Discord server role representing another squad",
-        channel="Discord Forum Channel to bind for tasks",
-        description="Optional markdown project overview",
-        category="Optional organizational category",
-    )
-    async def project_create(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        prefix: str,
-        role: discord.Role,
-        role_2: discord.Role | None = None,
-        role_3: discord.Role | None = None,
-        channel: discord.ForumChannel | None = None,
-        description: str | None = None,
-        category: str | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        if channel is not None and not isinstance(channel, discord.ForumChannel):
-            await interaction.response.send_message(
-                "❌ Projects must be bound to a Discord Forum Channel.", ephemeral=True
-            )
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            roles = [r for r in [role, role_2, role_3] if r is not None]
-            ref = await self.project_workspace.provision_project(
-                ProjectProvisionSpec(
-                    guild_id=interaction.guild.id,
-                    name=name,
-                    prefix=prefix,
-                    role=role,
-                    roles=roles,
-                    channel=channel,
-                    description=description,
-                    category=category,
-                )
-            )
-            project = ref.project
-
-            hub_note = ""
-            if ref.channel_id:
-                hub_note = " • 📌 Pinned Control Hub created"
-
-            role_mentions = ", ".join(f"<@&{r.id}>" for r in roles)
-            embed = discord.Embed(
-                title=f"📁 Project Created: {project.name} (`{project.prefix}`)",
-                description=project.description or "*No description provided.*",
-                color=discord.Color.blue(),
-            )
-            embed.add_field(name="Task ID Prefix", value=f"`{project.prefix}-#`", inline=True)
-            embed.add_field(name="Assigned Squad(s)", value=role_mentions, inline=True)
-            if project.discord_channel_id:
-                embed.add_field(name="Bound Channel", value=f"<#{project.discord_channel_id}>{hub_note}", inline=True)
-
-            await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(interaction, e, f"creating project '{name}'", logger, ephemeral=True)
-
-    @project_group.command(name="list", description="List all active projects in this server.")
-    async def project_list(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
-            if not projects:
-                await interaction.followup.send("📁 No active projects found. Use `/pm project create` to set one up.")
-                return
-
-            embed = discord.Embed(title="📁 Server Projects", color=discord.Color.blue())
-            for p in projects:
-                chan_str = f"<#{p.discord_channel_id}>" if p.discord_channel_id else "*No channel bound*"
-                role_ids = p.discord_role_ids or ([p.discord_role_id] if p.discord_role_id else [])
-                role_str = ", ".join(f"<@&{rid}>" for rid in role_ids) if role_ids else "*No squad role*"
-                embed.add_field(
-                    name=f"**{p.name}** (`{p.prefix}`)",
-                    value=f"Channel: {chan_str}\nSquads: {role_str}\nStatus: Active",
-                    inline=False,
-                )
-            await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "listing projects", logger, ephemeral=True)
-
-    @project_group.command(name="tree", description="Render tech-tree dependency graph for a project.")
-    @app_commands.describe(
-        project_name="Name of the project to visualize",
-        orientation="Layout orientation: horizontal (lr) or vertical (tb)",
-    )
-    @app_commands.choices(
-        orientation=[
-            app_commands.Choice(name="Horizontal (Left to Right)", value="lr"),
-            app_commands.Choice(name="Vertical (Top to Bottom)", value="tb"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_tree(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        orientation: app_commands.Choice[str] | None = None,
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            await self.auth_service.require_project_view(interaction.user, project.id)
-
-            orient_val = orientation.value if orientation else "lr"
-            buf = await self.task_service.render_project_tree(
-                guild_id=interaction.guild.id,
-                project_id=project.id,
-                orientation=orient_val,
-                member_resolver=interaction.guild,
-            )
-            file = discord.File(fp=buf, filename="tech_tree.png")
-            orient_label = "Horizontal (Left to Right)" if orient_val == "lr" else "Vertical (Top to Bottom)"
-            embed = discord.Embed(
-                title=f"🌲 Tech Tree: [{project.prefix}] {project.name}",
-                description=f"Showing dependency graph in **{orient_label}** layout.",
-                color=discord.Color.from_rgb(16, 152, 247),
-            )
-            embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(
-                self.task_service, project, current_orientation=orient_val, auth_service=self.auth_service
-            )
-            await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"rendering tech tree for '{project_name}'", logger, ephemeral=True
-            )
-
-    @project_group.command(name="archive", description="Archive a project container.")
-    @app_commands.describe(project_name="Name of the project to archive")
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_archive(self, interaction: discord.Interaction, project_name: str) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            await self.project_service.archive_project(project.id)
-
-            if hasattr(self.bot, "sync_task_thread") and self.task_service:
-                tasks, _ = await self.task_service.list_tasks(
-                    guild_id=interaction.guild.id, project_id=project.id, status=None, include_archived=True
-                )
-                for t in tasks:
-                    if t.discord_thread_id:
-                        try:
-                            await self.bot.sync_task_thread(t, action="archive")
-                        except Exception as te:
-                            logger.warning("Could not sync task thread on project archive for task %s: %s", t.id, te)
-
-            if interaction.guild and project.discord_channel_id:
-                chan = interaction.guild.get_channel(project.discord_channel_id)
-                if chan and isinstance(chan, (discord.ForumChannel, discord.TextChannel)):
-                    try:
-                        await ensure_pinned_hub_post(
-                            channel=chan,
-                            project_service=self.project_service,
-                            squad_service=self.squad_service,
-                            task_service=self.task_service,
-                            user_service=self.user_service,
-                        )
-                    except Exception as he:
-                        logger.warning("Could not refresh pinned hub on project archive: %s", he)
-
-            await interaction.followup.send(f"📦 Archived project **{project.name}** (`{project.prefix}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(interaction, e, f"archiving project '{project_name}'", logger, ephemeral=True)
-
-    @project_group.command(name="unarchive", description="Restore an archived project container.")
-    @app_commands.describe(project_name="Name of the project to restore")
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_unarchive(self, interaction: discord.Interaction, project_name: str) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            await self.project_service.unarchive_project(project.id)
-
-            if hasattr(self.bot, "sync_task_thread") and self.task_service:
-                tasks, _ = await self.task_service.list_tasks(
-                    guild_id=interaction.guild.id, project_id=project.id, status=None, include_archived=True
-                )
-                for t in tasks:
-                    if t.discord_thread_id:
-                        try:
-                            await self.bot.sync_task_thread(t, action="unarchive")
-                        except Exception as te:
-                            logger.warning("Could not sync task thread on project unarchive for task %s: %s", t.id, te)
-
-            if interaction.guild and project.discord_channel_id:
-                chan = interaction.guild.get_channel(project.discord_channel_id)
-                if chan and isinstance(chan, (discord.ForumChannel, discord.TextChannel)):
-                    try:
-                        await ensure_pinned_hub_post(
-                            channel=chan,
-                            project_service=self.project_service,
-                            squad_service=self.squad_service,
-                            task_service=self.task_service,
-                            user_service=self.user_service,
-                        )
-                    except Exception as he:
-                        logger.warning("Could not refresh pinned hub on project unarchive: %s", he)
-
-            await interaction.followup.send(f"📂 Restored project **{project.name}** (`{project.prefix}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(interaction, e, f"restoring project '{project_name}'", logger, ephemeral=True)
-
-    @project_group.command(name="role", description="Map or unmap a Discord squad role on a project container.")
-    @app_commands.describe(
-        project_name="Target project name",
-        role="Discord role representing the functional squad",
-        action="Map (add) or Unmap (remove) role from project",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Map Role to Project", value="add"),
-            app_commands.Choice(name="Unmap Role from Project", value="remove"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_role(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        role: discord.Role,
-        action: str = "add",
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            squad = await self.squad_service.get_or_create_squad_for_role(interaction.guild.id, role.id, role.name)
-
-            if action == "add":
-                await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
-                msg = f"🔗 Mapped role **{role.name}** (<@&{role.id}>) to project **{project.name}**."
-            else:
-                await self.project_service.remove_squad_from_project(project_id=project.id, squad_id=squad.id)
-                msg = f"✂️ Unmapped role **{role.name}** from project **{project.name}**."
-
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"managing project role for '{project_name}'", logger, ephemeral=True
-            )
-
-    @project_group.command(name="lead", description="Designate or remove a Squad Lead for a project's squads.")
-    @app_commands.describe(
-        project_name="Target project name",
-        user="Discord member to designate or remove as Squad Lead",
-        action="Action to perform (Add or Remove Lead)",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Add Squad Lead", value="add"),
-            app_commands.Choice(name="Remove Squad Lead", value="remove"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_lead(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        user: discord.Member,
-        action: str = "add",
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            squads = await self.project_service.list_squads_for_project(project.id)
-            if not squads:
-                await interaction.followup.send(f"❌ Project '{project.name}' has no assigned squads.", ephemeral=True)
-                return
-
-            # Check auth: server manager or active lead
-            is_manager = self.auth_service.is_server_manager(interaction.user)
-            if not is_manager:
-                is_any_lead = False
-                for s in squads:
-                    if await self.auth_service.can_manage_squad_leads(interaction.user, s.id):
-                        is_any_lead = True
-                        break
-                if not is_any_lead:
-                    await interaction.followup.send(
-                        "❌ You do not have permission to manage squad leads for this project.",
-                        ephemeral=True,
-                    )
-                    return
-
-            user_roles = {r.id for r in getattr(user, "roles", []) if hasattr(r, "id")}
-            matching_squads = [s for s in squads if s.discord_role_id in user_roles] if action == "add" else squads
-
-            if action == "add":
-                if not matching_squads:
-                    role_mentions = ", ".join(f"<@&{s.discord_role_id}>" for s in squads)
-                    await interaction.followup.send(
-                        f"❌ <@{user.id}> does not hold any of project **{project.name}**'s assigned roles "
-                        f"({role_mentions}).\nPlease assign them the Discord role first.",
-                        ephemeral=True,
-                    )
-                    return
-                for s in matching_squads:
-                    await self.squad_service.add_squad_lead(s.id, user.id)
-                msg = f"⭐ Designated <@{user.id}> as **Squad Lead** for project **{project.name}**."
-            else:
-                for s in squads:
-                    await self.squad_service.remove_squad_lead(s.id, user.id)
-                msg = f"✅ Removed Squad Lead status from <@{user.id}> for project **{project.name}**."
-
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"managing lead for project '{project_name}'", logger, ephemeral=True
-            )
-
-    @project_group.command(name="squad", description="Map or unmap a functional squad to a project container.")
-    @app_commands.describe(
-        project_name="Target project name",
-        squad_name="Name of the functional squad",
-        action="Map (assign) or Unmap (remove) squad",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Map Squad to Project", value="map"),
-            app_commands.Choice(name="Unmap Squad from Project", value="unmap"),
-        ]
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete, squad_name=squad_autocomplete)
-    async def project_squad(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        squad_name: str,
-        action: str = "map",
-    ) -> None:
-        if not interaction.guild:
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                return
-
-            squad = await self.squad_service.get_by_name(interaction.guild.id, squad_name)
-            if not squad:
-                await interaction.followup.send(f"❌ Squad '{squad_name}' not found.", ephemeral=True)
-                return
-
-            if action == "map":
-                await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
-                msg = f"🔗 Mapped squad **{squad.name}** (<@&{squad.discord_role_id}>) to project **{project.name}**."
-            else:
-                await self.project_service.remove_squad_from_project(project_id=project.id, squad_id=squad.id)
-                msg = f"✂️ Unmapped squad **{squad.name}** from project **{project.name}**."
-
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"mapping squad to project '{project_name}'", logger, ephemeral=True
-            )
-
-    @project_group.command(
-        name="setup-forum",
-        description="Automatically configure standard project management tags on a Forum Channel.",
-    )
-    @app_commands.describe(forum="The Discord Forum Channel to configure with PM tags")
-    async def project_setup_forum(
-        self,
-        interaction: discord.Interaction,
-        forum: discord.ForumChannel,
-    ) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            tags_added, total_tags, err = await setup_forum_tags(forum)
-            if err:
-                await interaction.followup.send(f"❌ Failed to configure tags in <#{forum.id}>: {err}", ephemeral=True)
-                return
-
-            embed = discord.Embed(
-                title=f"🏷️ Forum Tags Configured: #{forum.name}",
-                description=(
-                    f"Successfully verified and updated tags in <#{forum.id}>!\n\n"
-                    f"• **New Tags Added:** `{tags_added}`\n"
-                    f"• **Total Available Tags:** `{total_tags}` / 20\n\n"
-                    "**Standard Tags Managed:**\n"
-                    "• **Status:** `⏳ Not Started`, `🟡 In Progress`, `✅ Completed`\n"
-                    "• **Priority:** `🔴 High Priority`, `🟡 Normal Priority`, `🟢 Low Priority`\n"
-                    "• **Project:** One `📁 <Project Name>` tag per project bound to this forum"
-                ),
-                color=discord.Color.green(),
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
-        except Exception as e:
-            await send_interaction_error(
-                interaction, e, f"configuring forum tags for <#{forum.id}>", logger, ephemeral=True
-            )
-
-    @project_group.command(
-        name="rebuild",
-        description="Rebuild and reconcile a project's Discord forum, tags, hub, and task threads.",
-    )
-    @app_commands.describe(
-        project_name="Name of the project to rebuild",
-        forum="Optional target Forum Channel to rebind to (auto-creates if omitted and missing)",
-    )
-    @app_commands.autocomplete(project_name=project_autocomplete)
-    async def project_rebuild(
-        self,
-        interaction: discord.Interaction,
-        project_name: str,
-        forum: discord.ForumChannel | None = None,
-    ) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
-            return
-
-        try:
-            if self.auth_service:
-                await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
-            project = await self.project_service.get_by_name(interaction.guild.id, project_name)
-            if not project:
-                # Check if archived
-                projects = await self.project_service.list_projects(interaction.guild.id, include_archived=True)
-                project = next((p for p in projects if p.name.lower() == project_name.lower()), None)
-                if not project:
-                    await interaction.response.send_message(f"❌ Project '{project_name}' not found.", ephemeral=True)
-                    return
-
-            # Fetch task count for preview
-            task_count = 0
-            if self.task_service:
-                _, task_count = await self.task_service.list_tasks(
-                    guild_id=interaction.guild.id, project_id=project.id, include_archived=True
-                )
-
-            channel_status = (
-                f"Rebind to <#{forum.id}>"
-                if forum
-                else (
-                    f"Existing: <#{project.discord_channel_id}>"
-                    if project.discord_channel_id and interaction.guild.get_channel(project.discord_channel_id)
-                    else "Auto-create new ForumChannel"
-                )
-            )
-
-            embed = discord.Embed(
-                title=f"⚠️ Confirm Workspace Rebuild: [{project.prefix}] {project.name}",
-                description=(
-                    f"Are you sure you want to rebuild the Discord workspace for **{project.name}**?\n\n"
-                    f"**Planned Actions:**\n"
-                    f"• **Channel Target:** {channel_status}\n"
-                    f"• **Forum Tags:** Configure standard status, priority, and project tags\n"
-                    f"• **Control Hub:** Mount and pin interactive Control Hub post\n"
-                    f"• **Task Threads:** Reconcile **{task_count}** tasks "
-                    "(recreate missing threads and enforce Archive Invariant)\n"
-                    f"• **Project Status:** {'Unarchive and restore' if project.is_archived else 'Active'}\n\n"
-                    "⚠️ *This will pace Discord API calls to respect rate limits.*"
-                ),
-                color=discord.Color.orange(),
-            )
-            view = RebuildConfirmView(
-                project_workspace=self.project_workspace,
-                project=project,
-                target_channel=forum,
-                interaction=interaction,
-                task_count=task_count,
-            )
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        except Exception as e:
-            await send_interaction_error(interaction, e, "initiating project rebuild", logger, ephemeral=True)
 
     @app_commands.command(name="tree", description="Render tech-tree dependency graph for a project.")
     @app_commands.describe(
@@ -2031,7 +393,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 guild_id=interaction.guild.id,
                 project_id=project.id,
                 orientation=orient_val,
-                member_resolver=interaction.guild,
+                member_resolver=lambda uid: resolve_discord_member_name(uid, interaction.guild),
             )
             file = discord.File(fp=buf, filename="tech_tree.png")
             orient_label = "Horizontal (Left to Right)" if orient_val == "lr" else "Vertical (Top to Bottom)"
@@ -2041,9 +403,7 @@ class PmCog(commands.GroupCog, group_name="pm", group_description="DGG-PM Projec
                 color=discord.Color.from_rgb(16, 152, 247),
             )
             embed.set_image(url="attachment://tech_tree.png")
-            from src.adapters.discord_bot.views.tree_view import TechTreeViewer
-
-            view = TechTreeViewer(
+            view = DiscordViewRouter.build_tech_tree_viewer(
                 self.task_service, project, current_orientation=orient_val, auth_service=self.auth_service
             )
             await interaction.followup.send(embed=embed, file=file, view=view, ephemeral=True)

@@ -208,3 +208,17 @@ class GuildLeadUserTable(Base):
     guild_id = Column(BigInteger, primary_key=True)
     user_discord_id = Column(BigInteger, primary_key=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+
+
+class UserCalendarTokenTable(Base):
+    __tablename__ = "user_calendar_tokens"
+
+    user_discord_id = Column(BigInteger, primary_key=True)
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

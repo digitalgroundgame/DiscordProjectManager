@@ -10,6 +10,7 @@ import discord
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.views.base_view import BaseModal
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
+from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
 from src.domain.enums import TaskStatus
 from src.domain.models import Task
 from src.services.task_service import TaskService
@@ -91,12 +92,14 @@ class TaskEditModal(BaseModal):
         task: Task,
         task_service: TaskService,
         auth_service: AuthService | None = None,
+        workspace: ITaskDiscordWorkspace | None = None,
     ):
         super().__init__(title=f"Edit Task: {task.short_id}")
         self.task_id = task.id
         self.short_id = task.short_id
         self.task_service = task_service
         self.auth_service = auth_service
+        self.workspace = workspace
 
         self.title_input = discord.ui.TextInput(
             label="Task Title",
@@ -173,57 +176,47 @@ class TaskEditModal(BaseModal):
                 watchers=watchers,
             )
 
-            # Lazy import to prevent circular dependency
-            from src.adapters.discord_bot.views.task_buttons import TaskActionView
-            from src.adapters.discord_bot.views.task_embed import build_task_embed, build_thread_workspace_content
+            ws = self.workspace if isinstance(self.workspace, ITaskDiscordWorkspace) else None
+            if not ws and "workspace" in vars(interaction.client):
+                client_ws = getattr(interaction.client, "workspace", None)
+                if isinstance(client_ws, ITaskDiscordWorkspace):
+                    ws = client_ws
+            if not ws:
+                from src.adapters.discord_bot.task_workspace import DiscordTaskWorkspaceAdapter
 
-            new_embed = build_task_embed(updated_task)
-            new_view = TaskActionView(
-                task_id=self.task_id,
-                current_status=updated_task.status,
-                current_priority=updated_task.priority,
-                task_service=self.task_service,
-                current_assignee_id=updated_task.assignee_discord_id,
-                current_watchers=updated_task.watchers,
+                ws = DiscordTaskWorkspaceAdapter(
+                    bot=interaction.client,
+                    task_service=self.task_service,
+                    project_service=getattr(self.task_service, "project_service", None),
+                )
+
+            if interaction.message:
+                await ws.refresh_action_card(interaction, updated_task)
+            else:
+                await interaction.response.send_message(
+                    f"✅ Updated **[{updated_task.short_id}] {updated_task.title}**.",
+                    ephemeral=True,
+                )
+
+            sync_res = await ws.sync_workspace(
+                updated_task, sync_title=True, sync_archive=False, sync_starter_card=True
             )
+            title_deferred = bool(getattr(sync_res, "title_deferred", False))
+            if not title_deferred and "sync_task_thread" in vars(interaction.client):
+                legacy_res = await interaction.client.sync_task_thread(
+                    updated_task, sync_title=True, sync_archive=False
+                )
+                title_deferred = bool(getattr(legacy_res, "title_deferred", False))
 
-            thread = interaction.channel if isinstance(interaction.channel, discord.Thread) else None
-            keep_archived = updated_task.status == TaskStatus.COMPLETED or updated_task.is_archived
-            async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
-                if interaction.message:
-                    if isinstance(interaction.channel, discord.Thread):
-                        content = build_thread_workspace_content(updated_task)
-                        if isinstance(interaction.channel.parent, discord.ForumChannel):
-                            await interaction.response.edit_message(content=content, embed=new_embed, view=new_view)
-                        else:
-                            await interaction.response.edit_message(content=content, embed=None, view=new_view)
-                    else:
-                        await interaction.response.edit_message(embed=new_embed, view=new_view)
-                else:
-                    await interaction.response.send_message(
-                        f"✅ Updated **[{updated_task.short_id}] {updated_task.title}**.",
-                        ephemeral=True,
-                    )
-
-                if hasattr(interaction.client, "sync_root_task_message"):
-                    await interaction.client.sync_root_task_message(updated_task)
-                title_deferred = False
-                if hasattr(interaction.client, "sync_task_thread"):
-                    sync_res = await interaction.client.sync_task_thread(
-                        updated_task, sync_title=True, sync_archive=False
-                    )
-                    if hasattr(sync_res, "title_deferred") and sync_res.title_deferred:
-                        title_deferred = True
-
-                if title_deferred:
-                    notice = (
-                        "ℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
-                        "thread title will reflect changes shortly)."
-                    )
-                    try:
-                        await interaction.followup.send(notice, ephemeral=True)
-                    except Exception:
-                        pass
+            if title_deferred:
+                notice = (
+                    "ℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
+                    "thread title will reflect changes shortly)."
+                )
+                try:
+                    await interaction.followup.send(notice, ephemeral=True)
+                except Exception:
+                    pass
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating details for task '{self.short_id}'", logger, ephemeral=True

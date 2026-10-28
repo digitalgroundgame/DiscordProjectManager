@@ -18,6 +18,7 @@ help: ## Display this help screen
 .PHONY: install
 install: ## Sync dependencies and create venv via uv
 	$(UV) sync --all-extras
+	@if [ -d .git ]; then git config core.hooksPath .githooks; echo "Configured git hooks path: .githooks"; fi
 
 .PHONY: sync
 sync: install ## Alias for install
@@ -45,6 +46,14 @@ test: ## Run the pytest test suite (in-memory SQLite, fast)
 .PHONY: test-cov
 test-cov: ## Run test suite with coverage report
 	$(UV) run --all-extras pytest -n 4 --cov=src --cov-report=term-missing tests/
+
+.PHONY: test-e2e
+test-e2e: ## Run in-process E2E user journey test suite
+	$(UV) run --all-extras pytest -v tests/e2e/
+
+.PHONY: test-postgres
+test-postgres: ## Run PostgreSQL integration and migration test suite against live container
+	$(UV) run --all-extras pytest -v -m postgres tests/
 
 .PHONY: lint
 lint: ## Run ruff linter

@@ -123,6 +123,14 @@ class ThreadRenameRateLimiter:
         self._pending_names[thread_id] = new_name
         self._cancel_deferred_task(thread_id)
 
+        logger.info(
+            "Thread rename throttled for %s -> '%s'. "
+            "Debouncing and scheduling deferred rename in %.1fs (cooldown: %.1fs).",
+            thread_id,
+            new_name,
+            delay,
+            wait_time,
+        )
         task = asyncio.create_task(self._run_deferred(thread, new_name, delay))
         self._deferred_tasks[thread_id] = task
         return RenameResult(executed=False, deferred=True, cooldown_remaining_seconds=wait_time)

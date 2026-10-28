@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from PIL import Image
 
+from src.adapters.rendering import MermaidTechTreeRenderer, PillowTechTreeRenderer
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Task
 from src.domain.tech_tree import (
@@ -206,13 +207,15 @@ class TestMemberResolution:
         assert tree["M-2"].assignee_name == "Dev #5555"
 
     def test_discord_guild_mock_resolver(self):
+        from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+
         mock_member = MagicMock()
         mock_member.display_name = "Ford Prefect"
         mock_guild = MagicMock()
         mock_guild.get_member.return_value = mock_member
 
         t1 = _make_task("M-3", assignee_id=7777)
-        tree = TechTree.build([t1], member_resolver=mock_guild)
+        tree = TechTree.build([t1], member_resolver=lambda uid: resolve_discord_member_name(uid, mock_guild))
         assert tree["M-3"].assignee_name == "Ford Prefect"
 
 
@@ -233,7 +236,14 @@ class TestTechTreeRenderingSeam:
         t2 = _make_task("PNG-2", status=TaskStatus.IN_PROGRESS)
         tree = TechTree.build([t1, t2], [(t2.id, t1.id)])
 
-        buf = tree.to_png(title="Test Project Tree", orientation=TechTreeOrientation.HORIZONTAL)
+        with pytest.raises(ValueError, match="No PNG renderer provided"):
+            tree.to_png()
+
+        buf = tree.to_png(
+            renderer=PillowTechTreeRenderer(),
+            title="Test Project Tree",
+            orientation=TechTreeOrientation.HORIZONTAL,
+        )
         assert isinstance(buf, io.BytesIO)
         img = Image.open(buf)
         assert img.format == "PNG"
@@ -245,7 +255,10 @@ class TestTechTreeRenderingSeam:
         t2 = _make_task("MER-2", title="Run System", status=TaskStatus.IN_PROGRESS)
         tree = TechTree.build([t1, t2], [(t2.id, t1.id)])
 
-        mermaid = tree.to_mermaid(orientation="lr")
+        with pytest.raises(ValueError, match="No Mermaid renderer provided"):
+            tree.to_mermaid()
+
+        mermaid = tree.to_mermaid(renderer=MermaidTechTreeRenderer(), orientation="lr")
         assert "graph LR" in mermaid
         assert 'MER-1["MER-1: Start Engine"]:::complete' in mermaid
         assert 'MER-2["MER-2: Run System"]:::active' in mermaid

@@ -73,3 +73,44 @@ For running directly on a Linux VPS or self-hosted server using Docker Compose:
    ```bash
    docker compose down
    ```
+
+---
+
+## 🌐 Public Base URL & Reverse Proxy Setup (Calendar Feeds)
+
+To enable live RFC 5545 iCalendar subscription feeds (`.ics` / `webcal://`) for Google Calendar, Apple Calendar, and Outlook, configure `PUBLIC_BASE_URL` in your environment (e.g. `PUBLIC_BASE_URL=https://pm.example.com`).
+
+The application listens on port `8000` (`http://localhost:8000`). Route incoming HTTPS traffic to port `8000` via your preferred reverse proxy:
+
+### Option A: Caddy (Recommended for Auto-HTTPS)
+```caddy
+pm.example.com {
+    reverse_proxy localhost:8000
+}
+```
+
+### Option B: Nginx
+```nginx
+server {
+    server_name pm.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Option C: Cloudflare Tunnel (`cloudflared`)
+```yaml
+tunnel: <TUNNEL_UUID>
+credentials-file: /root/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: pm.example.com
+    service: http://localhost:8000
+  - service: http_status:404
+```

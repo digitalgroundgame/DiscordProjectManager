@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.domain.models import Task
@@ -44,6 +44,99 @@ def to_rfc5545_vtodo(task: Task) -> str:
 
     lines.append("END:VTODO")
     return "\r\n".join(lines)
+
+
+def to_rfc5545_vevent(task: Task) -> str | None:
+    """Serializes a domain Task with a due date into an RFC 5545 VEVENT component string.
+
+    Returns None if the task has no due_at timestamp.
+    """
+    if not task.due_at:
+        return None
+
+    now_utc = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    due_dt = task.due_at if task.due_at.tzinfo else task.due_at.replace(tzinfo=UTC)
+    due_utc = due_dt.astimezone(UTC)
+    start_utc = due_utc - timedelta(hours=1)
+    dtstart_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    dtend_str = due_utc.strftime("%Y%m%dT%H%M%SZ")
+
+    # In VEVENT, valid STATUS values are TENTATIVE, CONFIRMED, CANCELLED.
+    if task.is_archived:
+        status_str = "CANCELLED"
+    else:
+        status_str = "CONFIRMED"
+
+    summary = f"[{task.short_id}] {task.title}"
+
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{task.id}",
+        f"DTSTAMP:{now_utc}",
+        f"SUMMARY:{summary}",
+        f"STATUS:{status_str}",
+        f"PRIORITY:{task.priority.rfc5545_priority}",
+        f"DTSTART:{dtstart_str}",
+        f"DTEND:{dtend_str}",
+        f"ORGANIZER;CN=Discord:mailto:{task.creator_discord_id}@discord.local",
+    ]
+
+    if task.body:
+        escaped_body = task.body.replace("\r\n", "\\n").replace("\n", "\\n")
+        lines.append(f"DESCRIPTION:{escaped_body}")
+
+    if task.assignee_discord_id:
+        lines.append(f"ATTENDEE;ROLE=REQ-PARTICIPANT;CN=Assignee:mailto:{task.assignee_discord_id}@discord.local")
+
+    for watcher_id in task.watchers:
+        lines.append(f"ATTENDEE;ROLE=NON-PARTICIPANT;CN=Watcher:mailto:{watcher_id}@discord.local")
+
+    # Custom extensions for Discord metadata
+    lines.append(f"X-DISCORD-GUILD-ID:{task.guild_id}")
+    lines.append(f"X-DISCORD-SHORT-ID:{task.short_id}")
+    if task.project_id:
+        lines.append(f"X-DISCORD-PROJECT-ID:{task.project_id}")
+    lines.append(f"X-DISCORD-STATUS:{task.status.value}")
+
+    lines.append("END:VEVENT")
+    return "\r\n".join(lines)
+
+
+def to_rfc5545_vcalendar(
+    tasks: list[Task],
+    cal_name: str = "DGG-PM Tasks",
+    format_type: str = "event",
+) -> str:
+    """Wraps domain Tasks into a valid RFC 5545 VCALENDAR envelope.
+
+    Args:
+        tasks: List of domain tasks to serialize.
+        cal_name: Calendar name for X-WR-CALNAME.
+        format_type: 'event' (default, VEVENT components for Google/Apple/Outlook),
+                     'todo' (VTODO components for Reminders/OmniFocus),
+                     'both' (both VEVENT and VTODO components).
+    """
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Digital Ground Game//Discord Project Manager//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{cal_name}",
+        "X-WR-TIMEZONE:UTC",
+    ]
+
+    for task in tasks:
+        if format_type in ("event", "both"):
+            vevent = to_rfc5545_vevent(task)
+            if vevent:
+                lines.append(vevent)
+        if format_type in ("todo", "both"):
+            vtodo = to_rfc5545_vtodo(task)
+            lines.append(vtodo)
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
 
 
 def to_ms_graph_todo_task(task: Task) -> dict[str, Any]:

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import discord
 
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.domain.enums import PriorityLevel, TaskStatus
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ async def unarchive_thread_if_needed(
             if hasattr(edit_res, "__await__"):
                 await edit_res
             thread.archived = False
+            logger.debug("Temporarily unarchived thread %s for safe workspace mutation", getattr(thread, "id", None))
     except Exception as e:
         logger.debug("Failed to unarchive thread %s: %s", getattr(thread, "id", None), e)
 
@@ -52,6 +54,7 @@ async def unarchive_thread_if_needed(
                     if hasattr(edit_res, "__await__"):
                         await edit_res
                     thread.archived = True
+                    logger.debug("Restored archived state for thread %s", getattr(thread, "id", None))
             except Exception as e:
                 logger.debug("Failed to restore archived state for thread %s: %s", getattr(thread, "id", None), e)
 
@@ -356,7 +359,6 @@ async def ensure_pinned_hub_post(
     auth_service: AuthService | None = None,
 ) -> tuple[bool, str]:
     """Ensures a pinned Project Management Hub post exists in the given Forum or Text channel."""
-    from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
     from src.domain.models import Project
 
     bound_projects: list[Project] = []
@@ -387,61 +389,45 @@ async def ensure_pinned_hub_post(
             except Exception as e:
                 logger.debug("Could not fetch squads for project %s in hub post: %s", bp.id, e)
 
-    embed = build_hub_welcome_embed(
-        channel_name=channel_name,
-        bound_projects=bound_projects,
-        project_squads_map=project_squads_map,
-    )
-
     view = None
     if project_service and task_service:
-        if not squad_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
-            try:
-                from src.adapters.db.postgres_repo import PostgresSquadRepo
-                from src.services.squad_service import SquadService
-
-                squad_service = SquadService(PostgresSquadRepo(task_service.uow.session_factory))
-            except Exception as e:
-                logger.debug("Could not auto-create squad_service for hub: %s", e)
-
-        if not user_service and hasattr(task_service, "uow") and hasattr(task_service.uow, "session_factory"):
-            try:
-                from src.adapters.db.postgres_repo import PostgresUserPreferenceRepo
-                from src.services.user_service import UserService
-
-                user_service = UserService(PostgresUserPreferenceRepo(task_service.uow.session_factory))
-            except Exception as e:
-                logger.debug("Could not auto-create user_service for hub: %s", e)
-
         uow = getattr(task_service, "uow", None)
-        sf = getattr(uow, "session_factory", None) or getattr(uow, "_session_factory", None)
-        if not auth_service and squad_service and sf:
-            try:
-                from src.adapters.db.postgres_repo import (
-                    PostgresGuildLeadRoleRepository,
-                    PostgresGuildLeadUserRepository,
-                )
-                from src.services.auth_service import AuthService
+        if not squad_service and uow and getattr(uow, "squads", None):
+            from src.services.squad_service import SquadService
 
-                lead_role_repo = PostgresGuildLeadRoleRepository(sf)
-                lead_user_repo = PostgresGuildLeadUserRepository(sf)
-                auth_service = AuthService(
-                    project_service,
-                    squad_service,
-                    guild_lead_role_repo=lead_role_repo,
-                    guild_lead_user_repo=lead_user_repo,
-                )
-            except Exception as e:
-                logger.debug("Could not auto-create auth_service for hub: %s", e)
+            squad_service = SquadService(uow.squads, uow=uow)
 
-        if squad_service:
-            view = PmHubView(
-                project_service=project_service,
-                squad_service=squad_service,
-                task_service=task_service,
-                user_service=user_service,
-                auth_service=auth_service,
+        if not user_service and uow and getattr(uow, "user_prefs", None):
+            from src.services.user_service import UserService
+
+            user_service = UserService(uow.user_prefs, uow=uow)
+
+        if not auth_service and squad_service:
+            from src.services.auth_service import AuthService
+
+            auth_service = AuthService(
+                project_service,
+                squad_service,
+                uow=uow,
             )
+
+    if squad_service and project_service and task_service:
+        embed, view = DiscordViewRouter.build_hub_view(
+            project_service=project_service,
+            squad_service=squad_service,
+            task_service=task_service,
+            user_service=user_service,
+            auth_service=auth_service,
+            channel_name=channel_name,
+            bound_projects=bound_projects,
+            project_squads_map=project_squads_map,
+        )
+    else:
+        embed = DiscordViewRouter.build_hub_embed(
+            channel_name=channel_name,
+            bound_projects=bound_projects,
+            project_squads_map=project_squads_map,
+        )
 
     if isinstance(channel, discord.ForumChannel):
         # 1. Setup standard tags first

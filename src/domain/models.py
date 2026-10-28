@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.actor import ActorPrincipal as ActorPrincipal
 from src.domain.enums import (
     EventType,
     NotificationPreference,
@@ -67,6 +68,7 @@ class TaskHistory(DomainModel):
     old_status: TaskStatus | None = None
     new_status: TaskStatus | None = None
     notes: str | None = None
+    diff_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -158,3 +160,10 @@ class GuildLeadRole(DomainModel):
     guild_id: int
     discord_role_id: int
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class UserCalendarToken(DomainModel):
+    user_discord_id: int
+    token: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

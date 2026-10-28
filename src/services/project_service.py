@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -8,11 +10,19 @@ from uuid import UUID
 from src.domain.exceptions import ProjectAlreadyExistsError, ProjectNotFoundError
 from src.domain.models import Project, ProjectSquad, Squad
 from src.ports.repositories import IProjectRepo
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 
-class ProjectService:
-    def __init__(self, project_repo: IProjectRepo):
+class ProjectService(TransactionalService):
+    def __init__(self, project_repo: IProjectRepo, uow: IUnitOfWork | None = None):
         self.project_repo = project_repo
+        self.uow = uow
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
+        async with super()._transaction(projects=self.project_repo) as active_uow:
+            yield active_uow
 
     @staticmethod
     def derive_default_prefix(name: str) -> str:
@@ -37,34 +47,53 @@ class ProjectService:
         lead_discord_id: int | None = None,
         category: str | None = None,
     ) -> Project:
-        # Check name uniqueness in guild
-        existing_name = await self.project_repo.get_by_name(guild_id, name)
-        if existing_name:
-            raise ProjectAlreadyExistsError(f"Project with name '{name}' already exists in this server.")
+        async with self._transaction() as uow:
+            # Check name uniqueness in guild
+            existing_name = await uow.projects.get_by_name(guild_id, name)
+            if existing_name:
+                raise ProjectAlreadyExistsError(f"Project with name '{name}' already exists in this server.")
 
-        assigned_prefix = (prefix or self.derive_default_prefix(name)).upper()
-        existing_prefix = await self.project_repo.get_by_prefix(guild_id, assigned_prefix)
-        if existing_prefix:
-            raise ProjectAlreadyExistsError(
-                f"Project prefix '{assigned_prefix}' is already in use by project '{existing_prefix.name}'."
+            assigned_prefix = (prefix or self.derive_default_prefix(name)).upper()
+            existing_prefix = await uow.projects.get_by_prefix(guild_id, assigned_prefix)
+            if existing_prefix:
+                raise ProjectAlreadyExistsError(
+                    f"Project prefix '{assigned_prefix}' is already in use by project '{existing_prefix.name}'."
+                )
+
+            role_ids = list(discord_role_ids or [])
+            if discord_role_id and discord_role_id not in role_ids:
+                role_ids.insert(0, discord_role_id)
+
+            # Auto-provision any missing squads for the specified role IDs
+            squad_ids: list[UUID] = []
+            if uow.squads:
+                for rid in role_ids:
+                    squad = await uow.squads.get_by_role_id(guild_id, rid)
+                    if not squad:
+                        squad = await uow.squads.create(
+                            Squad(
+                                guild_id=guild_id,
+                                name=f"Squad-{rid}",
+                                discord_role_id=rid,
+                            )
+                        )
+                    squad_ids.append(squad.id)
+
+            project = Project(
+                guild_id=guild_id,
+                name=name.strip(),
+                prefix=assigned_prefix,
+                next_task_number=1,
+                description=description.strip() if description else None,
+                discord_channel_id=discord_channel_id,
+                discord_role_ids=role_ids,
+                lead_discord_id=lead_discord_id,
+                category=category.strip() if category else None,
             )
-
-        role_ids = list(discord_role_ids or [])
-        if discord_role_id and discord_role_id not in role_ids:
-            role_ids.insert(0, discord_role_id)
-
-        project = Project(
-            guild_id=guild_id,
-            name=name.strip(),
-            prefix=assigned_prefix,
-            next_task_number=1,
-            description=description.strip() if description else None,
-            discord_channel_id=discord_channel_id,
-            discord_role_ids=role_ids,
-            lead_discord_id=lead_discord_id,
-            category=category.strip() if category else None,
-        )
-        return await self.project_repo.create(project)
+            created = await uow.projects.create(project)
+            for sid in squad_ids:
+                await uow.projects.assign_squad(ProjectSquad(project_id=created.id, squad_id=sid))
+            return created
 
     async def get_by_id(self, project_id: UUID) -> Project | None:
         return await self.project_repo.get_by_id(project_id)
@@ -94,21 +123,47 @@ class ProjectService:
         return task_num, short_id
 
     async def archive_project(self, project_id: UUID) -> Project | None:
-        return await self.project_repo.set_archived(project_id, is_archived=True)
+        async with self._transaction() as uow:
+            project = await uow.projects.set_archived(project_id, is_archived=True)
+            if project and uow.tasks:
+                await uow.tasks.set_archived_by_project(project_id, is_archived=True)
+            return project
 
     async def unarchive_project(self, project_id: UUID) -> Project | None:
-        return await self.project_repo.set_archived(project_id, is_archived=False)
+        async with self._transaction() as uow:
+            project = await uow.projects.set_archived(project_id, is_archived=False)
+            if project and uow.tasks:
+                await uow.tasks.set_archived_by_project(project_id, is_archived=False)
+            return project
 
     async def update_project_channel(self, project_id: UUID, discord_channel_id: int | None) -> Project | None:
-        return await self.project_repo.update_channel_id(project_id, discord_channel_id)
+        async with self._transaction() as uow:
+            return await uow.projects.update_channel_id(project_id, discord_channel_id)
 
     async def set_project_role(self, project_id: UUID, discord_role_id: int | None) -> Project | None:
         """Updates or clears the mapped contributor Discord role for a project."""
-        return await self.project_repo.update_role_id(project_id, discord_role_id)
+        async with self._transaction() as uow:
+            project = await uow.projects.get_by_id(project_id)
+            if not project:
+                return None
+            target_squad_id: UUID | None = None
+            if discord_role_id is not None and uow.squads:
+                squad = await uow.squads.get_by_role_id(project.guild_id, discord_role_id)
+                if not squad:
+                    squad = await uow.squads.create(
+                        Squad(
+                            guild_id=project.guild_id,
+                            name=f"Squad-{discord_role_id}",
+                            discord_role_id=discord_role_id,
+                        )
+                    )
+                target_squad_id = squad.id
+            return await uow.projects.update_role_id(project_id, discord_role_id, squad_id=target_squad_id)
 
     async def set_project_lead(self, project_id: UUID, lead_discord_id: int | None) -> Project | None:
         """Updates or clears the designated Project Lead Discord user for a project."""
-        return await self.project_repo.update_lead_id(project_id, lead_discord_id)
+        async with self._transaction() as uow:
+            return await uow.projects.update_lead_id(project_id, lead_discord_id)
 
     async def assign_squad_to_project(
         self,
@@ -117,16 +172,18 @@ class ProjectService:
         start_date: datetime | None = None,
         timeline: str | None = None,
     ) -> None:
-        ps = ProjectSquad(
-            project_id=project_id,
-            squad_id=squad_id,
-            start_date=start_date,
-            timeline=timeline,
-        )
-        await self.project_repo.assign_squad(ps)
+        async with self._transaction() as uow:
+            ps = ProjectSquad(
+                project_id=project_id,
+                squad_id=squad_id,
+                start_date=start_date,
+                timeline=timeline,
+            )
+            await uow.projects.assign_squad(ps)
 
     async def remove_squad_from_project(self, project_id: UUID, squad_id: UUID) -> None:
-        await self.project_repo.remove_squad(project_id, squad_id)
+        async with self._transaction() as uow:
+            await uow.projects.remove_squad(project_id, squad_id)
 
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         return await self.project_repo.list_squads_for_project(project_id)

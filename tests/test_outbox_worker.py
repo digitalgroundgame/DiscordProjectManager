@@ -1486,3 +1486,200 @@ async def test_task_updated_and_status_changed_preserve_due_at_during_workspace_
     assert synced_task_2.body == "Important description body"
     assert synced_task_2.priority == PriorityLevel.HIGH
     assert synced_task_2.status == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_task_unblocked_notification_delivery_preferences_and_workspace_sync(services, repos):
+    """Verify TASK_UNBLOCKED dispatches alert to assignees and watchers honoring user preferences,
+    excludes actor, and syncs workspace."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import NOTIFICATION_FOOTER, DiscordNotifier
+    from src.domain.enums import EventType, NotificationPreference, TaskStatus
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    outbox_repo = repos["outbox"]
+    guild_id = 999333444
+
+    # Configure notification preferences:
+    # 2001 (Assignee) -> BOTH (DM + Channel)
+    # 3001 (Watcher 1) -> DM
+    # 3002 (Watcher 2) -> CHANNEL
+    # 3003 (Watcher 3) -> NONE (Silent)
+    # 9999 (Actor / Completer, also in watchers) -> Excluded because actor
+    await user_srv.set_preference(guild_id, 2001, NotificationPreference.BOTH)
+    await user_srv.set_preference(guild_id, 3001, NotificationPreference.DM)
+    await user_srv.set_preference(guild_id, 3002, NotificationPreference.CHANNEL)
+    await user_srv.set_preference(guild_id, 3003, NotificationPreference.NONE)
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Infrastructure", prefix="INF")
+    task_a = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Backend Core",
+        creator_discord_id=1001,
+        project_id=project.id,
+    )
+    task_b = await task_srv.create_task(
+        guild_id=guild_id,
+        title="Frontend UI",
+        creator_discord_id=1001,
+        assignee_discord_id=2001,
+        watchers=[3001, 3002, 3003, 9999],
+        project_id=project.id,
+        prerequisite_short_ids=[task_a.short_id],
+    )
+    await task_srv.update_discord_message_ids(task_b.id, discord_message_id=222333444, discord_thread_id=111222333)
+
+    # Actor 9999 completes task_a -> triggers TASK_UNBLOCKED for task_b
+    await task_srv.update_status(
+        task_id=task_a.id,
+        new_status=TaskStatus.COMPLETED,
+        expected_version=task_a.version,
+        actor_discord_id=9999,
+    )
+
+    pending = await outbox_repo.fetch_pending_batch(limit=20)
+    unblock_evt = next(e for e in pending if e.event_type == EventType.TASK_UNBLOCKED)
+
+    bot = MagicMock()
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 111222333
+    mock_thread.send = AsyncMock()
+    mock_thread.parent = None
+    bot.get_channel = MagicMock(return_value=mock_thread)
+
+    dmd_users: dict[int, MagicMock] = {}
+
+    def get_mock_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=get_mock_user)
+    bot.fetch_user = AsyncMock(side_effect=get_mock_user)
+
+    workspace = MagicMock()
+    workspace.post_activity = AsyncMock(return_value=True)
+    workspace.sync_workspace = AsyncMock(return_value=True)
+
+    notifier = DiscordNotifier(
+        bot,
+        user_service=user_srv,
+        workspace=workspace,
+        task_service=task_srv,
+    )
+    await notifier.dispatch_event(unblock_evt)
+
+    expected_alert = (
+        "🎉 All prerequisite blockers for **[INF-2] Frontend UI** have completed! You are now clear to begin work."
+    )
+
+    # 1. Verify workspace activity and starter card sync
+    workspace.post_activity.assert_awaited_once()
+    activity_kwargs = workspace.post_activity.call_args.kwargs
+    assert activity_kwargs["content"] == expected_alert
+    workspace.sync_workspace.assert_awaited_once()
+    synced_task = workspace.sync_workspace.call_args.args[0]
+    assert synced_task.id == task_b.id
+
+    expected_jump_url = f"https://discord.com/channels/{guild_id}/111222333/222333444"
+
+    # 2. Verify DM delivery for 2001 (BOTH) and 3001 (DM)
+    for uid in (2001, 3001):
+        assert uid in dmd_users
+        assert dmd_users[uid].send.await_count == 1
+        dm_kwargs = dmd_users[uid].send.call_args.kwargs
+        embed = dm_kwargs["embed"]
+        view = dm_kwargs.get("view")
+        assert embed.title == "Task Unblocked: [INF-2] Frontend UI"
+        assert embed.description == expected_alert
+        assert embed.url == expected_jump_url
+        assert embed.footer.text == NOTIFICATION_FOOTER
+        assert any(f.name == "Resolved Prerequisites" and "[INF-1]" in f.value for f in embed.fields)
+        assert view is not None
+        assert view.children[0].url == expected_jump_url
+        assert view.children[0].label == "Open Task"
+
+    # 3. Verify 3002 (CHANNEL), 3003 (NONE), and 9999 (Actor) did NOT receive DMs
+    assert 3002 not in dmd_users
+    assert 3003 not in dmd_users
+    assert 9999 not in dmd_users
+
+    # 4. Verify in-thread notifications for 2001 (BOTH) and 3002 (CHANNEL)
+    assert mock_thread.send.await_count == 2
+    thread_contents = [call.kwargs["content"] for call in mock_thread.send.await_args_list]
+    assert any("<@2001>" in c and expected_alert in c for c in thread_contents)
+    assert any("<@3002>" in c and expected_alert in c for c in thread_contents)
+    for call in mock_thread.send.await_args_list:
+        assert call.kwargs.get("view") is not None
+        assert call.kwargs["view"].children[0].url == expected_jump_url
+
+
+@pytest.mark.asyncio
+async def test_structured_diffs_notification_formatting():
+    """Verify that structured domain diffs in outbox payload are formatted into Discord markdown and mentions."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.discord_notifier import DiscordNotifier
+    from src.domain.models import OutboxEvent
+
+    bot = MagicMock(spec=discord.Client)
+    dmd_users = {}
+
+    async def mock_get_or_fetch_user(uid: int):
+        if uid not in dmd_users:
+            u = MagicMock(spec=discord.User)
+            u.id = uid
+            u.send = AsyncMock()
+            dmd_users[uid] = u
+        return dmd_users[uid]
+
+    bot.get_user = MagicMock(side_effect=lambda uid: dmd_users.get(uid))
+    bot.fetch_user = AsyncMock(side_effect=mock_get_or_fetch_user)
+
+    mock_thread = MagicMock(spec=discord.Thread)
+    mock_thread.id = 555666
+    mock_thread.guild = MagicMock(id=111)
+    mock_thread.send = AsyncMock()
+    bot.get_channel = MagicMock(return_value=mock_thread)
+    bot.fetch_channel = AsyncMock(return_value=mock_thread)
+
+    notifier = DiscordNotifier(bot)
+
+    evt = OutboxEvent(
+        event_type=EventType.TASK_UPDATED,
+        idempotency_key="diff_test_1",
+        payload={
+            "task_id": "diff-task-1",
+            "short_id": "DIFF-1",
+            "title": "New Title",
+            "guild_id": 111,
+            "actor_discord_id": 9999,
+            "assignee_discord_id": 2001,
+            "watchers": [2001],
+            "diffs": [
+                {"field": "title", "old_value": "Old Title", "new_value": "New Title"},
+                {"field": "due_at", "new_value": "2026-12-01 12:00 UTC"},
+                {"field": "watchers", "action": "added", "user_ids": [3001, 3002]},
+            ],
+            "update_type": "details",
+            "discord_thread_id": 555666,
+        },
+    )
+
+    await notifier.dispatch_event(evt)
+    assert 2001 in dmd_users
+    dm_call = dmd_users[2001].send.call_args.kwargs
+    embed = dm_call["embed"]
+    assert "Title: `Old Title` ➔ **`New Title`**" in embed.description
+    assert "Due date set to `2026-12-01 12:00 UTC`" in embed.description
+    assert "Added watchers: <@3001>, <@3002>" in embed.description

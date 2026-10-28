@@ -1,8 +1,9 @@
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 
-from src.config import settings
+from src.config import Settings, get_settings
 from src.ports.notifier import INotificationDispatcher
 from src.ports.repositories import IOutboxRepo
 
@@ -14,19 +15,27 @@ class OutboxWorker:
         self,
         outbox_repo: IOutboxRepo,
         notifier: INotificationDispatcher,
-        poll_interval: float = settings.OUTBOX_POLL_INTERVAL_SECONDS,
-        batch_size: int = settings.OUTBOX_BATCH_SIZE,
-        max_retries: int = settings.OUTBOX_MAX_RETRIES,
-        backoff_cap_seconds: float = settings.OUTBOX_BACKOFF_CAP_SECONDS,
-        max_retention_hours: float = settings.OUTBOX_MAX_RETENTION_HOURS,
+        poll_interval: float | None = None,
+        batch_size: int | None = None,
+        max_retries: int | None = None,
+        backoff_cap_seconds: float | None = None,
+        max_retention_hours: float | None = None,
+        settings: Settings | None = None,
     ):
+        active_settings = settings or get_settings()
         self.outbox_repo = outbox_repo
         self.notifier = notifier
-        self.poll_interval = poll_interval
-        self.batch_size = batch_size
-        self.max_retries = max_retries
-        self.backoff_cap_seconds = backoff_cap_seconds
-        self.max_retention_hours = max_retention_hours
+        self.poll_interval = (
+            poll_interval if poll_interval is not None else active_settings.OUTBOX_POLL_INTERVAL_SECONDS
+        )
+        self.batch_size = batch_size if batch_size is not None else active_settings.OUTBOX_BATCH_SIZE
+        self.max_retries = max_retries if max_retries is not None else active_settings.OUTBOX_MAX_RETRIES
+        self.backoff_cap_seconds = (
+            backoff_cap_seconds if backoff_cap_seconds is not None else active_settings.OUTBOX_BACKOFF_CAP_SECONDS
+        )
+        self.max_retention_hours = (
+            max_retention_hours if max_retention_hours is not None else active_settings.OUTBOX_MAX_RETENTION_HOURS
+        )
         self._running = False
         self._stop_event = asyncio.Event()
 
@@ -83,11 +92,14 @@ class OutboxWorker:
             return 0
 
         logger.info("Processing outbox batch of %d events.", len(events))
+        start_time = time.monotonic()
         for event in events:
             if not self._running:
                 break
             await self._process_single_event(event)
 
+        elapsed = time.monotonic() - start_time
+        logger.info("Completed outbox batch of %d event(s) in %.2fs.", len(events), elapsed)
         return len(events)
 
     async def _process_single_event(self, event) -> None:

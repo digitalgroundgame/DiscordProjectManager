@@ -390,6 +390,66 @@ async def test_task_service_update_outbox_events(services, db_session):
     # Check payload structure for details update
     details_evt = next(e for e in events if e.idempotency_key.startswith(f"task_details:{task.id}"))
     assert details_evt.payload["update_type"] == "details"
-    assert "Title: `Original Title` ➔ **`Updated Title`**" in details_evt.payload["changes"]
-    assert "Added watchers: <@5002>" in details_evt.payload["changes"]
+    assert "Title: Original Title -> Updated Title" in details_evt.payload["changes"]
+    assert "Added watchers: 5002" in details_evt.payload["changes"]
     assert set(details_evt.payload["watchers"]) == {5001, 5002}
+    assert any(
+        d.get("field") == "title" and d.get("old_value") == "Original Title" and d.get("new_value") == "Updated Title"
+        for d in details_evt.payload.get("diffs", [])
+    )
+    assert any(
+        d.get("field") == "watchers" and d.get("action") == "added" and d.get("user_ids") == [5002]
+        for d in details_evt.payload.get("diffs", [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_workspace_lifecycle(services):
+    """Verifies that TaskService coordinates task creation and workspace provisioning in one workflow."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.ports.workspace import TaskWorkspacePort, TaskWorkspaceRef
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    guild_id = 44556677
+
+    project = await proj_srv.create_project(guild_id=guild_id, name="Unified Lifecycle", prefix="UL")
+    prereq = await task_srv.create_task(
+        guild_id=guild_id,
+        project_id=project.id,
+        title="Prerequisite Task",
+        creator_discord_id=1001,
+    )
+
+    mock_ws = MagicMock(spec=TaskWorkspacePort)
+    mock_ws.provision_workspace = AsyncMock(
+        return_value=TaskWorkspaceRef(
+            thread_id=987654,
+            message_id=987654,
+            channel_id=123456,
+            jump_url="https://discord.com/channels/1/2/3",
+        )
+    )
+    mock_ws.sync_workspace = AsyncMock(return_value=True)
+
+    task, ref = await task_srv.create_task_with_workspace(
+        guild_id=guild_id,
+        title="Orchestrated Task",
+        creator_discord_id=1001,
+        project_id=project.id,
+        prerequisite_short_ids=[prereq.short_id],
+        workspace=mock_ws,
+    )
+
+    assert ref is not None
+    assert ref.thread_id == 987654
+    assert task.discord_thread_id == 987654
+    assert task.discord_message_id == 987654
+
+    mock_ws.provision_workspace.assert_awaited_once()
+    mock_ws.sync_workspace.assert_awaited_once()
+
+    # Test sync_task_workspace
+    sync_res = await task_srv.sync_task_workspace(task.id, workspace=mock_ws)
+    assert sync_res is True

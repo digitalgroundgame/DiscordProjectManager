@@ -5,7 +5,6 @@ import inspect
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
 
 import discord
 
@@ -57,26 +56,28 @@ class MenuSessionManager:
         async def _dismiss() -> None:
             await asyncio.sleep(delay)
             try:
-                has_delete = hasattr(target, "delete") and callable(target.delete)
-                has_delete_orig = hasattr(target, "delete_original_response") and callable(
-                    target.delete_original_response
-                )
-
-                # If target only has delete() (e.g. WebhookMessage / Message)
-                # or if target.delete is an AsyncMock while delete_original_response is not
-                is_mock_delete = isinstance(getattr(target, "delete", None), AsyncMock)
-                is_mock_orig = isinstance(getattr(target, "delete_original_response", None), AsyncMock)
-
-                if has_delete and (
-                    not has_delete_orig
-                    or (discord and isinstance(target, (discord.WebhookMessage, discord.Message)))
-                    or (is_mock_delete and not is_mock_orig)
-                ):
+                if isinstance(target, (discord.WebhookMessage, discord.Message)):
                     res = target.delete()
                     if inspect.isawaitable(res):
                         await res
-                elif has_delete_orig:
+                elif isinstance(target, discord.Interaction):
                     res = target.delete_original_response()
+                    if inspect.isawaitable(res):
+                        await res
+                elif "delete" in getattr(target, "__dict__", {}):
+                    res = target.delete()
+                    if inspect.isawaitable(res):
+                        await res
+                elif "delete_original_response" in getattr(target, "__dict__", {}):
+                    res = target.delete_original_response()
+                    if inspect.isawaitable(res):
+                        await res
+                elif hasattr(target, "delete_original_response") and callable(target.delete_original_response):
+                    res = target.delete_original_response()
+                    if inspect.isawaitable(res):
+                        await res
+                elif hasattr(target, "delete") and callable(target.delete):
+                    res = target.delete()
                     if inspect.isawaitable(res):
                         await res
             except Exception as e:
@@ -87,7 +88,28 @@ class MenuSessionManager:
         task.add_done_callback(self._background_tasks.discard)
 
 
-menu_manager = MenuSessionManager()
+_default_menu_manager: MenuSessionManager | None = None
+
+
+def get_menu_manager() -> MenuSessionManager:
+    """Return the active MenuSessionManager instance, creating it lazily if not set."""
+    global _default_menu_manager
+    if _default_menu_manager is None:
+        _default_menu_manager = MenuSessionManager()
+    return _default_menu_manager
+
+
+def set_menu_manager(manager: MenuSessionManager | None) -> None:
+    """Explicitly assign the active MenuSessionManager instance from container or test."""
+    global _default_menu_manager
+    _default_menu_manager = manager
+
+
+def __getattr__(name: str) -> Any:
+    """Provide lazy backwards compatibility for 'from src.adapters.discord_bot.menu_manager import menu_manager'."""
+    if name == "menu_manager":
+        return get_menu_manager()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def attach_dismissal_notice(

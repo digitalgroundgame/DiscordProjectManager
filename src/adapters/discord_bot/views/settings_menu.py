@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import NotificationPreference
 
 if TYPE_CHECKING:
+    from src.services.calendar_service import CalendarService
     from src.services.project_service import ProjectService
     from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
@@ -57,6 +59,7 @@ class UserSettingsView(BaseView):
         project_service: ProjectService | None = None,
         squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
+        calendar_service: CalendarService | None = None,
         initial_interaction: discord.Interaction | None = None,
         return_to: str = "dashboard",
     ):
@@ -66,6 +69,7 @@ class UserSettingsView(BaseView):
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
+        self.calendar_service = calendar_service
         self.return_to = return_to
         self._initial_interaction = initial_interaction
 
@@ -129,7 +133,7 @@ class UserSettingsView(BaseView):
         none_btn.callback = lambda i: self._on_pref_clicked(i, NotificationPreference.NONE)
         self.add_item(none_btn)
 
-        # Row 1: Test & Back to Hub
+        # Row 1: Test, Calendar Feed & Back to Hub
         test_btn = discord.ui.Button(
             label="Test Notification",
             style=discord.ButtonStyle.primary,
@@ -137,6 +141,16 @@ class UserSettingsView(BaseView):
         )
         test_btn.callback = self._on_test_clicked
         self.add_item(test_btn)
+
+        if self.calendar_service:
+            cal_btn = discord.ui.Button(
+                label="Calendar Feed",
+                style=discord.ButtonStyle.secondary,
+                emoji="📅",
+                row=1,
+            )
+            cal_btn.callback = self._on_calendar_clicked
+            self.add_item(cal_btn)
 
         if self.project_service and self.squad_service and self.task_service:
             back_btn = discord.ui.Button(
@@ -146,6 +160,21 @@ class UserSettingsView(BaseView):
             )
             back_btn.callback = self._on_hub_clicked
             self.add_item(back_btn)
+
+    async def _on_calendar_clicked(self, interaction: discord.Interaction) -> None:
+        if not self.calendar_service:
+            await interaction.response.send_message("❌ Calendar service is not available.", ephemeral=True)
+            return
+
+        try:
+            embed, view = await DiscordViewRouter.build_calendar_feed_view(
+                self.calendar_service,
+                interaction.user,
+                initial_interaction=interaction,
+            )
+            await interaction.response.edit_message(content=None, embed=embed, view=view)
+        except Exception as e:
+            await send_interaction_error(interaction, e, "retrieving calendar feed", logger, ephemeral=True)
 
     async def _on_test_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -231,8 +260,6 @@ class UserSettingsView(BaseView):
 
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
         if self.return_to == "dashboard" and interaction.guild:
-            from src.adapters.discord_bot.views.admin_menu import PmDashboardView, build_pm_dashboard_embed
-
             projects = (
                 await self.project_service.list_projects(interaction.guild.id, include_archived=False)
                 if self.project_service
@@ -241,31 +268,25 @@ class UserSettingsView(BaseView):
             _, count = (
                 await self.task_service.list_tasks(interaction.guild.id, limit=1) if self.task_service else ([], 0)
             )
-            view = PmDashboardView(
-                self.project_service,
-                self.squad_service,
-                self.task_service,
-                self.user_service,
-                initial_interaction=interaction,
-            )
-            embed = build_pm_dashboard_embed(
+            embed, view = DiscordViewRouter.build_admin_dashboard(
                 guild=interaction.guild,
                 user=interaction.user,
+                project_service=self.project_service,
+                squad_service=self.squad_service,
+                task_service=self.task_service,
+                user_service=self.user_service,
+                initial_interaction=interaction,
                 active_projects=projects,
                 active_tasks_count=count,
                 current_pref=self.current_pref,
-                is_server_manager=view.is_server_manager,
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         else:
-            from src.adapters.discord_bot.views.hub_menu import PmHubView, build_hub_welcome_embed
-
             if self.project_service and self.squad_service and self.task_service:
-                view = PmHubView(
+                embed, view = DiscordViewRouter.build_hub_view(
                     self.project_service,
                     self.squad_service,
                     self.task_service,
                     self.user_service,
                 )
-                embed = build_hub_welcome_embed()
                 await interaction.response.edit_message(content=None, embed=embed, view=view)

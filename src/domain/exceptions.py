@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class DggPmError(Exception):
     """Base exception for all domain and service errors in dgg-pm."""
@@ -49,3 +51,19 @@ class StaleVersionError(DomainError):
 
 class PermissionDeniedError(DomainError):
     """Raised when an actor lacks authorization to perform a mutating action."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        user_id: int | None = None,
+        required_role_ids: set[int] | frozenset[int] | None = None,
+        project_id: Any | None = None,
+        **metadata: Any,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.user_id = user_id
+        self.required_role_ids = frozenset(required_role_ids or ())
+        self.project_id = project_id
+        self.metadata = metadata

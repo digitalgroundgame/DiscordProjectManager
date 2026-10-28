@@ -1769,6 +1769,51 @@ async def test_bot_on_ready_triggers_failed_outbox_reconciliation(services):
     mock_outbox_svc.reclaim_failed_events.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_bot_gateway_lifecycle_logging_on_connect_disconnect_resumed(services):
+    """Verify DggPmBot gateway lifecycle hooks (on_connect, on_disconnect, on_resumed) track downtime and
+    reconcile outbox."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.adapters.discord_bot.bot import DggPmBot
+
+    mock_outbox_svc = MagicMock()
+    mock_outbox_svc.reclaim_failed_events = AsyncMock(return_value=1)
+
+    bot = DggPmBot(
+        project_service=services["project"],
+        squad_service=services["squad"],
+        task_service=services["task"],
+        user_service=services["user"],
+        outbox_service=mock_outbox_svc,
+    )
+
+    # 1. on_connect
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_connect()
+        mock_logger.info.assert_called()
+        assert "Connected to Discord Gateway" in mock_logger.info.call_args[0][0]
+
+    # 2. on_disconnect
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_disconnect()
+        assert bot._disconnected_at is not None
+        mock_logger.warning.assert_called()
+        assert "Disconnected from Discord Gateway" in mock_logger.warning.call_args[0][0]
+
+    # 3. on_resumed
+    with patch("src.adapters.discord_bot.bot.logger") as mock_logger:
+        await bot.on_resumed()
+        assert bot._disconnected_at is None
+        mock_logger.info.assert_called()
+        assert "Discord Gateway session resumed" in mock_logger.info.call_args[0][0]
+        # Yield control to allow background asyncio reconciliation task to execute
+        await asyncio.sleep(0.01)
+
+    mock_outbox_svc.reclaim_failed_events.assert_awaited()
+
+
 def test_task_status_command_parameters():
     """Verify that task-status command supports optional 'force' parameter."""
     cmd = PmCog.task_status
@@ -2275,3 +2320,217 @@ async def test_pm_cog_help_command_does_not_mention_squad_commands():
     assert "/pm squad" not in embed.description
     assert "/pm project role" in embed.description
     assert "/pm project lead" in embed.description
+
+
+def test_task_create_command_parameters_include_prereqs():
+    """Verify that /pm task create command parameters include optional prereqs."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    cmd = PmCog.task_create
+    params = {p.name: p for p in cmd.parameters}
+
+    assert "project_name" in params
+    assert params["project_name"].required is True
+
+    assert "title" in params
+    assert params["title"].required is True
+
+    assert "prereqs" in params
+    assert params["prereqs"].required is False
+
+
+def test_extract_short_ids_helper():
+    """Verify extraction and normalization of task short IDs."""
+    from src.adapters.discord_bot.cogs.pm_cog import extract_short_ids
+
+    assert extract_short_ids(None) == []
+    assert extract_short_ids("") == []
+    assert extract_short_ids("   ") == []
+    assert extract_short_ids("invalid without dash") == []
+
+    # Single ID
+    assert extract_short_ids("INF-1") == ["INF-1"]
+    assert extract_short_ids("inf-1") == ["INF-1"]
+    assert extract_short_ids("#INF-1") == ["INF-1"]
+    assert extract_short_ids("`INF-1`") == ["INF-1"]
+    assert extract_short_ids("[INF-1]") == ["INF-1"]
+
+    # Multiple separated by commas, spaces, semicolons
+    assert extract_short_ids("INF-1, INF-2, INF-3") == ["INF-1", "INF-2", "INF-3"]
+    assert extract_short_ids("INF-1 INF-2; INF-3") == ["INF-1", "INF-2", "INF-3"]
+    assert extract_short_ids("  #inf-1,  `inf-2` ; [inf-3]  ") == ["INF-1", "INF-2", "INF-3"]
+
+    # Deduplication
+    assert extract_short_ids("INF-1, INF-1, INF-2") == ["INF-1", "INF-2"]
+
+
+@pytest.mark.asyncio
+async def test_task_create_with_prereqs_success(services):
+    """Verify /pm task create successfully links specified prerequisites."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    bot = MagicMock()
+
+    guild_id = 123456789
+    project = await proj_srv.create_project(guild_id=guild_id, name="Infra", prefix="INF", discord_role_id=999)
+
+    # Create two prerequisite tasks
+    prereq1 = await task_srv.create_task(
+        guild_id=guild_id,
+        project_id=project.id,
+        title="Setup network",
+        creator_discord_id=1001,
+    )
+    prereq2 = await task_srv.create_task(
+        guild_id=guild_id,
+        project_id=project.id,
+        title="Configure firewall",
+        creator_discord_id=1001,
+    )
+
+    cog = PmCog(bot=bot, project_service=proj_srv, task_service=task_srv)
+
+    mock_channel = MagicMock(spec=discord.TextChannel)
+    mock_channel.id = 555
+    mock_msg = MagicMock()
+    mock_msg.id = 999
+    mock_thread = MagicMock()
+    mock_thread.id = 888
+    mock_msg.create_thread = AsyncMock(return_value=mock_thread)
+    mock_channel.send = AsyncMock(return_value=mock_msg)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock()
+    interaction.guild.id = guild_id
+    mock_channel.guild = interaction.guild
+    interaction.user = MagicMock()
+    interaction.user.id = 1001
+    interaction.channel = mock_channel
+    interaction.channel_id = 555
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_create.callback(
+        cog,
+        interaction=interaction,
+        project_name="Infra",
+        title="Deploy app",
+        prereqs=f"{prereq1.short_id}, {prereq2.short_id}",
+    )
+
+    interaction.followup.send.assert_awaited_once()
+    call_args = interaction.followup.send.call_args
+    sent_text = call_args[0][0]
+    assert "Prerequisites" in sent_text
+    assert prereq1.short_id in sent_text
+    assert prereq2.short_id in sent_text
+
+    # Verify task in DB has prerequisites linked
+    tasks, _ = await task_srv.list_tasks(guild_id=guild_id, project_id=project.id)
+    new_task = next(t for t in tasks if t.title == "Deploy app")
+    prereqs, _ = await task_srv.get_task_dependencies(new_task.id)
+    prereq_ids = [p.short_id for p in prereqs]
+    assert prereq1.short_id in prereq_ids
+    assert prereq2.short_id in prereq_ids
+
+
+@pytest.mark.asyncio
+async def test_task_create_with_invalid_prereqs_format(services):
+    """Verify /pm task create rejects prereqs string without valid short IDs."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    bot = MagicMock()
+
+    guild_id = 123456789
+    await proj_srv.create_project(guild_id=guild_id, name="Infra", prefix="INF", discord_role_id=999)
+
+    cog = PmCog(bot=bot, project_service=proj_srv, task_service=task_srv)
+
+    mock_channel = MagicMock(spec=discord.TextChannel)
+    mock_channel.id = 555
+    mock_msg = MagicMock()
+    mock_msg.id = 999
+    mock_thread = MagicMock()
+    mock_thread.id = 888
+    mock_msg.create_thread = AsyncMock(return_value=mock_thread)
+    mock_channel.send = AsyncMock(return_value=mock_msg)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock()
+    interaction.guild.id = guild_id
+    mock_channel.guild = interaction.guild
+    interaction.user = MagicMock()
+    interaction.user.id = 1001
+    interaction.channel = mock_channel
+    interaction.channel_id = 555
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_create.callback(
+        cog,
+        interaction=interaction,
+        project_name="Infra",
+        title="Deploy app",
+        prereqs="invalid_no_dash",
+    )
+
+    interaction.followup.send.assert_awaited_once()
+    sent_text = interaction.followup.send.call_args[0][0]
+    assert "Could not parse any valid task short IDs" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_task_create_with_nonexistent_prereq(services):
+    """Verify /pm task create rejects prereqs with non-existent short ID."""
+    from src.adapters.discord_bot.cogs.pm_cog import PmCog
+
+    proj_srv = services["project"]
+    task_srv = services["task"]
+    bot = MagicMock()
+
+    guild_id = 123456789
+    await proj_srv.create_project(guild_id=guild_id, name="Infra", prefix="INF", discord_role_id=999)
+
+    cog = PmCog(bot=bot, project_service=proj_srv, task_service=task_srv)
+
+    mock_channel = MagicMock(spec=discord.TextChannel)
+    mock_channel.id = 555
+    mock_msg = MagicMock()
+    mock_msg.id = 999
+    mock_thread = MagicMock()
+    mock_thread.id = 888
+    mock_msg.create_thread = AsyncMock(return_value=mock_thread)
+    mock_channel.send = AsyncMock(return_value=mock_msg)
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = MagicMock()
+    interaction.guild.id = guild_id
+    mock_channel.guild = interaction.guild
+    interaction.user = MagicMock()
+    interaction.user.id = 1001
+    interaction.channel = mock_channel
+    interaction.channel_id = 555
+    interaction.response = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await cog.task_create.callback(
+        cog,
+        interaction=interaction,
+        project_name="Infra",
+        title="Deploy app",
+        prereqs="INF-999",
+    )
+
+    interaction.followup.send.assert_awaited_once()
+    sent_text = interaction.followup.send.call_args[0][0]
+    assert "Prerequisite task `INF-999` was not found" in sent_text

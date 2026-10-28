@@ -4,8 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from src.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.models import Project, Task
-from src.ports.repositories import IOutboxRepo, IProjectRepo, ITaskRepo
-from src.ports.unit_of_work import IUnitOfWork
+from src.ports.repositories import (
+    IGuildLeadRoleRepository,
+    IGuildLeadUserRepository,
+    IOutboxRepo,
+    IProjectRepo,
+    ISquadRepo,
+    ITaskRepo,
+    IUserCalendarTokenRepo,
+    IUserPreferenceRepo,
+)
+from src.ports.unit_of_work import IUnitOfWork, NullUnitOfWork
 
 
 @pytest.mark.asyncio
@@ -131,3 +140,206 @@ async def test_task_service_rollback_on_outbox_failure(async_engine: AsyncEngine
         tasks, count = await uow.tasks.list_tasks(guild_id=55555, project_id=p.id)
         assert count == 0
         assert len(tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_task_service_atomic_rollback_on_prerequisite_failure(async_engine: AsyncEngine, monkeypatch):
+    """Test that if an explicit prerequisite fails or introduces a cycle after task creation, TaskService rolls back."""
+    session_factory = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    uow: IUnitOfWork = SqlAlchemyUnitOfWork(session_factory)
+
+    from src.domain.exceptions import TaskNotFoundError, ValidationError
+    from src.services.outbox_service import OutboxService
+    from src.services.project_service import ProjectService
+    from src.services.task_service import TaskService
+
+    proj_svc = ProjectService(uow.projects, uow=uow)
+    outbox_svc = OutboxService(uow.outbox)
+    task_svc = TaskService(uow.tasks, proj_svc, outbox_svc, uow=uow)
+
+    async with uow:
+        p = await proj_svc.create_project(guild_id=77777, name="Atomic Mission", prefix="ATM")
+        await uow.commit()
+
+    # 1. Attempt to create task with a non-existent prerequisite
+    with pytest.raises(TaskNotFoundError, match="Prerequisite task 'ATM-999' was not found"):
+        await task_svc.create_task(
+            guild_id=77777,
+            title="Broken Task",
+            creator_discord_id=1234,
+            project_id=p.id,
+            prerequisite_short_ids=["ATM-999"],
+        )
+
+    async with uow:
+        tasks, count = await uow.tasks.list_tasks(guild_id=77777, project_id=p.id)
+        assert count == 0
+        assert len(tasks) == 0
+
+    # 2. Create a valid base task ATM-1, then force a cycle/validation failure inside add_dependency
+    # AFTER uow.tasks.create(task) has already flushed ATM-2 into the session.
+    base_task = await task_svc.create_task(
+        guild_id=77777,
+        title="Base Prerequisite Task",
+        creator_discord_id=1234,
+        project_id=p.id,
+    )
+    assert base_task.short_id == "ATM-1"
+
+    orig_add_dep = task_svc.add_dependency
+
+    async def fail_with_cycle_on_second(
+        guild_id: int,
+        task_short_id: str,
+        depends_on_short_id: str,
+        actor_discord_id: int | None = None,
+    ) -> bool:
+        if depends_on_short_id == "ATM-1":
+            raise ValidationError("Circular dependency detected between ATM-2 and ATM-1")
+        return await orig_add_dep(guild_id, task_short_id, depends_on_short_id, actor_discord_id)
+
+    monkeypatch.setattr(task_svc, "add_dependency", fail_with_cycle_on_second)
+
+    with pytest.raises(ValidationError, match="Circular dependency detected"):
+        await task_svc.create_task(
+            guild_id=77777,
+            title="Task Whose Prerequisite Cycle Fails Post-Insert",
+            creator_discord_id=1234,
+            project_id=p.id,
+            prerequisite_short_ids=["ATM-1"],
+        )
+
+    # Verify ATM-2 was rolled back and only ATM-1 exists in the database
+    async with uow:
+        tasks, count = await uow.tasks.list_tasks(guild_id=77777, project_id=p.id)
+        assert count == 1
+        assert [t.short_id for t in tasks] == ["ATM-1"]
+
+
+@pytest.mark.asyncio
+async def test_uow_exposes_all_domain_repositories(async_engine: AsyncEngine):
+    """Assert all 8 repositories are accessible via IUnitOfWork interface."""
+    session_factory = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    uow: IUnitOfWork = SqlAlchemyUnitOfWork(session_factory)
+
+    async with uow:
+        assert isinstance(uow.tasks, ITaskRepo)
+        assert isinstance(uow.projects, IProjectRepo)
+        assert isinstance(uow.squads, ISquadRepo)
+        assert isinstance(uow.outbox, IOutboxRepo)
+        assert isinstance(uow.user_prefs, IUserPreferenceRepo)
+        assert isinstance(uow.guild_lead_roles, IGuildLeadRoleRepository)
+        assert isinstance(uow.guild_lead_users, IGuildLeadUserRepository)
+        assert isinstance(uow.calendar_tokens, IUserCalendarTokenRepo)
+
+
+@pytest.mark.asyncio
+async def test_null_unit_of_work():
+    """Verify NullUnitOfWork adheres to IUnitOfWork interface without raising."""
+    null_uow = NullUnitOfWork()
+    assert null_uow.tasks is None
+    assert null_uow.projects is None
+    assert null_uow.squads is None
+    assert null_uow.outbox is None
+    assert null_uow.user_prefs is None
+    assert null_uow.guild_lead_roles is None
+    assert null_uow.guild_lead_users is None
+    assert null_uow.calendar_tokens is None
+
+    async with null_uow as active:
+        assert active is null_uow
+        await null_uow.commit()
+        await null_uow.rollback()
+    assert null_uow.session is None
+
+
+@pytest.mark.asyncio
+async def test_uow_supports_reentrant_nested_blocks(async_engine: AsyncEngine):
+    """Test that nested 'async with uow:' blocks participate in the same transaction."""
+    session_factory = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    uow = SqlAlchemyUnitOfWork(session_factory)
+    guild_id = 1234567
+
+    async with uow:
+        p = await uow.projects.create(Project(guild_id=guild_id, name="Nested Project", prefix="NEST"))
+        outer_session = uow.session
+
+        # Enter inner block on the same UoW instance
+        async with uow:
+            inner_session = uow.session
+            assert inner_session is outer_session  # Shares outer session
+
+            task = await uow.tasks.create(
+                Task(
+                    guild_id=guild_id,
+                    project_id=p.id,
+                    short_id="NEST-1",
+                    task_number=1,
+                    title="Nested Task",
+                    creator_discord_id=101,
+                    status=TaskStatus.NOT_STARTED,
+                    priority=PriorityLevel.NORMAL,
+                    version=1,
+                )
+            )
+            assert task is not None
+
+        # Exiting inner block does not close outer session
+        assert uow.session is outer_session
+        loaded_p = await uow.projects.get_by_name(guild_id, "Nested Project")
+        assert loaded_p is not None
+
+    # After outer block exits, changes are committed and session is closed
+    with pytest.raises(RuntimeError, match="outside of an active async context"):
+        _ = uow.session
+
+    async with uow:
+        committed_task = await uow.tasks.get_by_short_id(guild_id, "NEST-1")
+        assert committed_task is not None
+        assert committed_task.title == "Nested Task"
+
+
+@pytest.mark.asyncio
+async def test_uow_concurrent_coroutines_have_isolated_sessions(async_engine: AsyncEngine):
+    """Test that concurrent coroutines using the same UoW instance receive isolated sessions."""
+    import asyncio
+
+    session_factory = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    shared_uow = SqlAlchemyUnitOfWork(session_factory)
+    sessions: list[AsyncSession] = []
+
+    async def worker(index: int):
+        async with shared_uow:
+            sessions.append(shared_uow.session)
+            await shared_uow.projects.create(
+                Project(guild_id=8888, name=f"Concurrent Project {index}", prefix=f"C{index}")
+            )
+            await asyncio.sleep(0.01)  # Context switch while inside UoW
+
+    await asyncio.gather(worker(1), worker(2), worker(3))
+
+    # All 3 workers must have received unique sessions
+    assert len(sessions) == 3
+    assert len(set(sessions)) == 3
+
+    # All 3 projects committed cleanly
+    async with shared_uow:
+        for idx in (1, 2, 3):
+            proj = await shared_uow.projects.get_by_name(8888, f"Concurrent Project {idx}")
+            assert proj is not None

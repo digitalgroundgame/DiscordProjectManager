@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from src.domain.enums import SquadRoleType
 from src.domain.exceptions import SquadAlreadyExistsError
 from src.domain.models import Squad, SquadMember
 from src.ports.repositories import ISquadRepo
+from src.ports.unit_of_work import IUnitOfWork
+from src.services.base import TransactionalService
 
 
-class SquadService:
-    def __init__(self, squad_repo: ISquadRepo):
+class SquadService(TransactionalService):
+    def __init__(self, squad_repo: ISquadRepo, uow: IUnitOfWork | None = None):
         self.squad_repo = squad_repo
+        self.uow = uow
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncGenerator[IUnitOfWork]:
+        async with super()._transaction(squads=self.squad_repo) as active_uow:
+            yield active_uow
 
     async def create_squad(
         self,
@@ -18,16 +28,17 @@ class SquadService:
         name: str,
         discord_role_id: int,
     ) -> Squad:
-        existing = await self.squad_repo.get_by_name(guild_id, name)
-        if existing:
-            raise SquadAlreadyExistsError(f"Squad with name '{name}' already exists in this server.")
+        async with self._transaction() as uow:
+            existing = await uow.squads.get_by_name(guild_id, name)
+            if existing:
+                raise SquadAlreadyExistsError(f"Squad with name '{name}' already exists in this server.")
 
-        squad = Squad(
-            guild_id=guild_id,
-            name=name.strip(),
-            discord_role_id=discord_role_id,
-        )
-        return await self.squad_repo.create(squad)
+            squad = Squad(
+                guild_id=guild_id,
+                name=name.strip(),
+                discord_role_id=discord_role_id,
+            )
+            return await uow.squads.create(squad)
 
     async def get_by_id(self, squad_id: UUID) -> Squad | None:
         return await self.squad_repo.get_by_id(squad_id)
@@ -45,26 +56,29 @@ class SquadService:
         role_name: str,
     ) -> Squad:
         """Finds an existing squad by role ID or name, or creates a new one."""
-        squad = await self.squad_repo.get_by_role_id(guild_id, role_id)
-        if squad:
-            return squad
+        async with self._transaction() as uow:
+            squad = await uow.squads.get_by_role_id(guild_id, role_id)
+            if squad:
+                return squad
 
-        squad_by_name = await self.squad_repo.get_by_name(guild_id, role_name.strip())
-        if squad_by_name:
-            return squad_by_name
+            squad_by_name = await uow.squads.get_by_name(guild_id, role_name.strip())
+            if squad_by_name:
+                return squad_by_name
 
-        new_squad = Squad(
-            guild_id=guild_id,
-            name=role_name.strip(),
-            discord_role_id=role_id,
-        )
-        return await self.squad_repo.create(new_squad)
+            new_squad = Squad(
+                guild_id=guild_id,
+                name=role_name.strip(),
+                discord_role_id=role_id,
+            )
+            return await uow.squads.create(new_squad)
 
     async def add_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
-        await self.squad_repo.add_squad_lead(squad_id, user_discord_id)
+        async with self._transaction() as uow:
+            await uow.squads.add_squad_lead(squad_id, user_discord_id)
 
     async def remove_squad_lead(self, squad_id: UUID, user_discord_id: int) -> None:
-        await self.squad_repo.remove_squad_lead(squad_id, user_discord_id)
+        async with self._transaction() as uow:
+            await uow.squads.remove_squad_lead(squad_id, user_discord_id)
 
     async def list_squad_leads(self, squad_id: UUID) -> list[int]:
         return await self.squad_repo.list_squad_leads(squad_id)
@@ -78,12 +92,13 @@ class SquadService:
         user_discord_id: int,
         role_type: SquadRoleType = SquadRoleType.MEMBER,
     ) -> None:
-        member = SquadMember(
-            squad_id=squad_id,
-            user_discord_id=user_discord_id,
-            role_type=role_type,
-        )
-        await self.squad_repo.assign_member(member)
+        async with self._transaction() as uow:
+            member = SquadMember(
+                squad_id=squad_id,
+                user_discord_id=user_discord_id,
+                role_type=role_type,
+            )
+            await uow.squads.assign_member(member)
 
     async def list_squads(self, guild_id: int) -> list[Squad]:
         return await self.squad_repo.list_squads(guild_id)
