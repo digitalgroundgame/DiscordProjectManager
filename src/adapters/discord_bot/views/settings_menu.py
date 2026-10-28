@@ -146,7 +146,6 @@ class UserSettingsView(BaseView):
             cal_btn = discord.ui.Button(
                 label="Calendar Feed",
                 style=discord.ButtonStyle.secondary,
-                emoji="📅",
                 row=1,
             )
             cal_btn.callback = self._on_calendar_clicked

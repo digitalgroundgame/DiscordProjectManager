@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -109,16 +109,46 @@ async def get_calendar_feed(
 
 @api_app.get("/calendar/{token}/subscribe")
 async def subscribe_calendar_redirect(
+    request: Request,
     token: str,
     format: str = Query(default="event"),
     calendar_service: CalendarService = Depends(get_calendar_service),
-) -> RedirectResponse:
-    """Redirects https:// requests to webcal:// for 1-click subscription from clients like Discord."""
+) -> Response:
+    """Redirects https:// requests to webcal:// for 1-click subscription from clients like Discord,
+    or serves the RFC 5545 iCalendar stream directly when fetched by Google Calendar or crawlers."""
     clean_token = token[:-4] if token.endswith(".ics") else token
     user_id = await calendar_service.get_user_id_by_token(clean_token)
     if user_id is None:
         raise HTTPException(status_code=404, detail="Invalid or expired calendar subscription token.")
 
+    format_lower = format.lower().strip()
+    if format_lower not in ("event", "todo", "both", "gcal"):
+        format_lower = "event"
+
     urls = calendar_service.build_feed_urls(clean_token)
-    target = urls["todo_webcal_url"] if format.lower().strip() == "todo" else urls["webcal_url"]
+
+    if format_lower == "gcal":
+        return RedirectResponse(url=urls["gcal_url"], status_code=307)
+
+    user_agent = request.headers.get("user-agent", "").lower()
+    accept_header = request.headers.get("accept", "").lower()
+
+    # Google Calendar's fetch bot (Google-Calendar-Importer / Feedfetcher-Google) cannot follow redirects
+    # to the webcal:// pseudo-protocol. If fetched by Google or clients requesting text/calendar,
+    # serve the iCalendar feed directly.
+    if any(bot in user_agent for bot in ("google", "feedfetcher", "calendarbot")) or "text/calendar" in accept_header:
+        feed_format = "event" if format_lower not in ("todo", "both") else format_lower
+        ics_content = await calendar_service.get_calendar_feed(clean_token, format_type=feed_format)
+        if ics_content is None:
+            raise HTTPException(status_code=404, detail="Invalid or expired calendar subscription token.")
+        return Response(
+            content=ics_content,
+            media_type="text/calendar; charset=utf-8",
+            headers={
+                "Content-Disposition": 'inline; filename="tasks.ics"',
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+        )
+
+    target = urls["todo_webcal_url"] if format_lower == "todo" else urls["webcal_url"]
     return RedirectResponse(url=target, status_code=307)

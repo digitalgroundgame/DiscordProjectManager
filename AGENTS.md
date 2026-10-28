@@ -64,6 +64,13 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
 3. **Strangler Fig Migration & Re-export Policy**:
    - When moving classes or modules during phased refactorings, maintain backwards-compatible re-exports in legacy module locations until Phase 5 to prevent breaking existing views/tests mid-migration.
 
+## UI / UX Design & Presentation Rules
+
+1. **Button & Component Emoji Policy**:
+   - Avoid decorative or excessive emojis across embeds, messages, and UI components.
+   - **Buttons**: Emojis should **ONLY** be used on buttons if they tangibly improve UX (e.g., status color indicators like `🟡`/`🟢` or layout orientation arrows like `↔️`/`↕️`). Never add emojis to buttons purely for decoration if a clear text label suffices.
+
+
 ## LLM Agent Workflow Protocol
 
 When working on GitHub issues or project migration tasks:
