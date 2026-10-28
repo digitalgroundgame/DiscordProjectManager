@@ -1,6 +1,6 @@
 [project]
 name = "dgg-pm"
-version = "0.2.3"
+version = "0.3.0b1"
 description = "Discord-Native Task Management Platform with Hexagonal Architecture and RFC 5545 Portability"
 readme = "README.md"
 license = { text = "MIT" }
