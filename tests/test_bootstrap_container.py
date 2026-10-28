@@ -55,6 +55,7 @@ async def test_container_wires_all_services_and_adapters(
     assert container.user_service is not None
     assert container.calendar_service is not None
     assert container.observability_service is not None
+    assert container.workspace_service is not None
 
     # Verify Adapters & Driving Infrastructure
     assert container.uow is not None

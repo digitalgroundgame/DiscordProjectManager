@@ -262,6 +262,7 @@ class PostgresTaskRepo(BasePostgresRepo, ITaskRepo):
         overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
+        count_total: bool = True,
     ) -> tuple[list[Task], int]:
         async with self._get_session() as session:
             filters = [TaskTable.guild_id == guild_id]
@@ -282,10 +283,13 @@ class PostgresTaskRepo(BasePostgresRepo, ITaskRepo):
                 filters.append(TaskTable.status != TaskStatus.COMPLETED.value)
                 filters.append(TaskTable.archived_at.is_(None))
 
-            # Count total
-            count_stmt = select(func.count()).select_from(TaskTable).where(*filters)
-            total_res = await session.execute(count_stmt)
-            total_count = total_res.scalar() or 0
+            # Count total only when requested
+            if count_total:
+                count_stmt = select(func.count()).select_from(TaskTable).where(*filters)
+                total_res = await session.execute(count_stmt)
+                total_count = total_res.scalar() or 0
+            else:
+                total_count = -1
 
             # Fetch records
             stmt = (

@@ -42,6 +42,7 @@ from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
+from src.services.workspace_service import WorkspaceService
 
 logger = logging.getLogger("dgg_pm.bootstrap")
 
@@ -81,6 +82,7 @@ class AppContainer:
         uvicorn_server: uvicorn.Server,
         auth_service: AuthService | None = None,
         member_directory: MemberDirectoryPort | None = None,
+        workspace_service: WorkspaceService | None = None,
     ) -> None:
         self.settings = settings
         self.engine = engine
@@ -104,6 +106,7 @@ class AppContainer:
         self.user_service = user_service
         self.calendar_service = calendar_service
         self.observability_service = observability_service
+        self.workspace_service = workspace_service
         self.menu_manager = menu_manager
         self.bot = bot
         self.notifier = notifier
@@ -191,6 +194,12 @@ def create_container(
         base_url=resolved_settings.PUBLIC_BASE_URL,
     )
     observability_service = ObservabilityService(metrics_adapter)
+    workspace_service = WorkspaceService(
+        project_repo=project_repo,
+        task_repo=task_repo,
+        squad_repo=squad_repo,
+        uow=uow,
+    )
 
     # 3. FastAPI App Wiring
     api_app.state.calendar_service = calendar_service
@@ -284,4 +293,5 @@ def create_container(
         uvicorn_server=uvicorn_server,
         auth_service=auth_service,
         member_directory=member_directory,
+        workspace_service=workspace_service,
     )

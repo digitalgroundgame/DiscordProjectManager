@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
 from src.adapters.db.repos.base import BasePostgresRepo
 from src.adapters.db.tables import (
@@ -69,16 +70,24 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
     async def get_by_id(self, project_id: UUID) -> Project | None:
         async with self._get_session() as session:
-            stmt = select(ProjectTable).where(ProjectTable.id == project_id)
+            stmt = (
+                select(ProjectTable)
+                .options(selectinload(ProjectTable.squads).joinedload(ProjectSquadTable.squad))
+                .where(ProjectTable.id == project_id)
+            )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
             return _to_domain_project(row) if row else None
 
     async def get_by_name(self, guild_id: int, name: str) -> Project | None:
         async with self._get_session() as session:
-            stmt = select(ProjectTable).where(
-                ProjectTable.guild_id == guild_id,
-                func.upper(ProjectTable.name) == name.strip().upper(),
+            stmt = (
+                select(ProjectTable)
+                .options(selectinload(ProjectTable.squads).joinedload(ProjectSquadTable.squad))
+                .where(
+                    ProjectTable.guild_id == guild_id,
+                    func.upper(ProjectTable.name) == name.strip().upper(),
+                )
             )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
@@ -86,9 +95,13 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
     async def get_by_prefix(self, guild_id: int, prefix: str) -> Project | None:
         async with self._get_session() as session:
-            stmt = select(ProjectTable).where(
-                ProjectTable.guild_id == guild_id,
-                func.upper(ProjectTable.prefix) == prefix.strip().upper(),
+            stmt = (
+                select(ProjectTable)
+                .options(selectinload(ProjectTable.squads).joinedload(ProjectSquadTable.squad))
+                .where(
+                    ProjectTable.guild_id == guild_id,
+                    func.upper(ProjectTable.prefix) == prefix.strip().upper(),
+                )
             )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
@@ -96,9 +109,13 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
     async def get_by_channel_id(self, guild_id: int, channel_id: int) -> Project | None:
         async with self._get_session() as session:
-            stmt = select(ProjectTable).where(
-                ProjectTable.guild_id == guild_id,
-                ProjectTable.discord_channel_id == channel_id,
+            stmt = (
+                select(ProjectTable)
+                .options(selectinload(ProjectTable.squads).joinedload(ProjectSquadTable.squad))
+                .where(
+                    ProjectTable.guild_id == guild_id,
+                    ProjectTable.discord_channel_id == channel_id,
+                )
             )
             res = await session.execute(stmt)
             row = res.scalar_one_or_none()
@@ -133,7 +150,12 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
             filters = [ProjectTable.guild_id == guild_id]
             if not include_archived:
                 filters.append(ProjectTable.archived_at.is_(None))
-            stmt = select(ProjectTable).where(*filters).order_by(ProjectTable.name.asc())
+            stmt = (
+                select(ProjectTable)
+                .options(selectinload(ProjectTable.squads).joinedload(ProjectSquadTable.squad))
+                .where(*filters)
+                .order_by(ProjectTable.name.asc())
+            )
             res = await session.execute(stmt)
             rows = res.scalars().all()
             return [_to_domain_project(r) for r in rows]
@@ -249,7 +271,11 @@ class PostgresProjectRepo(BasePostgresRepo, IProjectRepo):
 
     async def list_squads_for_project(self, project_id: UUID) -> list[Squad]:
         async with self._get_session() as session:
-            stmt = select(ProjectSquadTable).where(ProjectSquadTable.project_id == project_id)
+            stmt = (
+                select(ProjectSquadTable)
+                .options(joinedload(ProjectSquadTable.squad))
+                .where(ProjectSquadTable.project_id == project_id)
+            )
             res = await session.execute(stmt)
             rows = res.scalars().all()
             return [
