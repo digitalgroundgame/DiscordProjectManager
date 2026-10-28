@@ -362,17 +362,34 @@ class TaskGraphServiceMixin(TransactionalService):
         guild_id: int,
         project_id: UUID,
         member_resolver: Any = None,
+        limit: int = 1000,
     ) -> TechTree:
         """Loads and returns an analyzed TechTree domain model for a project."""
         tasks, _ = await self.task_repo.list_tasks(
             guild_id=guild_id,
             project_id=project_id,
             include_archived=False,
-            limit=500,
+            limit=limit,
+            count_total=False,
         )
         task_ids = [t.id for t in tasks]
         deps = await self.task_repo.get_dependencies_for_tasks(task_ids) if tasks else []
         return TechTree.build(tasks, deps, member_resolver=member_resolver)
+
+    async def get_project_tree(
+        self,
+        guild_id: int,
+        project_id: UUID,
+        member_resolver: Any = None,
+        limit: int = 1000,
+    ) -> TechTree:
+        """Alias for get_project_tech_tree."""
+        return await self.get_project_tech_tree(
+            guild_id=guild_id,
+            project_id=project_id,
+            member_resolver=member_resolver,
+            limit=limit,
+        )
 
     async def get_project_tree_data(
         self,

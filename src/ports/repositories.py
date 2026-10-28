@@ -83,8 +83,9 @@ class ITaskRepo(ABC):
         overdue_only: bool = False,
         limit: int = 50,
         offset: int = 0,
+        count_total: bool = True,
     ) -> tuple[list[Task], int]:
-        """Lists tasks with filters. Returns (tasks, total_count)."""
+        """Lists tasks with filters. Returns (tasks, total_count). If count_total is False, total_count is -1."""
 
     @abstractmethod
     async def list_user_calendar_tasks(
