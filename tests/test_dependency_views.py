@@ -234,7 +234,9 @@ async def test_task_blocked_confirm_view_and_embed(services):
 
     await view.cancel_transition.callback(cancel_interaction)
     cancel_interaction.response.edit_message.assert_awaited_once()
-    assert "cancelled" in cancel_interaction.response.edit_message.call_args.kwargs["content"]
+    cancel_content = cancel_interaction.response.edit_message.call_args.kwargs["content"]
+    assert "cancelled" in cancel_content
+    assert "*Auto-dismisses <t:" in cancel_content
 
     t2_after_cancel = await task_srv.get_by_id(t2.id)
     assert t2_after_cancel.status == TaskStatus.NOT_STARTED
@@ -247,9 +249,10 @@ async def test_task_blocked_confirm_view_and_embed(services):
 
     await view.confirm_proceed.callback(proceed_interaction)
     proceed_interaction.response.edit_message.assert_awaited_once()
-    assert "Bypassed" in proceed_interaction.response.edit_message.call_args.kwargs["content"]
+    content = proceed_interaction.response.edit_message.call_args.kwargs["content"]
+    assert "Bypassed" in content
+    assert "*Auto-dismisses <t:" in content
 
     t2_after_proceed = await task_srv.get_by_id(t2.id)
     assert t2_after_proceed.status == TaskStatus.IN_PROGRESS
-    mock_workspace.refresh_action_card.assert_awaited_once()
     mock_workspace.sync_workspace.assert_awaited_once()
