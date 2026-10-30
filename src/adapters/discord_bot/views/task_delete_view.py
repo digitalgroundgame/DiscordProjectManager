@@ -83,11 +83,17 @@ async def _safe_edit_toast(
     delay: float = TOAST_DURATION_STANDARD,
 ) -> None:
     toast_text = format_toast_message(text, delay=delay)
-    if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-        await interaction.response.edit_message(content=toast_text, embed=None, view=None)
-    elif hasattr(interaction, "edit_original_response"):
-        await interaction.edit_original_response(content=toast_text, embed=None, view=None)
-    get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
+    try:
+        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
+            await interaction.response.edit_message(content=toast_text, embed=None, view=None)
+        elif hasattr(interaction, "edit_original_response"):
+            await interaction.edit_original_response(content=toast_text, embed=None, view=None)
+        get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
+    except discord.errors.Forbidden as fe:
+        if getattr(fe, "code", None) in (50083, 10003, 10062):
+            logger.debug("Cannot edit interaction in archived/deleted thread: %s", fe)
+        else:
+            raise
 
 
 async def _safe_send_toast(
@@ -96,12 +102,18 @@ async def _safe_send_toast(
     delay: float = TOAST_DURATION_EXTENDED,
 ) -> None:
     toast_text = format_toast_message(text, delay=delay)
-    if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-        await interaction.response.send_message(toast_text, ephemeral=True)
-        get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
-    elif hasattr(interaction, "followup"):
-        toast = await interaction.followup.send(toast_text, ephemeral=True, wait=True)
-        get_menu_manager().schedule_toast_dismissal(toast, delay=delay)
+    try:
+        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
+            await interaction.response.send_message(toast_text, ephemeral=True)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
+        elif hasattr(interaction, "followup"):
+            toast = await interaction.followup.send(toast_text, ephemeral=True, wait=True)
+            get_menu_manager().schedule_toast_dismissal(toast, delay=delay)
+    except discord.errors.Forbidden as fe:
+        if getattr(fe, "code", None) in (50083, 10003, 10062):
+            logger.debug("Cannot send interaction toast in archived/deleted thread: %s", fe)
+        else:
+            raise
 
 
 class TaskDeleteConfirmView(BaseView):
@@ -167,6 +179,10 @@ class TaskDeleteConfirmView(BaseView):
                 self.stop()
                 return
 
+            msg = f"🗑️ Task **[{self.task.short_id}]** (`{self.task.title}`) was permanently deleted."
+            await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
+            self.stop()
+
             effective_workspace = self.workspace or getattr(self.bot, "workspace", None)
             if effective_workspace:
                 try:
@@ -176,10 +192,6 @@ class TaskDeleteConfirmView(BaseView):
                     )
                 except Exception as ws_err:
                     logger.warning("Error cleaning workspace for deleted task %s: %s", self.task.short_id, ws_err)
-
-            msg = f"🗑️ Task **[{self.task.short_id}]** (`{self.task.title}`) was permanently deleted."
-            await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
-            self.stop()
         except Exception as e:
             logger.exception("Failed during task delete confirmation: %s", e)
             await _safe_send_toast(interaction, f"❌ Failed to delete task: {e}", delay=TOAST_DURATION_EXTENDED)
