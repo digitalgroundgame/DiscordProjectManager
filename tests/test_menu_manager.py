@@ -121,7 +121,7 @@ def test_attach_dismissal_notice_no_existing_description():
     result = attach_dismissal_notice(embed, delay=8.0, base_time=base_time)
 
     assert result is embed
-    assert result.description == f"⏱️ Auto-dismisses <t:{target_ts}:R>"
+    assert result.description == f"*Auto-dismisses <t:{target_ts}:R>*"
 
 
 def test_attach_dismissal_notice_with_existing_description():
@@ -138,7 +138,7 @@ def test_attach_dismissal_notice_with_existing_description():
     embed.set_footer(text="Task UUID: 12345", icon_url="https://example.com/icon.png")
     result = attach_dismissal_footer(embed, delay=10.0, base_time=base_time)
 
-    assert result.description == f"Details\n\n⏱️ Auto-dismisses <t:{target_ts}:R>"
+    assert result.description == f"Details\n\n*Auto-dismisses <t:{target_ts}:R>*"
     assert result.footer.text == "Task UUID: 12345"
     assert result.footer.icon_url == "https://example.com/icon.png"
 
@@ -154,4 +154,4 @@ def test_format_toast_message():
     msg = "❌ Invalid date expression: `xyz`"
     formatted = format_toast_message(msg, delay=10.0, base_time=base_time)
 
-    assert formatted == f"❌ Invalid date expression: `xyz`\n\n*⏱️ Auto-dismisses <t:{target_ts}:R>*"
+    assert formatted == f"❌ Invalid date expression: `xyz`\n\n*Auto-dismisses <t:{target_ts}:R>*"

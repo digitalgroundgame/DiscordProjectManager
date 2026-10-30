@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.task_builder_embeds import build_task_draft_embed
 from src.adapters.discord_bot.views.task_builder_inputs import (
@@ -51,8 +52,10 @@ class TaskCreateDraftView(BaseView):
         auth_service: AuthService | None = None,
         prerequisite_short_ids: list[str] | None = None,
         workspace: Any = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project = project
         self.title = title
@@ -65,7 +68,6 @@ class TaskCreateDraftView(BaseView):
         self.auth_service = auth_service
         self.prerequisite_short_ids = prerequisite_short_ids or []
         self.workspace = workspace
-        self._initial_interaction: discord.Interaction | None = None
 
         self._rebuild_items()
 
@@ -86,17 +88,6 @@ class TaskCreateDraftView(BaseView):
             project_service=getattr(self.task_service, "project_service", None),
             auth_service=self.auth_service,
         )
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _rebuild_items(self) -> None:
         self.clear_items()
@@ -139,7 +130,7 @@ class TaskCreateDraftView(BaseView):
 
         self.cancel_btn = discord.ui.Button(
             label="Cancel",
-            style=discord.ButtonStyle.danger,
+            style=discord.ButtonStyle.secondary,
             row=0,
         )
         self.cancel_btn.callback = self._on_cancel_clicked
@@ -344,9 +335,9 @@ class TaskCreateDraftView(BaseView):
         )
         from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-        attach_dismissal_footer(embed, delay=3.0)
+        attach_dismissal_footer(embed, delay=TOAST_DURATION_STANDARD)
         await interaction.response.edit_message(embed=embed, view=None)
-        menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+        menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
 
     async def _on_confirm_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -432,10 +423,10 @@ class TaskCreateDraftView(BaseView):
             success_embed.set_footer(text=f"Task UUID: {task.id}")
             from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-            attach_dismissal_footer(success_embed, delay=8.0)
+            attach_dismissal_footer(success_embed, delay=TOAST_DURATION_STANDARD)
             await interaction.response.edit_message(embed=success_embed, view=None)
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"creating task '{self.title}'", logger, ephemeral=True)
 

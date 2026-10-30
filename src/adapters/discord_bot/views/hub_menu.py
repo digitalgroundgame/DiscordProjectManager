@@ -9,6 +9,7 @@ import discord
 
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.hub_embeds import (
     _format_squad_roles,
@@ -195,7 +196,7 @@ class PmHubView(BaseView):
                 "Contact a Project Lead or server manager to be added to a project squad.",
                 ephemeral=True,
             )
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         else:
             # 0 channel projects (unbound channel)
             if len(allowed_projects) == 1:
@@ -228,7 +229,7 @@ class PmHubView(BaseView):
                     )
                     from src.adapters.discord_bot.menu_manager import menu_manager
 
-                    menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                    menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             else:
                 from src.adapters.discord_bot.menu_manager import menu_manager
 

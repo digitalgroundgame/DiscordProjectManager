@@ -9,6 +9,7 @@ import discord
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -85,15 +86,15 @@ class ProjectMenuView(BaseView):
         user_service: UserService | None = None,
         return_to: str = "dashboard",
         auth_service: AuthService | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
         self.auth_service = auth_service
-        self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)
         if is_server_manager is not None:
@@ -197,20 +198,6 @@ class ProjectMenuView(BaseView):
             self.tech_tree_btn = None
             self.hub_btn = None
 
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.unregister_menu(self._initial_interaction)
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
-
     async def _on_tech_tree_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild or not self.task_service:
             return
@@ -306,7 +293,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = ProjectChannelSelectView(
             self.project_service,
@@ -335,7 +322,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No active projects found in this server.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         embed = build_active_projects_embed(projects, page=0, total_count=len(projects))
@@ -356,7 +343,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No active projects found. Create a project first!", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = ProjectRoleSelectView(
             projects,
@@ -380,7 +367,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No active projects found. Create a project first!", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = ProjectLeadSelectView(
             projects,
@@ -404,7 +391,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No active projects available to archive.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = ProjectArchiveSelectView(
             projects,
@@ -427,7 +414,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No archived projects to restore.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = ProjectRestoreSelectView(
             archived,
@@ -449,7 +436,7 @@ class ProjectMenuView(BaseView):
             await interaction.response.send_message("No projects found to rebuild.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         client = getattr(interaction, "client", None)

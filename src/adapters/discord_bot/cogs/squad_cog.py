@@ -7,6 +7,7 @@ from discord import app_commands
 
 from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
 
 logger = logging.getLogger("dgg_pm.cogs.squad")
 
@@ -62,7 +63,7 @@ class SquadCommandsMixin(AutocompleteMixin):
             await interaction.followup.send(msg)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"managing project role for '{project_name}'", logger, ephemeral=True
@@ -140,7 +141,7 @@ class SquadCommandsMixin(AutocompleteMixin):
             await interaction.followup.send(msg)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"managing lead for project '{project_name}'", logger, ephemeral=True
@@ -192,7 +193,7 @@ class SquadCommandsMixin(AutocompleteMixin):
             await interaction.followup.send(msg)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"mapping squad to project '{project_name}'", logger, ephemeral=True

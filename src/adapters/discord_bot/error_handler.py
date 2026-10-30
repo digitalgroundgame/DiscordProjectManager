@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_EXTENDED
 from src.domain.exceptions import DggPmError, StaleVersionError
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ async def send_interaction_error(
     *,
     ephemeral: bool = True,
     auto_dismiss: bool = True,
-    dismiss_delay: float = 10.0,
+    dismiss_delay: float = TOAST_DURATION_EXTENDED,
 ) -> str:
     """Logs the exception appropriately and sends a safe, user-friendly message to Discord.
 

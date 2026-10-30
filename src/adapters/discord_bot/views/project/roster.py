@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.domain.models import Project
 from src.services.project_service import ProjectService
@@ -86,6 +87,8 @@ def build_active_projects_embed(
 class ProjectActiveListView(BaseView):
     """Paginated and searchable view for active projects."""
 
+    PAGE_SIZE = 8
+
     def __init__(
         self,
         projects: list[Project],
@@ -94,10 +97,11 @@ class ProjectActiveListView(BaseView):
         task_service: TaskService | None = None,
         current_page: int = 0,
         query: str = "",
-        page_size: int = 8,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        page_size: int = 8,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_projects = projects
         self.project_service = project_service
         self.squad_service = squad_service
@@ -105,20 +109,8 @@ class ProjectActiveListView(BaseView):
         self.current_page = current_page
         self.query = query
         self.page_size = page_size
-        self._initial_interaction = initial_interaction
         self._filtered_projects = self._filter_projects()
         self._rebuild_items()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _filter_projects(self) -> list[Project]:
         if not self.query:

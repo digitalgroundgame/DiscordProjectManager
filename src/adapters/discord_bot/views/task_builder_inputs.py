@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_EXTENDED,
+)
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.task_builder_embeds import build_task_draft_embed
 from src.domain.enums import PriorityLevel, TaskStatus
@@ -76,14 +80,14 @@ class TaskCustomDueModal(BaseModal):
 
             msg = format_toast_message(
                 f"❌ Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
-                delay=10.0,
+                delay=TOAST_DURATION_EXTENDED,
             )
             toast = await interaction.followup.send(
                 msg,
                 ephemeral=True,
                 wait=True,
             )
-            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+            menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
             return
 
         if hasattr(self.target_view, "staged_due_at"):
@@ -169,11 +173,11 @@ class TaskDetailsModal(BaseModal):
             )
             await interaction.response.edit_message(embed=embed, view=self.draft_view)
             toast = await interaction.followup.send(
-                format_toast_message(error_text, delay=10.0),
+                format_toast_message(error_text, delay=TOAST_DURATION_EXTENDED),
                 ephemeral=True,
                 wait=True,
             )
-            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+            menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
         elif self.parent_view:
             if hasattr(self.parent_view, "_rebuild_items"):
                 self.parent_view._rebuild_items()
@@ -183,14 +187,14 @@ class TaskDetailsModal(BaseModal):
             else:
                 await interaction.response.edit_message(view=self.parent_view)
             toast = await interaction.followup.send(
-                format_toast_message(error_text, delay=10.0),
+                format_toast_message(error_text, delay=TOAST_DURATION_EXTENDED),
                 ephemeral=True,
                 wait=True,
             )
-            menu_manager.schedule_toast_dismissal(toast, delay=10.0)
+            menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
         else:
             await interaction.response.send_message(error_text, ephemeral=True)
-            menu_manager.schedule_toast_dismissal(interaction, delay=10.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_EXTENDED)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
@@ -257,8 +261,14 @@ class TaskDetailsModal(BaseModal):
 class DraftPrerequisiteSelectView(BaseView):
     """Interactive in-place view to pick prerequisite tasks for a new task draft."""
 
-    def __init__(self, draft_view: TaskCreateDraftView, sibling_tasks: list[Task]):
-        super().__init__(timeout=180)
+    def __init__(
+        self,
+        draft_view: TaskCreateDraftView,
+        sibling_tasks: list[Task],
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    ):
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.draft_view = draft_view
         self.sibling_tasks = sibling_tasks
 

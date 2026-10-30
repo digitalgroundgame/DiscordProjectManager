@@ -10,6 +10,10 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.task_builder import TaskDetailsModal
 from src.domain.models import Project
@@ -64,8 +68,9 @@ class TaskSelectProjectView(BaseView):
         query: str = "",
         initial_interaction: discord.Interaction | None = None,
         filter_to_channel: bool = False,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_projects = projects
         self.task_service = task_service
         self.project_service = project_service
@@ -79,17 +84,6 @@ class TaskSelectProjectView(BaseView):
         self._initial_interaction = initial_interaction
         self._filtered_projects = self._filter_and_sort_projects()
         self._rebuild_items()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _filter_and_sort_projects(self) -> list[Project]:
         channel_ids = {cid for cid in (self.current_channel_id, self.parent_channel_id) if cid}
@@ -268,7 +262,7 @@ class TaskSelectProjectView(BaseView):
             await interaction.response.send_message("❌ Project not found.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         target_channel = None

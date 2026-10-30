@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.exceptions import StaleVersionError
@@ -69,9 +70,10 @@ class TaskBlockedConfirmView(BaseView):
         workspace: ITaskDiscordWorkspace | None = None,
         bot: discord.Client | None = None,
         notes: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
     ):
-        super().__init__(timeout=timeout)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task = task
         self.target_status = target_status
         self.incomplete_prereqs = incomplete_prereqs
@@ -151,7 +153,6 @@ class TaskBlockedConfirmView(BaseView):
     @discord.ui.button(
         label="Cancel",
         style=discord.ButtonStyle.secondary,
-        emoji="✖️",
         custom_id="btn_cancel_blocked_transition",
     )
     async def cancel_transition(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

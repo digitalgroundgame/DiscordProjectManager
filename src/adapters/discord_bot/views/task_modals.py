@@ -8,6 +8,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.ui_constants import (
+    TOAST_DURATION_EXTENDED,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseModal
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
@@ -77,7 +81,7 @@ class TaskNoteModal(BaseModal):
                 )
                 from src.adapters.discord_bot.menu_manager import menu_manager
 
-                menu_manager.schedule_toast_dismissal(interaction, delay=6.0)
+                menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"adding note to task '{self.short_id}'", logger, ephemeral=True
@@ -214,7 +218,10 @@ class TaskEditModal(BaseModal):
                     "thread title will reflect changes shortly)."
                 )
                 try:
-                    await interaction.followup.send(notice, ephemeral=True)
+                    toast = await interaction.followup.send(notice, ephemeral=True, wait=True)
+                    from src.adapters.discord_bot.menu_manager import menu_manager
+
+                    menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
                 except Exception:
                     pass
         except Exception as e:

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Task
 
@@ -75,9 +76,10 @@ class TaskDeleteConfirmView(BaseView):
         auth_service: AuthService | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
         bot: discord.Client | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
     ):
-        super().__init__(timeout=timeout)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task = task
         self.author_id = author_id
         self.task_service = task_service
@@ -147,7 +149,6 @@ class TaskDeleteConfirmView(BaseView):
     @discord.ui.button(
         label="Cancel",
         style=discord.ButtonStyle.secondary,
-        emoji="✖️",
         custom_id="btn_cancel_task_delete",
     )
     async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 
 if TYPE_CHECKING:
@@ -55,28 +56,15 @@ class CalendarFeedView(BaseView):
         user_discord_id: int,
         token: str,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.calendar_service = calendar_service
         self.user_discord_id = user_discord_id
         self.token = token
         self._initial_interaction = initial_interaction
 
         self._refresh_components()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.unregister_menu(self._initial_interaction)
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _refresh_components(self) -> None:
         self.clear_items()

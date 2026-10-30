@@ -10,6 +10,7 @@ from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
 from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
 from src.adapters.discord_bot.workspace_protocol import (
@@ -94,7 +95,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             await interaction.followup.send(embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"creating project '{name}'", logger, ephemeral=True)
 
@@ -122,7 +123,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             await interaction.followup.send(embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, "listing projects", logger, ephemeral=True)
 
@@ -225,7 +226,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             await interaction.followup.send(f"📦 Archived project **{project.name}** (`{project.prefix}`).")
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"archiving project '{project_name}'", logger, ephemeral=True)
 
@@ -275,7 +276,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             await interaction.followup.send(f"📂 Restored project **{project.name}** (`{project.prefix}`).")
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"restoring project '{project_name}'", logger, ephemeral=True)
 
@@ -318,7 +319,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             await interaction.followup.send(embed=embed, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"configuring forum tags for <#{forum.id}>", logger, ephemeral=True

@@ -11,6 +11,13 @@ import discord
 if TYPE_CHECKING:
     pass
 
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DISMISS_PREFIX,
+    TOAST_DURATION_EXTENDED,
+    TOAST_DURATION_STANDARD,
+)
+
 logger = logging.getLogger("dgg_pm.menu_manager")
 
 
@@ -47,9 +54,9 @@ class MenuSessionManager:
     def schedule_toast_dismissal(
         self,
         target: discord.Interaction | discord.WebhookMessage | discord.Message | Any,
-        delay: float = 6.0,
+        delay: float = TOAST_DURATION_STANDARD,
     ) -> None:
-        """Schedules auto-dismissal of an ephemeral toast message after delay (default: 6s)."""
+        """Schedules auto-dismissal of an ephemeral toast message after delay (default: TOAST_DURATION_STANDARD)."""
         if target is None:
             return
 
@@ -114,16 +121,16 @@ def __getattr__(name: str) -> Any:
 
 def attach_dismissal_notice(
     embed: discord.Embed,
-    delay: float = 8.0,
+    delay: float = TOAST_DURATION_STANDARD,
     *,
     base_time: datetime | None = None,
-    prefix: str = "⏱️ Auto-dismisses",
+    prefix: str = TOAST_DISMISS_PREFIX,
 ) -> discord.Embed:
     """Appends dynamic Discord relative countdown to embed description where Markdown is parsed and rendered."""
     base = base_time or datetime.now(UTC)
     target_ts = int((base + timedelta(seconds=delay)).timestamp())
     timer_str = f"<t:{target_ts}:R>"
-    notice = f"{prefix} {timer_str}"
+    notice = f"*{prefix} {timer_str}*"
 
     if embed.description:
         embed.description = f"{embed.description}\n\n{notice}"
@@ -139,13 +146,27 @@ attach_dismissal_footer = attach_dismissal_notice
 
 def format_toast_message(
     text: str,
-    delay: float = 8.0,
+    delay: float = TOAST_DURATION_STANDARD,
     *,
     base_time: datetime | None = None,
-    prefix: str = "⏱️ Auto-dismisses",
+    prefix: str = TOAST_DISMISS_PREFIX,
 ) -> str:
     """Appends dynamic Discord relative countdown to text-only toasts."""
     base = base_time or datetime.now(UTC)
     target_ts = int((base + timedelta(seconds=delay)).timestamp())
     timer_str = f"<t:{target_ts}:R>"
     return f"{text}\n\n*{prefix} {timer_str}*"
+
+
+__all__ = [
+    "EPHEMERAL_MENU_TIMEOUT_SECONDS",
+    "TOAST_DISMISS_PREFIX",
+    "TOAST_DURATION_EXTENDED",
+    "TOAST_DURATION_STANDARD",
+    "MenuSessionManager",
+    "attach_dismissal_footer",
+    "attach_dismissal_notice",
+    "format_toast_message",
+    "get_menu_manager",
+    "set_menu_manager",
+]

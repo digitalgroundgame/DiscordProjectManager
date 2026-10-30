@@ -8,6 +8,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.squad_embeds import build_squad_menu_embed
 from src.adapters.discord_bot.views.squad_member_assign_view import SquadMemberAssignView
@@ -100,7 +101,7 @@ class SquadCreateModalWithName(BaseModal):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"creating squad '{name}'", logger, ephemeral=True)
 
@@ -114,12 +115,12 @@ class SquadCreateRoleSelectView(BaseView):
         project_service: ProjectService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
-        self._initial_interaction = initial_interaction
 
         self.role_select = discord.ui.RoleSelect(
             placeholder="Select Discord Server Role for Squad...",
@@ -137,17 +138,6 @@ class SquadCreateRoleSelectView(BaseView):
         )
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     async def _on_role_selected(self, interaction: discord.Interaction) -> None:
         selected_role = self.role_select.values[0]
@@ -178,14 +168,14 @@ class SquadOverviewListView(BaseView):
         task_service: TaskService | None = None,
         current_page: int = 0,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_squads = list(squads)
         self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self.current_page = current_page
-        self._initial_interaction = initial_interaction
 
         self._rebuild_items()
 
@@ -309,14 +299,14 @@ class SquadMenuView(BaseView):
         can_assign_members: bool | None = None,
         user_service: UserService | None = None,
         return_to: str = "dashboard",
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.squad_service = squad_service
         self.project_service = project_service
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
-        self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)
         if can_create_squads is not None:
@@ -379,20 +369,6 @@ class SquadMenuView(BaseView):
         else:
             self.hub_btn = None
 
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.unregister_menu(self._initial_interaction)
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
-
     async def _on_hub_clicked(self, interaction: discord.Interaction) -> None:
         if self.return_to == "dashboard" and interaction.guild:
             projects = (
@@ -453,7 +429,7 @@ class SquadMenuView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         view = SquadMemberAssignView(
             squads,
@@ -477,7 +453,7 @@ class SquadMenuView(BaseView):
             await interaction.response.send_message("No squads configured in this server.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         view = SquadOverviewListView(

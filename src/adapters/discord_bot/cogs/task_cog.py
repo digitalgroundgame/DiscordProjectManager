@@ -11,6 +11,7 @@ from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.cogs.task_actions_cog import TaskActionsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.task_embed import (
     build_task_embed,
     build_task_history_embed,
@@ -189,7 +190,7 @@ class TaskCommandsMixin(TaskActionsMixin):
                 )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"creating task in project '{project_name}'", logger, ephemeral=True
@@ -327,7 +328,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             await interaction.followup.send(embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"retrieving history for task '{task or 'current thread'}'", logger, ephemeral=True
@@ -382,7 +383,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             await interaction.followup.send(msg, embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"assigning task '{task or 'current thread'}'", logger, ephemeral=True
@@ -484,7 +485,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             await interaction.followup.send(msg, embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating status for task '{task or 'current thread'}'", logger, ephemeral=True
@@ -573,7 +574,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             await interaction.followup.send(msg, embed=embed)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating details for task '{task or 'current thread'}'", logger, ephemeral=True

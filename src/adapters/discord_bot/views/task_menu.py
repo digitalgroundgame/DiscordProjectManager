@@ -5,6 +5,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.task_builder import TaskDetailsModal
 from src.adapters.discord_bot.views.task_select_project import (
@@ -99,8 +103,9 @@ class TaskMenuView(BaseView):
         auth_service: AuthService | None = None,
         initial_interaction: discord.Interaction | None = None,
         can_create_standalone: bool | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project_service = project_service
         self.squad_service = squad_service
@@ -111,7 +116,6 @@ class TaskMenuView(BaseView):
         self.selected_assignee_id: int | None = initial_assignee_id
         self.status_filter_value: str = "active"
         self.auth_service = auth_service or (AuthService(project_service, squad_service) if squad_service else None)
-        self._initial_interaction = initial_interaction
 
         if can_create_standalone is not None:
             self.can_create_standalone = can_create_standalone
@@ -134,20 +138,6 @@ class TaskMenuView(BaseView):
             self.selected_project_id = None
 
         self._rebuild_items()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.unregister_menu(self._initial_interaction)
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _rebuild_items(self) -> None:
         self.clear_items()
@@ -344,7 +334,7 @@ class TaskMenuView(BaseView):
                     )
                     from src.adapters.discord_bot.menu_manager import menu_manager
 
-                    menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                    menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
                     return
 
                 target_channel = None
@@ -389,7 +379,7 @@ class TaskMenuView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         has_channel_projects = bool(self.channel_projects)
@@ -430,7 +420,7 @@ class TaskMenuView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         modal = TaskCreateModal(
