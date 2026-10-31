@@ -10,7 +10,10 @@ import discord
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.views.base_view import BaseView
-from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
+from src.adapters.discord_bot.views.forum_helpers import (
+    ensure_pinned_hub_post,
+    remove_project_tag,
+)
 from src.domain.models import Project
 from src.services.project_service import ProjectService
 from src.services.squad_service import SquadService
@@ -99,6 +102,16 @@ class ProjectArchiveConfirmView(BaseView):
             if interaction.guild and self.project.discord_channel_id:
                 chan = interaction.guild.get_channel(self.project.discord_channel_id)
                 if chan and isinstance(chan, (discord.ForumChannel, discord.TextChannel)):
+                    if isinstance(chan, discord.ForumChannel):
+                        try:
+                            await remove_project_tag(chan, self.project.name)
+                        except Exception as te:
+                            logger.warning(
+                                "Could not remove forum tag for archived project %s in forum #%s: %s",
+                                self.project.name,
+                                chan.id,
+                                te,
+                            )
                     try:
                         await ensure_pinned_hub_post(
                             channel=chan,
