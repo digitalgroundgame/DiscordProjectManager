@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from src.adapters.discord_bot.menu_manager import format_toast_message, get_menu_manager
+from src.adapters.discord_bot.menu_manager import build_toast_embed, get_menu_manager
 from src.adapters.discord_bot.ui_constants import (
     EPHEMERAL_MENU_TIMEOUT_SECONDS,
     TOAST_DURATION_EXTENDED,
     TOAST_DURATION_STANDARD,
+    ToastType,
 )
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
@@ -71,14 +72,15 @@ def _is_interaction_done(interaction: discord.Interaction) -> bool:
 async def _safe_edit_toast(
     interaction: discord.Interaction,
     text: str,
+    toast_type: ToastType = ToastType.INFO,
     delay: float = TOAST_DURATION_STANDARD,
 ) -> None:
-    toast_text = format_toast_message(text, delay=delay)
+    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
     try:
         if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.edit_message(content=toast_text, embed=None, view=None)
+            await interaction.response.edit_message(content=None, embed=embed, view=None)
         elif hasattr(interaction, "edit_original_response"):
-            await interaction.edit_original_response(content=toast_text, embed=None, view=None)
+            await interaction.edit_original_response(content=None, embed=embed, view=None)
         get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
     except discord.errors.Forbidden as fe:
         if getattr(fe, "code", None) == 50083:
@@ -90,15 +92,16 @@ async def _safe_edit_toast(
 async def _safe_send_toast(
     interaction: discord.Interaction,
     text: str,
+    toast_type: ToastType = ToastType.ERROR,
     delay: float = TOAST_DURATION_EXTENDED,
 ) -> None:
-    toast_text = format_toast_message(text, delay=delay)
+    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
     try:
         if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.send_message(toast_text, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
         elif hasattr(interaction, "followup"):
-            toast = await interaction.followup.send(toast_text, ephemeral=True, wait=True)
+            toast = await interaction.followup.send(embed=embed, ephemeral=True, wait=True)
             get_menu_manager().schedule_toast_dismissal(toast, delay=delay)
     except discord.errors.Forbidden as fe:
         if getattr(fe, "code", None) == 50083:
@@ -144,7 +147,8 @@ class TaskBlockedConfirmView(BaseView):
                     return True
             await _safe_send_toast(
                 interaction,
-                "❌ Only the command invoker or an authorized manager/lead may interact with this confirmation card.",
+                "Only the command invoker or an authorized manager/lead may interact with this confirmation card.",
+                toast_type=ToastType.ERROR,
                 delay=TOAST_DURATION_EXTENDED,
             )
             return False
@@ -175,11 +179,11 @@ class TaskBlockedConfirmView(BaseView):
             )
 
             msg = (
-                f"⚠️ **Dependency Warning Bypassed**\n"
+                f"**Dependency Warning Bypassed**\n"
                 f"Status updated to **{self.target_status.value.upper()}** for **[{self.task.short_id}]** "
                 f"despite unresolved blockers: {blocker_ids}."
             )
-            await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
+            await _safe_edit_toast(interaction, msg, toast_type=ToastType.SUCCESS, delay=TOAST_DURATION_STANDARD)
             self.stop()
 
             effective_workspace = self.workspace or getattr(self.bot, "workspace", None)
@@ -191,13 +195,19 @@ class TaskBlockedConfirmView(BaseView):
         except StaleVersionError:
             await _safe_edit_toast(
                 interaction,
-                f"⚠️ Task **[{self.task.short_id}]** was modified by another user. Please retry.",
+                f"Task **[{self.task.short_id}]** was modified by another user. Please retry.",
+                toast_type=ToastType.WARNING,
                 delay=TOAST_DURATION_EXTENDED,
             )
             self.stop()
         except Exception as e:
             logger.exception("Error confirming blocked task transition: %s", e)
-            await _safe_send_toast(interaction, f"❌ Failed to update status: {e}", delay=TOAST_DURATION_EXTENDED)
+            await _safe_send_toast(
+                interaction,
+                f"Failed to update status: {e}",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
 
     @discord.ui.button(
         label="Cancel",
@@ -206,5 +216,5 @@ class TaskBlockedConfirmView(BaseView):
     )
     async def cancel_transition(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         msg = f"Status update to **{self.target_status.value.upper()}** for **[{self.task.short_id}]** was cancelled."
-        await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
+        await _safe_edit_toast(interaction, msg, toast_type=ToastType.INFO, delay=TOAST_DURATION_STANDARD)
         self.stop()

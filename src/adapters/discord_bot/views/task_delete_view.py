@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from src.adapters.discord_bot.menu_manager import format_toast_message, get_menu_manager
+from src.adapters.discord_bot.menu_manager import build_toast_embed, get_menu_manager
 from src.adapters.discord_bot.ui_constants import (
     EPHEMERAL_MENU_TIMEOUT_SECONDS,
     TOAST_DURATION_EXTENDED,
     TOAST_DURATION_STANDARD,
+    ToastType,
 )
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Task
@@ -80,14 +81,15 @@ def _is_interaction_done(interaction: discord.Interaction) -> bool:
 async def _safe_edit_toast(
     interaction: discord.Interaction,
     text: str,
+    toast_type: ToastType = ToastType.INFO,
     delay: float = TOAST_DURATION_STANDARD,
 ) -> None:
-    toast_text = format_toast_message(text, delay=delay)
+    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
     try:
         if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.edit_message(content=toast_text, embed=None, view=None)
+            await interaction.response.edit_message(content=None, embed=embed, view=None)
         elif hasattr(interaction, "edit_original_response"):
-            await interaction.edit_original_response(content=toast_text, embed=None, view=None)
+            await interaction.edit_original_response(content=None, embed=embed, view=None)
         get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
     except discord.errors.Forbidden as fe:
         if getattr(fe, "code", None) in (50083, 10003, 10062):
@@ -99,15 +101,16 @@ async def _safe_edit_toast(
 async def _safe_send_toast(
     interaction: discord.Interaction,
     text: str,
+    toast_type: ToastType = ToastType.ERROR,
     delay: float = TOAST_DURATION_EXTENDED,
 ) -> None:
-    toast_text = format_toast_message(text, delay=delay)
+    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
     try:
         if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.send_message(toast_text, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
         elif hasattr(interaction, "followup"):
-            toast = await interaction.followup.send(toast_text, ephemeral=True, wait=True)
+            toast = await interaction.followup.send(embed=embed, ephemeral=True, wait=True)
             get_menu_manager().schedule_toast_dismissal(toast, delay=delay)
     except discord.errors.Forbidden as fe:
         if getattr(fe, "code", None) in (50083, 10003, 10062):
@@ -147,7 +150,8 @@ class TaskDeleteConfirmView(BaseView):
                     return True
             await _safe_send_toast(
                 interaction,
-                "❌ Only the command invoker or an authorized manager/lead may interact with this deletion card.",
+                "Only the command invoker or an authorized manager/lead may interact with this deletion card.",
+                toast_type=ToastType.ERROR,
                 delay=TOAST_DURATION_EXTENDED,
             )
             return False
@@ -173,14 +177,15 @@ class TaskDeleteConfirmView(BaseView):
             if not deleted:
                 await _safe_edit_toast(
                     interaction,
-                    f"⚠️ Task **[{self.task.short_id}]** was not found or has already been deleted.",
+                    f"Task **[{self.task.short_id}]** was not found or has already been deleted.",
+                    toast_type=ToastType.WARNING,
                     delay=TOAST_DURATION_EXTENDED,
                 )
                 self.stop()
                 return
 
-            msg = f"🗑️ Task **[{self.task.short_id}]** (`{self.task.title}`) was permanently deleted."
-            await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
+            msg = f"Task **[{self.task.short_id}]** (`{self.task.title}`) was permanently deleted."
+            await _safe_edit_toast(interaction, msg, toast_type=ToastType.SUCCESS, delay=TOAST_DURATION_STANDARD)
             self.stop()
 
             effective_workspace = self.workspace or getattr(self.bot, "workspace", None)
@@ -194,7 +199,12 @@ class TaskDeleteConfirmView(BaseView):
                     logger.warning("Error cleaning workspace for deleted task %s: %s", self.task.short_id, ws_err)
         except Exception as e:
             logger.exception("Failed during task delete confirmation: %s", e)
-            await _safe_send_toast(interaction, f"❌ Failed to delete task: {e}", delay=TOAST_DURATION_EXTENDED)
+            await _safe_send_toast(
+                interaction,
+                f"Failed to delete task: {e}",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
 
     @discord.ui.button(
         label="Cancel",
@@ -203,5 +213,5 @@ class TaskDeleteConfirmView(BaseView):
     )
     async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         msg = f"Task deletion for **[{self.task.short_id}]** was cancelled."
-        await _safe_edit_toast(interaction, msg, delay=TOAST_DURATION_STANDARD)
+        await _safe_edit_toast(interaction, msg, toast_type=ToastType.INFO, delay=TOAST_DURATION_STANDARD)
         self.stop()

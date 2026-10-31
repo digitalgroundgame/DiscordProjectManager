@@ -1799,9 +1799,10 @@ async def test_project_channel_select_incompatible_channel_resets_dropdown(servi
 
         # Must send auto-dismissing toast via followup
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Selected channel must be a Forum Channel" in toast_text
-        assert "*Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Selected channel must be a Forum Channel" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
@@ -1843,9 +1844,10 @@ async def test_project_create_modal_empty_name_from_channel_select_resets_dropdo
 
         inter.response.edit_message.assert_awaited_once_with(view=view)
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Project name cannot be empty" in toast_text
-        assert "*Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Project name cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
@@ -1897,9 +1899,10 @@ async def test_project_create_modal_empty_name_from_draft_view_refreshes_view(se
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Project name cannot be empty" in toast_text
-        assert "*Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Project name cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
 
 
@@ -1946,9 +1949,10 @@ async def test_task_details_modal_empty_title_from_task_select_project_view_rese
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Task title cannot be empty" in toast_text
-        assert "*Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Task title cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
@@ -1999,9 +2003,10 @@ async def test_task_details_modal_empty_title_from_hub_task_project_select_view_
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Task title cannot be empty" in toast_text
-        assert "*Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Task title cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
 
     assert view.select.placeholder == "Select Project for New Task..."

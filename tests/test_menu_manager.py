@@ -155,3 +155,51 @@ def test_format_toast_message():
     formatted = format_toast_message(msg, delay=10.0, base_time=base_time)
 
     assert formatted == f"❌ Invalid date expression: `xyz`\n\n*Auto-dismisses <t:{target_ts}:R>*"
+
+
+def test_strip_status_emojis():
+    from src.adapters.discord_bot.menu_manager import strip_status_emojis
+
+    assert strip_status_emojis("✅ Note added to **API-1**.") == "Note added to **API-1**."
+    assert strip_status_emojis("❌ Failed to update status: Error") == "Failed to update status: Error"
+    assert strip_status_emojis("⚠️ Task was modified") == "Task was modified"
+    assert strip_status_emojis("🗑️ Task permanently deleted") == "Task permanently deleted"
+    assert strip_status_emojis("Plain text without emoji") == "Plain text without emoji"
+
+
+def test_build_toast_embed_success_and_error():
+    from datetime import datetime
+
+    import discord
+
+    from src.adapters.discord_bot.menu_manager import ToastType, build_toast_embed
+
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
+    target_ts = int(base_time.timestamp()) + 6
+
+    # Success: Green embed, stripped leading emoji, countdown attached
+    embed = build_toast_embed(
+        "✅ Note added to **API-1**.", toast_type=ToastType.SUCCESS, delay=6.0, base_time=base_time
+    )
+    assert embed.color == discord.Color.green()
+    assert embed.description == f"Note added to **API-1**.\n\n*Auto-dismisses <t:{target_ts}:R>*"
+
+    # Error: Red embed
+    err_embed = build_toast_embed(
+        "❌ Note cannot be empty.", toast_type=ToastType.ERROR, delay=10.0, base_time=base_time
+    )
+    err_ts = int(base_time.timestamp()) + 10
+    assert err_embed.color == discord.Color.red()
+    assert err_embed.description == f"Note cannot be empty.\n\n*Auto-dismisses <t:{err_ts}:R>*"
+
+    # Warning: Gold embed
+    warn_embed = build_toast_embed(
+        "⚠️ Dependency bypassed", toast_type=ToastType.WARNING, delay=6.0, base_time=base_time
+    )
+    assert warn_embed.color == discord.Color.gold()
+    assert warn_embed.description == f"Dependency bypassed\n\n*Auto-dismisses <t:{target_ts}:R>*"
+
+    # Info: Blurple embed
+    info_embed = build_toast_embed("ℹ️ Action cancelled", toast_type=ToastType.INFO, delay=6.0, base_time=base_time)
+    assert info_embed.color == discord.Color.blurple()
+    assert info_embed.description == f"Action cancelled\n\n*Auto-dismisses <t:{target_ts}:R>*"

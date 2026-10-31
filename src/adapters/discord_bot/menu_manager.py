@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -13,9 +14,11 @@ if TYPE_CHECKING:
 
 from src.adapters.discord_bot.ui_constants import (
     EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_COLOR_MAP,
     TOAST_DISMISS_PREFIX,
     TOAST_DURATION_EXTENDED,
     TOAST_DURATION_STANDARD,
+    ToastType,
 )
 
 logger = logging.getLogger("dgg_pm.menu_manager")
@@ -119,6 +122,43 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+# Regex matching leading status emojis to prevent duplicate emoji/color signaling
+_LEADING_STATUS_EMOJI_RE = re.compile(
+    r"^[\s\u200b]*[✅❌⚠️ℹ️🗑️⚙️🔄🟡🟢🔴⏳🚀⏱️\ufe0e\ufe0f]+\s*",
+    re.UNICODE,
+)
+
+
+def strip_status_emojis(text: str) -> str:
+    """Strips leading status emojis from toast messages to ensure clean presentation in color-coded embeds."""
+    return _LEADING_STATUS_EMOJI_RE.sub("", text).strip()
+
+
+def build_toast_embed(
+    message: str,
+    toast_type: ToastType = ToastType.INFO,
+    delay: float = TOAST_DURATION_STANDARD,
+    *,
+    base_time: datetime | None = None,
+    prefix: str = TOAST_DISMISS_PREFIX,
+    title: str | None = None,
+) -> discord.Embed:
+    """Builds a compact, color-coded ephemeral toast embed with auto-dismiss countdown.
+
+    Eliminates emoji clutter in favor of standard status color bars:
+    - SUCCESS: Green (Operation succeeded)
+    - ERROR: Red (Validation error / exception)
+    - WARNING: Gold (Cautionary notice / bypassed condition)
+    - INFO: Blurple (Informational status)
+    """
+    clean_message = strip_status_emojis(message)
+    color = TOAST_COLOR_MAP.get(toast_type, discord.Color.blurple())
+    embed = discord.Embed(description=clean_message, color=color)
+    if title:
+        embed.title = strip_status_emojis(title)
+    return attach_dismissal_notice(embed, delay=delay, base_time=base_time, prefix=prefix)
+
+
 def attach_dismissal_notice(
     embed: discord.Embed,
     delay: float = TOAST_DURATION_STANDARD,
@@ -164,9 +204,12 @@ __all__ = [
     "TOAST_DURATION_EXTENDED",
     "TOAST_DURATION_STANDARD",
     "MenuSessionManager",
+    "ToastType",
     "attach_dismissal_footer",
     "attach_dismissal_notice",
+    "build_toast_embed",
     "format_toast_message",
     "get_menu_manager",
     "set_menu_manager",
+    "strip_status_emojis",
 ]

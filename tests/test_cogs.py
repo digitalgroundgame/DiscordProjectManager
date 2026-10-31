@@ -1016,8 +1016,10 @@ async def test_quick_controls_custom_due_date_flow(services):
         await modal.on_submit(invalid_interaction)
         invalid_interaction.response.edit_message.assert_awaited_once()
         invalid_interaction.followup.send.assert_awaited_once()
-        assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
-        assert "*Auto-dismisses <t:" in invalid_interaction.followup.send.call_args[0][0]
+        sent_embed = invalid_interaction.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Could not parse" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
         assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
@@ -1999,8 +2001,9 @@ async def test_task_status_blocked_guard_with_force_unauthorized(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     task_in_db = await task_srv.get_by_id(blocked_task.id)
     assert task_in_db.status == TaskStatus.NOT_STARTED
@@ -2273,8 +2276,9 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         role=squad_role,
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     # Regular user fails mapping role to project
     interaction.followup.send.reset_mock()
@@ -2286,8 +2290,9 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         action="add",
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
 
 def test_pm_cog_does_not_expose_squad_command_group():

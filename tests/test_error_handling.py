@@ -99,11 +99,16 @@ async def test_send_interaction_error_not_deferred(caplog):
         raise KeyError("internal_state_missing")
     except Exception as raw_err:
         with caplog.at_level(logging.ERROR, logger="test_error_logger"):
-            msg = await send_interaction_error(
+            await send_interaction_error(
                 interaction, raw_err, "processing action", target_logger=custom_logger, ephemeral=True
             )
 
-    interaction.response.send_message.assert_awaited_once_with(msg, ephemeral=True)
+    interaction.response.send_message.assert_awaited_once()
+    kwargs = interaction.response.send_message.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    sent_embed = kwargs.get("embed")
+    assert sent_embed is not None
+    assert "An unexpected error occurred while processing action" in sent_embed.description
     assert "Unexpected error while processing action" in caplog.text
     assert "internal_state_missing" in caplog.text
     assert "KeyError" in caplog.text
@@ -121,7 +126,13 @@ async def test_send_interaction_error_deferred():
     stale_err = StaleVersionError("Conflict")
     msg = await send_interaction_error(interaction, stale_err, "updating task", ephemeral=True)
 
-    interaction.followup.send.assert_awaited_once_with(msg, ephemeral=True, wait=True)
+    interaction.followup.send.assert_awaited_once()
+    kwargs = interaction.followup.send.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    assert kwargs.get("wait") is True
+    sent_embed = kwargs.get("embed")
+    assert sent_embed is not None
+    assert "already modified by another user" in sent_embed.description
     assert "already modified" in msg
 
 
@@ -143,9 +154,12 @@ async def test_send_interaction_error_deferred_schedules_followup_dismissal(monk
     interaction.followup.send = AsyncMock(return_value=followup_msg)
 
     stale_err = StaleVersionError("Conflict")
-    msg = await send_interaction_error(interaction, stale_err, "updating task", ephemeral=True)
+    await send_interaction_error(interaction, stale_err, "updating task", ephemeral=True)
 
-    interaction.followup.send.assert_awaited_once_with(msg, ephemeral=True, wait=True)
+    interaction.followup.send.assert_awaited_once()
+    kwargs = interaction.followup.send.call_args.kwargs
+    assert kwargs.get("ephemeral") is True
+    assert kwargs.get("wait") is True
     assert len(scheduled_targets) == 1
     assert scheduled_targets[0] is followup_msg
 
@@ -247,8 +261,9 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
         pm_cog, interaction, name="Infra", prefix="INF2", role=mock_role, channel=mock_channel
     )
     interaction.followup.send.assert_awaited()
-    last_call_arg = interaction.followup.send.call_args[0][0]
-    assert "already exists" in last_call_arg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "already exists" in sent_embed.description
 
     # 2. Project Role: Non-existent project translates to clean error message
     interaction.followup.send.reset_mock()
@@ -329,9 +344,10 @@ async def test_cog_app_command_error_handles_missing_permissions(services, caplo
         await pm_cog.cog_app_command_error(interaction, missing_err)
 
     interaction.response.send_message.assert_awaited_once()
-    sent_msg = interaction.response.send_message.call_args[0][0]
-    assert "Manage Server" in sent_msg
-    assert interaction.response.send_message.call_args[1].get("ephemeral") is True
+    sent_embed = interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "Manage Server" in sent_embed.description
+    assert interaction.response.send_message.call_args.kwargs.get("ephemeral") is True
     assert "App command check failure while executing '/pm project create'" in caplog.text
 
 
@@ -360,9 +376,10 @@ async def test_bot_on_tree_error_handles_missing_permissions(services, caplog):
         await bot.on_tree_error(interaction, missing_err)
 
     interaction.response.send_message.assert_awaited_once()
-    sent_msg = interaction.response.send_message.call_args[0][0]
-    assert "Manage Server" in sent_msg
-    assert interaction.response.send_message.call_args[1].get("ephemeral") is True
+    sent_embed = interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "Manage Server" in sent_embed.description
+    assert interaction.response.send_message.call_args.kwargs.get("ephemeral") is True
     assert "App command check failure while executing '/pm project create'" in caplog.text
 
 

@@ -101,21 +101,36 @@ async def send_interaction_error(
                     is_done = True
 
         dismissal_target: Any = interaction
+        embed = None
+        content: str | None = message
+        if ephemeral and auto_dismiss:
+            from src.adapters.discord_bot.menu_manager import build_toast_embed
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            embed = build_toast_embed(message, toast_type=ToastType.ERROR, delay=dismiss_delay)
+            content = None
+
         if is_done and hasattr(interaction, "followup") and callable(getattr(interaction.followup, "send", None)):
-            res = interaction.followup.send(message, ephemeral=ephemeral, wait=True)
+            if embed is not None:
+                res = interaction.followup.send(embed=embed, ephemeral=ephemeral, wait=True)
+            else:
+                res = interaction.followup.send(content, ephemeral=ephemeral, wait=True)
             if hasattr(res, "__await__"):
                 res = await res
             if res is not None:
                 dismissal_target = res
         elif hasattr(interaction, "response") and callable(getattr(interaction.response, "send_message", None)):
-            res = interaction.response.send_message(message, ephemeral=ephemeral)
+            if embed is not None:
+                res = interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            else:
+                res = interaction.response.send_message(content, ephemeral=ephemeral)
             if hasattr(res, "__await__"):
                 await res
 
         if ephemeral and auto_dismiss:
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            from src.adapters.discord_bot.menu_manager import get_menu_manager
 
-            menu_manager.schedule_toast_dismissal(dismissal_target, delay=dismiss_delay)
+            get_menu_manager().schedule_toast_dismissal(dismissal_target, delay=dismiss_delay)
     except Exception as send_err:
         log.exception("Failed to send error response to Discord interaction: %s", send_err)
 

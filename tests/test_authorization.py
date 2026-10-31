@@ -346,8 +346,9 @@ async def test_task_assignment_role_eligibility_enforcement(services):
     )
 
     interaction_fail.followup.send.assert_awaited_once()
-    fail_msg = interaction_fail.followup.send.await_args.args[0]
-    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in fail_msg
+    sent_embed = interaction_fail.followup.send.await_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in sent_embed.description
 
     # 3. Dynamic button assignee selection with ineligible member fails
     dgg_bot = DggPmBot(task_service=task_srv, project_service=proj_srv, squad_service=squad_srv)
@@ -364,8 +365,9 @@ async def test_task_assignment_role_eligibility_enforcement(services):
 
     await dgg_bot._handle_dynamic_task_button(dynamic_fail, "assignee", task.id)
     dynamic_fail.response.send_message.assert_awaited_once()
-    dyn_err = dynamic_fail.response.send_message.await_args.args[0]
-    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in dyn_err
+    sent_embed = dynamic_fail.response.send_message.await_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "does not hold an eligible squad Discord role for project 'Frontend App'" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -434,7 +436,9 @@ async def test_task_cog_watchers_self_service_vs_third_party(services):
     )
 
     interaction_clear.followup.send.assert_awaited_once()
-    assert "You do not have permission" in interaction_clear.followup.send.await_args.args[0]
+    sent_embed = interaction_clear.followup.send.await_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -467,16 +471,18 @@ async def test_modal_authorization_rejection(services):
 
     await note_modal.on_submit(interaction)
     interaction.response.send_message.assert_awaited_once()
-    msg = interaction.response.send_message.await_args.args[0]
-    assert "You do not have permission" in msg
+    sent_embed = interaction.response.send_message.await_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     # Edit modal rejection
     edit_modal = TaskEditModal(task=task, task_service=task_srv, auth_service=auth_srv)
     edit_modal.title_input._value = "Hacked Title"
 
     await edit_modal.on_submit(interaction)
-    msg2 = interaction.response.send_message.await_args.args[0]
-    assert "You do not have permission" in msg2
+    sent_embed2 = interaction.response.send_message.await_args.kwargs.get("embed")
+    assert sent_embed2 is not None
+    assert "You do not have permission" in sent_embed2.description
 
 
 @pytest.mark.asyncio
@@ -1058,7 +1064,9 @@ async def test_tech_tree_visual_graph_permission_gating(services):
 
     await pm_cog.pm_tree.callback(pm_cog, interaction=interaction_denied, project_name="Infra Engine")
     interaction_denied.followup.send.assert_awaited_once()
-    assert "You do not have permission" in interaction_denied.followup.send.await_args.args[0]
+    sent_embed = interaction_denied.followup.send.await_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     # Allowed interaction for squad member
     interaction_allowed = MagicMock(spec=discord.Interaction)

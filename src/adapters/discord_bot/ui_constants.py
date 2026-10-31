@@ -6,7 +6,26 @@ confirmation dialogs, and toast messages to prevent interface drift.
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 import discord
+
+
+class ToastType(StrEnum):
+    """Semantic classifications for ephemeral toast messages."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+
+
+TOAST_COLOR_MAP: dict[ToastType, discord.Color] = {
+    ToastType.SUCCESS: discord.Color.green(),
+    ToastType.ERROR: discord.Color.red(),
+    ToastType.WARNING: discord.Color.gold(),
+    ToastType.INFO: discord.Color.blurple(),
+}
 
 # ---------------------------------------------------------------------------
 # Interaction & Ephemeral Lifecycles

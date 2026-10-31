@@ -76,14 +76,16 @@ class TaskCustomDueModal(BaseModal):
             self.target_view._rebuild_items()
             embed = self._render_parent_embed(interaction)
             await interaction.response.edit_message(embed=embed, view=self.target_view)
-            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+            from src.adapters.discord_bot.menu_manager import build_toast_embed, menu_manager
+            from src.adapters.discord_bot.ui_constants import ToastType
 
-            msg = format_toast_message(
-                f"❌ Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
+            embed_toast = build_toast_embed(
+                f"Could not parse date expression: `{val}`. Please try expressions like `friday 5pm` or `tomorrow`.",
+                toast_type=ToastType.ERROR,
                 delay=TOAST_DURATION_EXTENDED,
             )
             toast = await interaction.followup.send(
-                msg,
+                embed=embed_toast,
                 ephemeral=True,
                 wait=True,
             )
@@ -156,7 +158,10 @@ class TaskDetailsModal(BaseModal):
         self.add_item(self.desc_input)
 
     async def _send_modal_error(self, interaction: discord.Interaction, error_text: str) -> None:
-        from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+        from src.adapters.discord_bot.menu_manager import build_toast_embed, menu_manager
+        from src.adapters.discord_bot.ui_constants import ToastType
+
+        toast_embed = build_toast_embed(error_text, toast_type=ToastType.ERROR, delay=TOAST_DURATION_EXTENDED)
 
         if self.draft_view:
             self.draft_view._rebuild_items()
@@ -173,7 +178,7 @@ class TaskDetailsModal(BaseModal):
             )
             await interaction.response.edit_message(embed=embed, view=self.draft_view)
             toast = await interaction.followup.send(
-                format_toast_message(error_text, delay=TOAST_DURATION_EXTENDED),
+                embed=toast_embed,
                 ephemeral=True,
                 wait=True,
             )
@@ -187,19 +192,19 @@ class TaskDetailsModal(BaseModal):
             else:
                 await interaction.response.edit_message(view=self.parent_view)
             toast = await interaction.followup.send(
-                format_toast_message(error_text, delay=TOAST_DURATION_EXTENDED),
+                embed=toast_embed,
                 ephemeral=True,
                 wait=True,
             )
             menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
         else:
-            await interaction.response.send_message(error_text, ephemeral=True)
+            await interaction.response.send_message(embed=toast_embed, ephemeral=True)
             menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_EXTENDED)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
         if not title:
-            await self._send_modal_error(interaction, "❌ Task title cannot be empty.")
+            await self._send_modal_error(interaction, "Task title cannot be empty.")
             return
 
         desc = self.desc_input.value.strip() or None
