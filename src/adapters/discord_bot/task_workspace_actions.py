@@ -9,7 +9,9 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import send_toast
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import ToastType
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.adapters.discord_bot.views.task_buttons import (
     TaskQuickControlsView,
@@ -92,28 +94,21 @@ async def handle_task_action(
 
     task = await adapter.task_service.get_by_id(task_id)
     if not task:
-        if hasattr(interaction, "response") and not interaction.response.is_done():
-            await _maybe_await(interaction.response.send_message("❌ Task not found in database.", ephemeral=True))
+        await send_toast(interaction, "Task not found in database.", toast_type=ToastType.ERROR)
         return
 
     # Prevent cross-guild access
     if interaction.guild_id is not None and task.guild_id != interaction.guild_id:
-        if hasattr(interaction, "response") and not interaction.response.is_done():
-            await _maybe_await(
-                interaction.response.send_message("❌ This task does not belong to this server.", ephemeral=True)
-            )
+        await send_toast(interaction, "This task does not belong to this server.", toast_type=ToastType.ERROR)
         return
 
     # Check authorization
     if adapter.auth_service and not await adapter.auth_service.can_mutate_task(interaction.user, task):
         msg = (
-            "❌ You do not have permission to modify this task. "
+            "You do not have permission to modify this task. "
             "You must be the assignee, creator, a member of the project squad, or a server manager."
         )
-        if hasattr(interaction, "response") and not interaction.response.is_done():
-            await _maybe_await(interaction.response.send_message(msg, ephemeral=True))
-        elif hasattr(interaction, "followup"):
-            await _maybe_await(interaction.followup.send(msg, ephemeral=True))
+        await send_toast(interaction, msg, toast_type=ToastType.ERROR)
         return
 
     if action == "note":
@@ -165,22 +160,18 @@ async def handle_task_action(
     if action == "claim":
         try:
             if task.assignee_discord_id and task.assignee_discord_id != interaction.user.id:
-                if hasattr(interaction, "response") and not interaction.response.is_done():
-                    await _maybe_await(
-                        interaction.response.send_message(
-                            f"❌ Task is already claimed by <@{task.assignee_discord_id}>.",
-                            ephemeral=True,
-                        )
-                    )
+                await send_toast(
+                    interaction,
+                    f"Task is already claimed by <@{task.assignee_discord_id}>.",
+                    toast_type=ToastType.ERROR,
+                )
                 return
             elif task.assignee_discord_id == interaction.user.id:
-                if hasattr(interaction, "response") and not interaction.response.is_done():
-                    await _maybe_await(
-                        interaction.response.send_message(
-                            "ℹ️ You are already assigned to this task.",
-                            ephemeral=True,
-                        )
-                    )
+                await send_toast(
+                    interaction,
+                    "You are already assigned to this task.",
+                    toast_type=ToastType.INFO,
+                )
                 return
 
             if adapter.auth_service and interaction.guild:
@@ -343,18 +334,13 @@ async def handle_task_action(
         if latest_task:
             await adapter.refresh_action_card(interaction, latest_task)
             await adapter.sync_workspace(latest_task)
-            if hasattr(interaction, "followup"):
-                await _maybe_await(
-                    interaction.followup.send(
-                        "⚠️ This task was already modified by another squad member. The card has been refreshed.",
-                        ephemeral=True,
-                    )
-                )
+            await send_toast(
+                interaction,
+                "This task was already modified by another squad member. The card has been refreshed.",
+                toast_type=ToastType.WARNING,
+            )
         else:
-            if hasattr(interaction, "response") and not interaction.response.is_done():
-                await _maybe_await(interaction.response.send_message("❌ Task no longer exists.", ephemeral=True))
-            elif hasattr(interaction, "followup"):
-                await _maybe_await(interaction.followup.send("❌ Task no longer exists.", ephemeral=True))
+            await send_toast(interaction, "Task no longer exists.", toast_type=ToastType.ERROR)
     except Exception as e:
         await send_interaction_error(interaction, e, "processing task button action", logger, ephemeral=True)
 

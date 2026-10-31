@@ -203,3 +203,103 @@ def test_build_toast_embed_success_and_error():
     info_embed = build_toast_embed("ℹ️ Action cancelled", toast_type=ToastType.INFO, delay=6.0, base_time=base_time)
     assert info_embed.color == discord.Color.blurple()
     assert info_embed.description == f"Action cancelled\n\n*Auto-dismisses <t:{target_ts}:R>*"
+
+
+@pytest.mark.asyncio
+async def test_send_toast_unresponded_and_deferred(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.menu_manager import ToastType, get_menu_manager, send_toast
+
+    scheduled = []
+    monkeypatch.setattr(
+        get_menu_manager(),
+        "schedule_toast_dismissal",
+        lambda target, delay=6.0: scheduled.append(target),
+    )
+
+    # 1. Unresponded interaction uses response.send_message
+    interaction1 = MagicMock(spec=discord.Interaction)
+    interaction1.response = MagicMock()
+    interaction1.response.is_done.return_value = False
+    interaction1.response.send_message = AsyncMock()
+
+    await send_toast(interaction1, "Task created successfully", toast_type=ToastType.SUCCESS)
+    interaction1.response.send_message.assert_awaited_once()
+    assert interaction1.response.send_message.call_args.kwargs.get("ephemeral") is True
+    embed = interaction1.response.send_message.call_args.kwargs.get("embed")
+    assert embed is not None
+    assert embed.color == discord.Color.green()
+    assert "Task created successfully" in embed.description
+    assert len(scheduled) == 1
+    assert scheduled[0] is interaction1
+
+    # 2. Deferred interaction uses followup.send
+    scheduled.clear()
+    interaction2 = MagicMock(spec=discord.Interaction)
+    interaction2.response = MagicMock()
+    interaction2.response.is_done.return_value = True
+    followup_msg = MagicMock(spec=discord.WebhookMessage)
+    interaction2.followup = MagicMock()
+    interaction2.followup.send = AsyncMock(return_value=followup_msg)
+
+    await send_toast(interaction2, "Something went wrong", toast_type=ToastType.ERROR, delay=10.0)
+    interaction2.followup.send.assert_awaited_once()
+    assert interaction2.followup.send.call_args.kwargs.get("ephemeral") is True
+    assert interaction2.followup.send.call_args.kwargs.get("wait") is True
+    embed2 = interaction2.followup.send.call_args.kwargs.get("embed")
+    assert embed2 is not None
+    assert embed2.color == discord.Color.red()
+    assert "Something went wrong" in embed2.description
+    assert len(scheduled) == 1
+    assert scheduled[0] is followup_msg
+
+
+@pytest.mark.asyncio
+async def test_edit_toast_unresponded_and_responded(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+
+    from src.adapters.discord_bot.menu_manager import ToastType, edit_toast, get_menu_manager
+
+    scheduled = []
+    monkeypatch.setattr(
+        get_menu_manager(),
+        "schedule_toast_dismissal",
+        lambda target, delay=6.0: scheduled.append(target),
+    )
+
+    # 1. Unresponded interaction edits via response.edit_message
+    interaction1 = MagicMock(spec=discord.Interaction)
+    interaction1.response = MagicMock()
+    interaction1.response.is_done.return_value = False
+    interaction1.response.edit_message = AsyncMock()
+
+    await edit_toast(interaction1, "Cancelled action", toast_type=ToastType.INFO)
+    interaction1.response.edit_message.assert_awaited_once()
+    call_kwargs = interaction1.response.edit_message.call_args.kwargs
+    assert call_kwargs.get("view") is None
+    assert call_kwargs.get("content") is None
+    embed = call_kwargs.get("embed")
+    assert embed is not None
+    assert embed.color == discord.Color.blurple()
+    assert "Cancelled action" in embed.description
+    assert len(scheduled) == 1
+
+    # 2. Responded interaction edits via edit_original_response
+    interaction2 = MagicMock(spec=discord.Interaction)
+    interaction2.response = MagicMock()
+    interaction2.response.is_done.return_value = True
+    interaction2.edit_original_response = AsyncMock()
+
+    await edit_toast(interaction2, "Updated successfully", toast_type=ToastType.SUCCESS)
+    interaction2.edit_original_response.assert_awaited_once()
+    call_kwargs2 = interaction2.edit_original_response.call_args.kwargs
+    assert call_kwargs2.get("view") is None
+    assert call_kwargs2.get("content") is None
+    embed2 = call_kwargs2.get("embed")
+    assert embed2 is not None
+    assert embed2.color == discord.Color.green()

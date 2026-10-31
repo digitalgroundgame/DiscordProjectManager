@@ -14,8 +14,9 @@ from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
 from src.adapters.discord_bot.cogs.task_cog import TaskCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+from src.adapters.discord_bot.menu_manager import send_toast
 from src.adapters.discord_bot.router import DiscordViewRouter
-from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD, ToastType
 from src.adapters.discord_bot.views.calendar_feed_view import (
     CalendarFeedView,
     build_calendar_feed_embed,
@@ -131,7 +132,7 @@ class PmCog(
     @app_commands.command(name="menu", description="Open the Project Management Administration & Control Center.")
     async def menu(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be used inside a Discord server.", toast_type=ToastType.ERROR)
             return
         try:
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
@@ -210,11 +211,11 @@ class PmCog(
 
     async def _handle_settings(self, interaction: discord.Interaction, notify_preference: str | None = None) -> None:
         if not self.user_service:
-            await interaction.response.send_message("❌ User settings service is not enabled.", ephemeral=True)
+            await send_toast(interaction, "User settings service is not enabled.", toast_type=ToastType.ERROR)
             return
 
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be used inside a Discord server.", toast_type=ToastType.ERROR)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -226,13 +227,11 @@ class PmCog(
                     user_discord_id=interaction.user.id,
                     notify_preference=pref_enum,
                 )
-                await interaction.followup.send(
-                    f"✅ Notification preference updated to **{pref_enum.value.upper()}**.",
-                    ephemeral=True,
+                await send_toast(
+                    interaction,
+                    f"Notification preference updated to **{pref_enum.value.upper()}**.",
+                    toast_type=ToastType.SUCCESS,
                 )
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             else:
                 from src.adapters.discord_bot.menu_manager import menu_manager
 
@@ -304,8 +303,10 @@ class PmCog(
     async def calendar(self, interaction: discord.Interaction) -> None:
         """Personal iCalendar subscription feed link generator & management."""
         if not self.calendar_service:
-            await interaction.response.send_message(
-                "❌ Calendar subscription service is currently unavailable.", ephemeral=True
+            await send_toast(
+                interaction,
+                "Calendar subscription service is currently unavailable.",
+                toast_type=ToastType.ERROR,
             )
             return
 
@@ -334,13 +335,15 @@ class PmCog(
         channel: discord.ForumChannel | discord.TextChannel | None = None,
     ) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be run in a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be run in a Discord server.", toast_type=ToastType.ERROR)
             return
 
         target_channel = channel or interaction.channel
         if not isinstance(target_channel, (discord.ForumChannel, discord.TextChannel)):
-            await interaction.response.send_message(
-                "❌ Target must be a Forum Channel or Text Channel.", ephemeral=True
+            await send_toast(
+                interaction,
+                "Target must be a Forum Channel or Text Channel.",
+                toast_type=ToastType.ERROR,
             )
             return
 
@@ -356,10 +359,8 @@ class PmCog(
                 user_service=self.user_service,
                 auth_service=self.auth_service,
             )
-            await interaction.followup.send(msg, ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            toast_type = ToastType.SUCCESS if _ok else ToastType.ERROR
+            await send_toast(interaction, msg, toast_type=toast_type)
         except Exception as e:
             await send_interaction_error(interaction, e, "posting pinned PM hub", logger, ephemeral=True)
 
@@ -387,7 +388,7 @@ class PmCog(
         try:
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             await self.auth_service.require_project_view(interaction.user, project.id)

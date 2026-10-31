@@ -378,23 +378,17 @@ class TaskQuickControlsView(BaseView):
         if updated_task:
             self.task = updated_task
         self.stop()
-        embed = discord.Embed(
-            title=f"Updated [{self.task.short_id}]",
-            description="Task changes have been saved to the workspace.",
-            color=discord.Color.green(),
-        )
-        from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-        attach_dismissal_footer(embed, delay=TOAST_DURATION_STANDARD)
-        is_done = False
-        if hasattr(interaction, "response") and hasattr(interaction.response, "is_done"):
-            res = interaction.response.is_done()
-            if isinstance(res, bool):
-                is_done = res
-        if hasattr(interaction, "response") and not is_done:
-            await interaction.response.edit_message(embed=embed, view=None)
-        elif hasattr(interaction, "edit_original_response"):
-            await interaction.edit_original_response(embed=embed, view=None)
+        from src.adapters.discord_bot.menu_manager import edit_toast, menu_manager
+        from src.adapters.discord_bot.ui_constants import ToastType
+
+        await edit_toast(
+            interaction,
+            "Task changes have been saved to the workspace.",
+            toast_type=ToastType.SUCCESS,
+            title=f"Updated [{self.task.short_id}]",
+            delay=TOAST_DURATION_STANDARD,
+        )
 
         if self.bot and hasattr(self.bot, "sync_root_task_message"):
             await self.bot.sync_root_task_message(self.task)
@@ -402,7 +396,6 @@ class TaskQuickControlsView(BaseView):
                 await self.bot.sync_task_thread(self.task, sync_title=title_changed, sync_archive=False)
 
         menu_manager.unregister_menu(interaction)
-        menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
 
     _on_done_clicked = _on_save_clicked
 

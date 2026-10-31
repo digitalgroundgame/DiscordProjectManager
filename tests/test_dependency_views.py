@@ -150,13 +150,15 @@ async def test_dependency_and_tree_cogs_slash_commands(services):
     # 1. /pm task depend
     await pm_cog.task_depend.callback(pm_cog, interaction=interaction, task=t2.short_id, depends_on=t1.short_id)
     interaction.followup.send.assert_awaited_once()
-    assert "Linked dependency" in interaction.followup.send.call_args.args[0]
+    sent_embed1 = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed1 is not None and "Linked dependency" in sent_embed1.description
 
     # 2. /pm task undepend
     interaction.followup.send.reset_mock()
     await pm_cog.task_undepend.callback(pm_cog, interaction=interaction, task=t2.short_id, depends_on=t1.short_id)
     interaction.followup.send.assert_awaited_once()
-    assert "Unlinked dependency" in interaction.followup.send.call_args.args[0]
+    sent_embed2 = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed2 is not None and "Unlinked dependency" in sent_embed2.description
 
     # 3. /pm project tree
     interaction.followup.send.reset_mock()

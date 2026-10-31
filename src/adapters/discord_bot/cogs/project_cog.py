@@ -9,8 +9,13 @@ from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+from src.adapters.discord_bot.menu_manager import (
+    attach_dismissal_notice,
+    get_menu_manager,
+    send_toast,
+)
 from src.adapters.discord_bot.router import DiscordViewRouter
-from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD, ToastType
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post, setup_forum_tags
 from src.adapters.discord_bot.views.project_menu import RebuildConfirmView
 from src.adapters.discord_bot.workspace_protocol import (
@@ -54,8 +59,10 @@ class ProjectCommandsMixin(SquadCommandsMixin):
         if not interaction.guild:
             return
         if channel is not None and not isinstance(channel, discord.ForumChannel):
-            await interaction.response.send_message(
-                "❌ Projects must be bound to a Discord Forum Channel.", ephemeral=True
+            await send_toast(
+                interaction,
+                "Projects must be bound to a Discord Forum Channel.",
+                toast_type=ToastType.ERROR,
             )
             return
         await interaction.response.defer(ephemeral=True)
@@ -92,10 +99,9 @@ class ProjectCommandsMixin(SquadCommandsMixin):
             if project.discord_channel_id:
                 embed.add_field(name="Bound Channel", value=f"<#{project.discord_channel_id}>{hub_note}", inline=True)
 
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"creating project '{name}'", logger, ephemeral=True)
 
@@ -107,7 +113,11 @@ class ProjectCommandsMixin(SquadCommandsMixin):
         try:
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
             if not projects:
-                await interaction.followup.send("📁 No active projects found. Use `/pm project create` to set one up.")
+                await send_toast(
+                    interaction,
+                    "No active projects found. Use `/pm project create` to set one up.",
+                    toast_type=ToastType.INFO,
+                )
                 return
 
             embed = discord.Embed(title="📁 Server Projects", color=discord.Color.blue())
@@ -151,7 +161,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
         try:
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             await self.auth_service.require_project_view(interaction.user, project.id)
@@ -192,7 +202,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             await self.project_service.archive_project(project.id)
@@ -223,10 +233,11 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project archive: %s", he)
 
-            await interaction.followup.send(f"📦 Archived project **{project.name}** (`{project.prefix}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                f"Archived project **{project.name}** (`{project.prefix}`).",
+                toast_type=ToastType.SUCCESS,
+            )
         except Exception as e:
             await send_interaction_error(interaction, e, f"archiving project '{project_name}'", logger, ephemeral=True)
 
@@ -242,7 +253,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             await self.project_service.unarchive_project(project.id)
@@ -273,10 +284,11 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project unarchive: %s", he)
 
-            await interaction.followup.send(f"📂 Restored project **{project.name}** (`{project.prefix}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                f"Restored project **{project.name}** (`{project.prefix}`).",
+                toast_type=ToastType.SUCCESS,
+            )
         except Exception as e:
             await send_interaction_error(interaction, e, f"restoring project '{project_name}'", logger, ephemeral=True)
 
@@ -291,7 +303,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
         forum: discord.ForumChannel,
     ) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be used inside a Discord server.", toast_type=ToastType.ERROR)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -300,7 +312,11 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             tags_added, total_tags, err = await setup_forum_tags(forum)
             if err:
-                await interaction.followup.send(f"❌ Failed to configure tags in <#{forum.id}>: {err}", ephemeral=True)
+                await send_toast(
+                    interaction,
+                    f"Failed to configure tags in <#{forum.id}>: {err}",
+                    toast_type=ToastType.ERROR,
+                )
                 return
 
             embed = discord.Embed(
@@ -316,10 +332,9 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 ),
                 color=discord.Color.green(),
             )
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.followup.send(embed=embed, ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"configuring forum tags for <#{forum.id}>", logger, ephemeral=True
@@ -341,7 +356,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
         forum: discord.ForumChannel | None = None,
     ) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be used inside a Discord server.", toast_type=ToastType.ERROR)
             return
 
         try:
@@ -353,7 +368,7 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 projects = await self.project_service.list_projects(interaction.guild.id, include_archived=True)
                 project = next((p for p in projects if p.name.lower() == project_name.lower()), None)
                 if not project:
-                    await interaction.response.send_message(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                    await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                     return
 
             # Fetch task count for preview

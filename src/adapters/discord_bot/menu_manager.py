@@ -198,6 +198,94 @@ def format_toast_message(
     return f"{text}\n\n*{prefix} {timer_str}*"
 
 
+def _is_interaction_done(interaction: discord.Interaction) -> bool:
+    if hasattr(interaction, "response"):
+        resp = interaction.response
+        if callable(getattr(resp, "is_done", None)):
+            done_res = resp.is_done()
+            if isinstance(done_res, bool):
+                return done_res
+            if getattr(getattr(resp, "defer", None), "called", False) or getattr(
+                getattr(resp, "send_message", None), "called", False
+            ):
+                return True
+    return False
+
+
+async def send_toast(
+    interaction: discord.Interaction,
+    message: str,
+    toast_type: ToastType = ToastType.INFO,
+    delay: float = TOAST_DURATION_STANDARD,
+    *,
+    title: str | None = None,
+    ephemeral: bool = True,
+) -> Any:
+    """Sends an ephemeral color-coded toast embed and schedules its auto-dismissal.
+
+    Automatically routes to response.send_message or followup.send based on interaction state.
+    """
+    embed = build_toast_embed(message, toast_type=toast_type, delay=delay, title=title)
+    mgr = get_menu_manager()
+    try:
+        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
+            res = interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            if inspect.isawaitable(res):
+                await res
+            mgr.schedule_toast_dismissal(interaction, delay=delay)
+            return interaction
+        elif hasattr(interaction, "followup"):
+            res = interaction.followup.send(embed=embed, ephemeral=ephemeral, wait=True)
+            if inspect.isawaitable(res):
+                res = await res
+            mgr.schedule_toast_dismissal(res or interaction, delay=delay)
+            return res
+    except discord.errors.Forbidden as fe:
+        if getattr(fe, "code", None) in (50083, 10003, 10062):
+            logger.debug("Cannot send interaction toast in archived/deleted thread: %s", fe)
+        else:
+            raise
+    except discord.errors.NotFound as nf:
+        if getattr(nf, "code", None) in (50083, 10003, 10062):
+            logger.debug("Interaction expired or thread deleted: %s", nf)
+        else:
+            raise
+    return None
+
+
+async def edit_toast(
+    interaction: discord.Interaction,
+    message: str,
+    toast_type: ToastType = ToastType.INFO,
+    delay: float = TOAST_DURATION_STANDARD,
+    *,
+    title: str | None = None,
+) -> None:
+    """Edits an existing interaction message into an ephemeral color-coded toast and schedules auto-dismissal."""
+    embed = build_toast_embed(message, toast_type=toast_type, delay=delay, title=title)
+    mgr = get_menu_manager()
+    try:
+        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
+            res = interaction.response.edit_message(content=None, embed=embed, view=None)
+            if inspect.isawaitable(res):
+                await res
+        elif hasattr(interaction, "edit_original_response"):
+            res = interaction.edit_original_response(content=None, embed=embed, view=None)
+            if inspect.isawaitable(res):
+                await res
+        mgr.schedule_toast_dismissal(interaction, delay=delay)
+    except discord.errors.Forbidden as fe:
+        if getattr(fe, "code", None) in (50083, 10003, 10062):
+            logger.debug("Cannot edit interaction in archived/deleted thread: %s", fe)
+        else:
+            raise
+    except discord.errors.NotFound as nf:
+        if getattr(nf, "code", None) in (50083, 10003, 10062):
+            logger.debug("Interaction expired or thread deleted: %s", nf)
+        else:
+            raise
+
+
 __all__ = [
     "EPHEMERAL_MENU_TIMEOUT_SECONDS",
     "TOAST_DISMISS_PREFIX",
@@ -208,8 +296,10 @@ __all__ = [
     "attach_dismissal_footer",
     "attach_dismissal_notice",
     "build_toast_embed",
+    "edit_toast",
     "format_toast_message",
     "get_menu_manager",
+    "send_toast",
     "set_menu_manager",
     "strip_status_emojis",
 ]

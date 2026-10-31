@@ -10,8 +10,13 @@ from discord import app_commands
 from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.cogs.task_actions_cog import TaskActionsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import (
+    attach_dismissal_notice,
+    get_menu_manager,
+    send_toast,
+)
 from src.adapters.discord_bot.router import DiscordViewRouter
-from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
+from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD, ToastType
 from src.adapters.discord_bot.views.task_embed import (
     build_task_embed,
     build_task_history_embed,
@@ -93,14 +98,14 @@ class TaskCommandsMixin(TaskActionsMixin):
         depends_on: str | None = None,
     ) -> None:
         if not interaction.guild:
-            await interaction.response.send_message("❌ Must be used inside a Discord server.", ephemeral=True)
+            await send_toast(interaction, "Must be used inside a Discord server.", toast_type=ToastType.ERROR)
             return
 
         await interaction.response.defer(ephemeral=True)
         try:
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             await self.auth_service.require_task_creation(interaction.user, project.id)
@@ -110,10 +115,11 @@ class TaskCommandsMixin(TaskActionsMixin):
             raw_prereqs = prereqs or depends_on
             prereq_ids = extract_short_ids(raw_prereqs)
             if raw_prereqs and raw_prereqs.strip() and not prereq_ids:
-                await interaction.followup.send(
-                    f"❌ Could not parse any valid task short IDs from prereqs: `{raw_prereqs}`.\n"
+                await send_toast(
+                    interaction,
+                    f"Could not parse any valid task short IDs from prereqs: `{raw_prereqs}`.\n"
                     "Expected format: `INF-1` or `INF-1, INF-2`.",
-                    ephemeral=True,
+                    toast_type=ToastType.ERROR,
                 )
                 return
 
@@ -121,9 +127,10 @@ class TaskCommandsMixin(TaskActionsMixin):
             for pid in prereq_ids:
                 prereq_task = await self.task_service.get_by_short_id(interaction.guild.id, pid)
                 if not prereq_task:
-                    await interaction.followup.send(
-                        f"❌ Prerequisite task `{pid}` was not found in this server.",
-                        ephemeral=True,
+                    await send_toast(
+                        interaction,
+                        f"Prerequisite task `{pid}` was not found in this server.",
+                        toast_type=ToastType.ERROR,
                     )
                     return
                 prereq_tasks.append(prereq_task)
@@ -171,26 +178,21 @@ class TaskCommandsMixin(TaskActionsMixin):
             if prereq_ids:
                 prereqs_suffix = f"\n🔗 **Prerequisites**: {', '.join(f'`[{p}]`' for p in prereq_ids)}"
 
-            if ref:
-                if ref.channel_id != interaction.channel_id:
-                    await interaction.followup.send(
-                        f"✅ Created task **[{task.short_id}] {task.title}** in <#{ref.channel_id}>"
-                        + f" with thread <#{ref.thread_id}>"
-                        + prereqs_suffix
-                    )
-                else:
-                    await interaction.followup.send(
-                        f"✅ Task **[{task.short_id}]** created in project **{project.name}**." + prereqs_suffix,
-                        embed=build_task_embed(task, project_name=project.name, prerequisites=prereq_tasks or None),
-                    )
-            else:
-                await interaction.followup.send(
-                    f"✅ Task **[{task.short_id}]** created in project **{project.name}**." + prereqs_suffix,
-                    embed=build_task_embed(task, project_name=project.name, prerequisites=prereq_tasks or None),
+            if ref and ref.channel_id != interaction.channel_id:
+                await send_toast(
+                    interaction,
+                    f"Created task **[{task.short_id}] {task.title}** in <#{ref.channel_id}>"
+                    f" with thread <#{ref.thread_id}>{prereqs_suffix}",
+                    toast_type=ToastType.SUCCESS,
                 )
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            else:
+                card_embed = build_task_embed(task, project_name=project.name, prerequisites=prereq_tasks or None)
+                attach_dismissal_notice(card_embed, delay=TOAST_DURATION_STANDARD)
+                await interaction.followup.send(
+                    f"Task **[{task.short_id}]** created in project **{project.name}**.{prereqs_suffix}",
+                    embed=card_embed,
+                )
+                get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"creating task in project '{project_name}'", logger, ephemeral=True
@@ -231,7 +233,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             if project_name:
                 project = await self.project_service.get_by_name(interaction.guild.id, project_name)
                 if not project:
-                    await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                    await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                     return
                 project_id = project.id
                 title_parts.append(f"Project: {project.name}")
@@ -276,9 +278,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             view = TaskListView(tasks, total_count, title_context)
 
             await interaction.followup.send(embed=embed, view=view)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            await menu_manager.register_menu(interaction)
+            await get_menu_manager().register_menu(interaction)
         except Exception as e:
             await send_interaction_error(interaction, e, "listing tasks", logger, ephemeral=True)
 
@@ -294,7 +294,7 @@ class TaskCommandsMixin(TaskActionsMixin):
         if task_short_id:
             task_entity = await self.task_service.get_by_short_id(interaction.guild.id, task_short_id)
             if not task_entity:
-                await interaction.followup.send(f"❌ Task '{task_short_id}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Task '{task_short_id}' not found.", toast_type=ToastType.ERROR)
                 return None
             return task_entity
 
@@ -304,10 +304,11 @@ class TaskCommandsMixin(TaskActionsMixin):
             if task_entity:
                 return task_entity
 
-        await interaction.followup.send(
-            "❌ No task specified and this command was not executed inside an active task thread workspace.\n"
+        await send_toast(
+            interaction,
+            "No task specified and this command was not executed inside an active task thread workspace.\n"
             "Please specify a task short ID (e.g. `APP-1`) or run this command inside the task's thread.",
-            ephemeral=True,
+            toast_type=ToastType.ERROR,
         )
         return None
 
@@ -325,10 +326,9 @@ class TaskCommandsMixin(TaskActionsMixin):
 
             history = await self.task_service.get_history(task_entity.id)
             embed = build_task_history_embed(task_entity, history)
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.followup.send(embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"retrieving history for task '{task or 'current thread'}'", logger, ephemeral=True
@@ -368,11 +368,12 @@ class TaskCommandsMixin(TaskActionsMixin):
             )
 
             msg = (
-                f"👤 Assigned **[{updated_task.short_id}]** to <@{new_assignee_id}>."
+                f"Assigned **[{updated_task.short_id}]** to <@{new_assignee_id}>."
                 if new_assignee_id
-                else f"👤 Unassigned **[{updated_task.short_id}]**."
+                else f"Unassigned **[{updated_task.short_id}]**."
             )
             embed = build_task_embed(updated_task)
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             if self.workspace:
                 await self.workspace.sync_workspace(updated_task)
             elif hasattr(self.bot, "sync_root_task_message"):
@@ -381,9 +382,7 @@ class TaskCommandsMixin(TaskActionsMixin):
                     await res
 
             await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"assigning task '{task or 'current thread'}'", logger, ephemeral=True
@@ -434,7 +433,7 @@ class TaskCommandsMixin(TaskActionsMixin):
                 try:
                     new_status = TaskStatus(status)
                 except ValueError:
-                    await interaction.followup.send(f"❌ Invalid status: '{status}'.", ephemeral=True)
+                    await send_toast(interaction, f"Invalid status: '{status}'.", toast_type=ToastType.ERROR)
                     return
 
             if new_status in (TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED):
@@ -473,8 +472,9 @@ class TaskCommandsMixin(TaskActionsMixin):
                 notes=notes,
             )
 
-            msg = f"🔄 Status updated to **{new_status.value.upper()}** for **[{updated_task.short_id}]**."
+            msg = f"Status updated to **{new_status.value.upper()}** for **[{updated_task.short_id}]**."
             embed = build_task_embed(updated_task)
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             if self.workspace:
                 await self.workspace.sync_workspace(updated_task)
             elif hasattr(self.bot, "sync_root_task_message"):
@@ -483,9 +483,7 @@ class TaskCommandsMixin(TaskActionsMixin):
                     await res
 
             await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating status for task '{task or 'current thread'}'", logger, ephemeral=True
@@ -522,7 +520,7 @@ class TaskCommandsMixin(TaskActionsMixin):
             if title is not None:
                 cleaned_title = title.strip()
                 if not cleaned_title:
-                    await interaction.followup.send("❌ Task title cannot be empty.", ephemeral=True)
+                    await send_toast(interaction, "Task title cannot be empty.", toast_type=ToastType.ERROR)
                     return
                 update_kwargs["title"] = cleaned_title
 
@@ -539,7 +537,7 @@ class TaskCommandsMixin(TaskActionsMixin):
                 update_kwargs["due_at"] = None if clear_due else parse_natural_date(due_val)
 
             if not update_kwargs:
-                await interaction.followup.send("ℹ️ No updates specified.", ephemeral=True)
+                await send_toast(interaction, "No updates specified.", toast_type=ToastType.INFO)
                 return
 
             updated_task = await self.task_service.update_details(
@@ -563,18 +561,17 @@ class TaskCommandsMixin(TaskActionsMixin):
                     await res
 
             title_deferred = hasattr(sync_res, "title_deferred") and sync_res.title_deferred
-            msg = f"✏️ Updated details for **[{updated_task.short_id}]**."
+            msg = f"Updated details for **[{updated_task.short_id}]**."
             if title_deferred:
                 msg += (
-                    "\nℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
+                    "\nTask title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
                     "thread title will reflect changes shortly)."
                 )
 
             embed = build_task_embed(updated_task)
+            attach_dismissal_notice(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.followup.send(msg, embed=embed)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating details for task '{task or 'current thread'}'", logger, ephemeral=True

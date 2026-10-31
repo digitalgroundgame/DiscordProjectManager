@@ -272,15 +272,15 @@ async def test_cogs_handle_service_and_unexpected_errors(services, caplog):
     mock_role.name = "Blue Squad"
     await pm_cog.project_role.callback(pm_cog, interaction, project_name="NON-EXISTENT", role=mock_role, action="add")
     interaction.followup.send.assert_awaited()
-    last_call_arg = interaction.followup.send.call_args[0][0]
-    assert "not found" in last_call_arg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "not found" in sent_embed.description
 
     # 3. Task Cog: Status update on non-existent task
     interaction.followup.send.reset_mock()
     await pm_cog.task_status.callback(pm_cog, interaction, task="NON-EXISTENT", status="completed")
     interaction.followup.send.assert_awaited()
-    last_call_arg = interaction.followup.send.call_args[0][0]
-    assert "not found" in last_call_arg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "not found" in sent_embed.description
 
 
 def test_translate_error_app_command_errors():

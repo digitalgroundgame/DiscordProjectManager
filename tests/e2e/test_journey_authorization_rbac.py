@@ -79,7 +79,7 @@ async def test_journey_outsider_unauthorized_boundaries(
         title="Audit Security Logs",
         description="Verify SIEM log ingestion",
     )
-    assert "[SEC-1]" in sec1_resp.content
+    assert "[SEC-1]" in sec1_resp.all_text()
     await e2e_env.drain_outbox()
 
     sec1_task = await e2e_env.task_service.get_by_short_id(guild.id, "SEC-1")
@@ -138,7 +138,7 @@ async def test_journey_lead_delegation_and_role_escalation(
         title="Deploy Kubernetes Ingress",
         assignee=member_actor.user,
     )
-    assert "[INF-1]" in task_resp.content
+    assert "[INF-1]" in task_resp.all_text()
     await e2e_env.drain_outbox()
 
     inf1_task = await e2e_env.task_service.get_by_short_id(guild.id, "INF-1")

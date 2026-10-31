@@ -7,7 +7,8 @@ from discord import app_commands
 
 from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
-from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD
+from src.adapters.discord_bot.menu_manager import send_toast
+from src.adapters.discord_bot.ui_constants import ToastType
 from src.adapters.discord_bot.views.task_delete_view import (
     TaskDeleteConfirmView,
     build_task_delete_confirm_embed,
@@ -46,10 +47,11 @@ class TaskActionsMixin(AutocompleteMixin):
                 res = self.bot.sync_task_thread(updated, action="archive")
                 if hasattr(res, "__await__"):
                     await res
-            await interaction.followup.send(f"📦 Archived task **[{updated.short_id}]** (`{updated.title}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                f"Archived task **[{updated.short_id}]** (`{updated.title}`).",
+                toast_type=ToastType.SUCCESS,
+            )
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"archiving task '{task or 'current thread'}'", logger, ephemeral=True
@@ -77,10 +79,11 @@ class TaskActionsMixin(AutocompleteMixin):
                 res = self.bot.sync_task_thread(updated, action="unarchive")
                 if hasattr(res, "__await__"):
                     await res
-            await interaction.followup.send(f"📂 Restored task **[{updated.short_id}]** (`{updated.title}`).")
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                f"Restored task **[{updated.short_id}]** (`{updated.title}`).",
+                toast_type=ToastType.SUCCESS,
+            )
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"restoring task '{task or 'current thread'}'", logger, ephemeral=True
@@ -170,11 +173,11 @@ class TaskActionsMixin(AutocompleteMixin):
                 watchers=current_watchers,
             )
 
-            msg = f"👀 Updated watchers for **[{updated_task.short_id}]** ({len(updated_task.watchers)} total)."
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                f"Updated watchers for **[{updated_task.short_id}]** ({len(updated_task.watchers)} total).",
+                toast_type=ToastType.SUCCESS,
+            )
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"updating watchers for task '{task or 'current thread'}'", logger, ephemeral=True
@@ -211,14 +214,12 @@ class TaskActionsMixin(AutocompleteMixin):
                 depends_on_short_id=depends_on,
                 actor_discord_id=interaction.user.id,
             )
-            msg = (
-                f"🔗 Linked dependency: **`[{target_task.short_id}]`** "
-                f"now depends on **`[{depends_on}]`** finishing first."
+            await send_toast(
+                interaction,
+                f"Linked dependency: **`[{target_task.short_id}]`** "
+                f"now depends on **`[{depends_on}]`** finishing first.",
+                toast_type=ToastType.SUCCESS,
             )
-            await interaction.followup.send(msg, ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"linking dependency for '{task or 'current thread'}'", logger, ephemeral=True
@@ -256,18 +257,17 @@ class TaskActionsMixin(AutocompleteMixin):
                 actor_discord_id=interaction.user.id,
             )
             if removed:
-                msg = (
-                    f"🔓 Unlinked dependency: **`[{target_task.short_id}]`** no longer depends on **`[{depends_on}]`**."
+                await send_toast(
+                    interaction,
+                    f"Unlinked dependency: **`[{target_task.short_id}]`** no longer depends on **`[{depends_on}]`**.",
+                    toast_type=ToastType.SUCCESS,
                 )
-                await interaction.followup.send(msg, ephemeral=True)
             else:
-                await interaction.followup.send(
-                    f"ℹ️ **`[{target_task.short_id}]`** did not depend on **`[{depends_on}]`**.",
-                    ephemeral=True,
+                await send_toast(
+                    interaction,
+                    f"**`[{target_task.short_id}]`** did not depend on **`[{depends_on}]`**.",
+                    toast_type=ToastType.INFO,
                 )
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"unlinking dependency for '{task or 'current thread'}'", logger, ephemeral=True

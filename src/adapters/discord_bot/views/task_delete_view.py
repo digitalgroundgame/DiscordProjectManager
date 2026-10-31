@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from src.adapters.discord_bot.menu_manager import build_toast_embed, get_menu_manager
+from src.adapters.discord_bot.menu_manager import edit_toast, send_toast
 from src.adapters.discord_bot.ui_constants import (
     EPHEMERAL_MENU_TIMEOUT_SECONDS,
     TOAST_DURATION_EXTENDED,
@@ -70,53 +70,8 @@ def build_task_delete_confirm_embed(
     return embed
 
 
-def _is_interaction_done(interaction: discord.Interaction) -> bool:
-    if hasattr(interaction, "response") and hasattr(interaction.response, "is_done"):
-        res = interaction.response.is_done()
-        if isinstance(res, bool):
-            return res
-    return False
-
-
-async def _safe_edit_toast(
-    interaction: discord.Interaction,
-    text: str,
-    toast_type: ToastType = ToastType.INFO,
-    delay: float = TOAST_DURATION_STANDARD,
-) -> None:
-    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
-    try:
-        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.edit_message(content=None, embed=embed, view=None)
-        elif hasattr(interaction, "edit_original_response"):
-            await interaction.edit_original_response(content=None, embed=embed, view=None)
-        get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
-    except discord.errors.Forbidden as fe:
-        if getattr(fe, "code", None) in (50083, 10003, 10062):
-            logger.debug("Cannot edit interaction in archived/deleted thread: %s", fe)
-        else:
-            raise
-
-
-async def _safe_send_toast(
-    interaction: discord.Interaction,
-    text: str,
-    toast_type: ToastType = ToastType.ERROR,
-    delay: float = TOAST_DURATION_EXTENDED,
-) -> None:
-    embed = build_toast_embed(text, toast_type=toast_type, delay=delay)
-    try:
-        if not _is_interaction_done(interaction) and hasattr(interaction, "response"):
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            get_menu_manager().schedule_toast_dismissal(interaction, delay=delay)
-        elif hasattr(interaction, "followup"):
-            toast = await interaction.followup.send(embed=embed, ephemeral=True, wait=True)
-            get_menu_manager().schedule_toast_dismissal(toast, delay=delay)
-    except discord.errors.Forbidden as fe:
-        if getattr(fe, "code", None) in (50083, 10003, 10062):
-            logger.debug("Cannot send interaction toast in archived/deleted thread: %s", fe)
-        else:
-            raise
+_safe_edit_toast = edit_toast
+_safe_send_toast = send_toast
 
 
 class TaskDeleteConfirmView(BaseView):

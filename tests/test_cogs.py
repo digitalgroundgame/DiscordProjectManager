@@ -109,7 +109,8 @@ async def test_project_create_rejects_non_forum(services):
     )
 
     interaction.response.send_message.assert_awaited_once()
-    assert "Forum Channel" in interaction.response.send_message.call_args.args[0]
+    sent_embed = interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Forum Channel" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -446,8 +447,9 @@ async def test_dynamic_task_button_rejects_cross_guild(services):
     await bot._handle_dynamic_task_button(foreign_interaction, "note", task.id)
 
     foreign_interaction.response.send_message.assert_awaited_once()
-    error_msg = foreign_interaction.response.send_message.await_args.args[0]
-    assert "does not belong to this server" in error_msg
+    sent_embed = foreign_interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "does not belong to this server" in sent_embed.description
 
     # Task unchanged
     refreshed = await task_srv.get_by_id(task.id)
@@ -802,7 +804,8 @@ async def test_pm_cog_menu_and_notifications(services):
     # 2. Test /pm notifications with value
     await pm_cog.notifications.callback(pm_cog, interaction=interaction, notify_preference="channel")
     interaction.followup.send.assert_awaited_once()
-    assert "CHANNEL" in interaction.followup.send.call_args.args[0]
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "CHANNEL" in sent_embed.description
 
     pref = await user_srv.get_preference(guild_id, 1001)
     assert pref == NotificationPreference.CHANNEL
@@ -2253,8 +2256,8 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         action="add",
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "Mapped role" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Mapped role" in sent_embed.description
 
     # 2. Regular user (does NOT have team_lead_role_id, manage_guild=False)
     other_role = MagicMock(spec=discord.Role, id=other_role_id, name="Member")
@@ -2488,8 +2491,8 @@ async def test_task_create_with_invalid_prereqs_format(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    sent_text = interaction.followup.send.call_args[0][0]
-    assert "Could not parse any valid task short IDs" in sent_text
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Could not parse any valid task short IDs" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -2537,5 +2540,5 @@ async def test_task_create_with_nonexistent_prereq(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    sent_text = interaction.followup.send.call_args[0][0]
-    assert "Prerequisite task `INF-999` was not found" in sent_text
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Prerequisite task `INF-999` was not found" in sent_embed.description
