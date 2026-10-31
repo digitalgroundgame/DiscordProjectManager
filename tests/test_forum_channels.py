@@ -10,6 +10,8 @@ from src.adapters.discord_bot.discord_notifier import DiscordNotifier
 from src.adapters.discord_bot.views.forum_helpers import (
     ensure_pinned_hub_post,
     ensure_project_tag,
+    prune_archived_project_tags,
+    remove_project_tag,
     resolve_forum_tags,
     setup_forum_tags,
 )
@@ -801,3 +803,260 @@ async def test_ensure_pinned_hub_post_multi_project_update(services):
     edited_embed = mock_starter_msg.edit.call_args.kwargs["embed"]
     assert "Frontend App" in edited_embed.description
     assert "Backend API" in edited_embed.description
+
+
+@pytest.mark.asyncio
+async def test_remove_project_tag_success():
+    """Verify remove_project_tag removes the matching tag from available_tags."""
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 12345
+    t1 = _create_mock_tag(1, "To Do")
+    t2 = _create_mock_tag(2, "📁 Mobile App")
+    t3 = _create_mock_tag(3, "📁 Backend API")
+    mock_forum.available_tags = [t1, t2, t3]
+    mock_forum.edit = AsyncMock()
+
+    removed, err = await remove_project_tag(mock_forum, "Mobile App")
+    assert removed is True
+    assert err is None
+    mock_forum.edit.assert_awaited_once_with(available_tags=[t1, t3])
+
+
+@pytest.mark.asyncio
+async def test_remove_project_tag_not_found():
+    """Verify remove_project_tag returns False without edit if tag is not present."""
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    t1 = _create_mock_tag(1, "To Do")
+    mock_forum.available_tags = [t1]
+    mock_forum.edit = AsyncMock()
+
+    removed, err = await remove_project_tag(mock_forum, "Nonexistent")
+    assert removed is False
+    assert err is None
+    mock_forum.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_remove_project_tag_forbidden():
+    """Verify remove_project_tag handles discord.Forbidden gracefully."""
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 99999
+    mock_forum.name = "test-forum"
+    t1 = _create_mock_tag(1, "📁 Old Project")
+    mock_forum.available_tags = [t1]
+    mock_forum.edit = AsyncMock(side_effect=discord.Forbidden(MagicMock(), "Missing Permissions"))
+
+    removed, err = await remove_project_tag(mock_forum, "Old Project")
+    assert removed is False
+    assert "Manage Channels" in err
+
+
+@pytest.mark.asyncio
+async def test_prune_archived_project_tags_success():
+    """Verify prune_archived_project_tags removes all matching tags for archived projects."""
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 54321
+    t_todo = _create_mock_tag(1, "To Do")
+    t_active = _create_mock_tag(2, "📁 Active Proj")
+    t_arch1 = _create_mock_tag(3, "📁 Old Proj 1")
+    t_arch2 = _create_mock_tag(4, "📁 Old Proj 2")
+    mock_forum.available_tags = [t_todo, t_active, t_arch1, t_arch2]
+    mock_forum.edit = AsyncMock()
+
+    pruned, err = await prune_archived_project_tags(mock_forum, ["Old Proj 1", "Old Proj 2", "Nonexistent"])
+    assert pruned == 2
+    assert err is None
+    mock_forum.edit.assert_awaited_once_with(available_tags=[t_todo, t_active])
+
+
+@pytest.mark.asyncio
+async def test_ensure_pinned_hub_post_prunes_archived_project_tags(services):
+    """Verify ensure_pinned_hub_post prunes tags of archived projects sharing the forum."""
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    guild_id = 77665544
+
+    mock_guild = MagicMock()
+    mock_guild.id = guild_id
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 99887766
+    mock_forum.name = "dev-forum"
+    mock_forum.guild = mock_guild
+
+    t_active = _create_mock_tag(10, "📁 Active Service")
+    t_archived = _create_mock_tag(20, "📁 Old Service")
+    mock_forum.available_tags = [t_active, t_archived]
+    mock_forum.threads = []
+    mock_forum.edit = AsyncMock()
+
+    mock_thread = MagicMock()
+    mock_thread.id = 11122233
+    mock_thread.name = "📌 #dev-forum • Forum Control Hub"
+    mock_thread.edit = AsyncMock()
+    mock_forum.create_thread = AsyncMock(return_value=mock_thread)
+
+    # Project 1: Active
+    await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Active Service",
+        prefix="ACT",
+        discord_channel_id=mock_forum.id,
+    )
+    # Project 2: Archived
+    p2 = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Old Service",
+        prefix="OLD",
+        discord_channel_id=mock_forum.id,
+    )
+    await proj_srv.archive_project(p2.id)
+
+    ok, _msg = await ensure_pinned_hub_post(
+        channel=mock_forum,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+    )
+
+    assert ok is True
+    # mock_forum.edit should have been called to prune the Old Service tag
+    assert mock_forum.edit.await_count >= 1
+    # Check that t_archived was pruned in one of the edit calls
+    for call in mock_forum.edit.call_args_list:
+        if "available_tags" in call.kwargs:
+            tags = call.kwargs["available_tags"]
+            assert t_archived not in tags
+
+
+@pytest.mark.asyncio
+async def test_project_archive_confirm_view_removes_tag(services):
+    """Verify ProjectArchiveConfirmView removes project tag from bound forum channel."""
+    from src.adapters.discord_bot.views.project.archive import ProjectArchiveConfirmView
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    guild_id = 55443322
+
+    mock_guild = MagicMock()
+    mock_guild.id = guild_id
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 88776655
+    mock_forum.name = "pm-forum"
+    mock_forum.guild = mock_guild
+
+    t_proj = _create_mock_tag(101, "📁 Deprecated Service")
+    t_other = _create_mock_tag(102, "To Do")
+    mock_forum.available_tags = [t_proj, t_other]
+    mock_forum.threads = []
+    mock_forum.edit = AsyncMock()
+
+    mock_guild.get_channel = MagicMock(return_value=mock_forum)
+
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Deprecated Service",
+        prefix="DEP",
+        discord_channel_id=mock_forum.id,
+    )
+
+    view = ProjectArchiveConfirmView(
+        project=project,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = mock_guild
+    interaction.client = MagicMock()
+    interaction.response = MagicMock()
+    interaction.response.edit_message = AsyncMock()
+
+    await view._on_confirm_clicked(interaction)
+
+    # Check project is archived in DB
+    refetched = await proj_srv.get_by_id(project.id)
+    assert refetched.is_archived is True
+
+    # Check that remove_project_tag edited available_tags to exclude t_proj
+    assert mock_forum.edit.await_count >= 1
+    for call in mock_forum.edit.call_args_list:
+        if "available_tags" in call.kwargs:
+            tags = call.kwargs["available_tags"]
+            assert t_proj not in tags
+
+    interaction.response.edit_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_project_restore_confirm_view_handles_tag_limit_warning(services):
+    """Verify ProjectRestoreConfirmView displays warning notice when forum reaches 20 tags."""
+    from src.adapters.discord_bot.views.project.restore import ProjectRestoreConfirmView
+
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    guild_id = 66554433
+
+    mock_guild = MagicMock()
+    mock_guild.id = guild_id
+
+    mock_forum = MagicMock(spec=discord.ForumChannel)
+    mock_forum.id = 33445566
+    mock_forum.name = "full-forum"
+    mock_forum.guild = mock_guild
+
+    # 20 existing tags
+    mock_forum.available_tags = [_create_mock_tag(i, f"Tag {i}") for i in range(20)]
+    mock_forum.threads = []
+    mock_forum.edit = AsyncMock()
+
+    mock_thread = MagicMock()
+    mock_thread.id = 77889900
+    mock_thread.name = "📌 #full-forum • Forum Control Hub"
+    mock_thread.edit = AsyncMock()
+    mock_forum.create_thread = AsyncMock(return_value=mock_thread)
+
+    mock_guild.get_channel = MagicMock(return_value=mock_forum)
+
+    project = await proj_srv.create_project(
+        guild_id=guild_id,
+        name="Revived Service",
+        prefix="REV",
+        discord_channel_id=mock_forum.id,
+    )
+    await proj_srv.archive_project(project.id)
+    archived_proj = await proj_srv.get_by_id(project.id)
+    assert archived_proj.is_archived is True
+
+    view = ProjectRestoreConfirmView(
+        project=archived_proj,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild = mock_guild
+    interaction.client = MagicMock()
+    interaction.response = MagicMock()
+    interaction.response.edit_message = AsyncMock()
+
+    await view._on_confirm_clicked(interaction)
+
+    # Check project is restored in DB
+    refetched = await proj_srv.get_by_id(project.id)
+    assert refetched.is_archived is False
+
+    interaction.response.edit_message.assert_awaited_once()
+    edited_embed = interaction.response.edit_message.call_args.kwargs["embed"]
+    assert "Notice:" in edited_embed.description
+    assert "20-tag limit" in edited_embed.description

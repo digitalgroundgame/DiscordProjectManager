@@ -80,17 +80,20 @@ class ProjectRestoreConfirmView(BaseView):
                     if t.discord_thread_id and t.status != TaskStatus.COMPLETED:
                         await interaction.client.sync_task_thread(t, action="unarchive")
 
+            hub_warning: str | None = None
             if interaction.guild and self.project.discord_channel_id:
                 chan = interaction.guild.get_channel(self.project.discord_channel_id)
                 if chan and isinstance(chan, (discord.ForumChannel, discord.TextChannel)):
                     try:
-                        await ensure_pinned_hub_post(
+                        _ok, hub_msg = await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
                             squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
+                        if "Warning:" in hub_msg:
+                            hub_warning = hub_msg.split("Warning:", 1)[1].rstrip(".)").strip()
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project restore: %s", he)
 
@@ -101,10 +104,11 @@ class ProjectRestoreConfirmView(BaseView):
                 user_service=self.user_service,
                 initial_interaction=interaction,
             )
+            warning_note = f"\n\n⚠️ **Notice:** {hub_warning}" if hub_warning else ""
             embed.description = (
                 f"**Project Restored!**\n"
-                f"Project **{restored.name} (`{restored.prefix}`)** has been reactivated.\n\n"
-                + (embed.description or "")
+                f"Project **{restored.name} (`{restored.prefix}`)** has been reactivated."
+                f"{warning_note}\n\n" + (embed.description or "")
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         except Exception as e:
