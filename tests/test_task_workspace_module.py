@@ -379,7 +379,9 @@ async def test_handle_action_status_and_permissions(services):
 
     await adapter.handle_action(unauth_interaction, "start", task.id)
     unauth_interaction.response.send_message.assert_awaited_once()
-    assert "You do not have permission" in unauth_interaction.response.send_message.call_args[0][0]
+    sent_embed = unauth_interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     # Task should remain NOT_STARTED
     cur_task = await task_srv.get_by_id(task.id)

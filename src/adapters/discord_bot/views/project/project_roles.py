@@ -10,6 +10,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project
 
@@ -31,13 +32,13 @@ class ProjectRoleSelectView(BaseView):
         squad_service: SquadService | None = None,
         task_service: TaskService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.projects = projects
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
-        self._initial_interaction = initial_interaction
 
         self.selected_project_id: UUID = projects[0].id
         self.selected_role: discord.Role | None = None
@@ -109,17 +110,6 @@ class ProjectRoleSelectView(BaseView):
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
 
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
-
     def _get_selected_project(self) -> Project | None:
         return next((p for p in self.projects if p.id == self.selected_project_id), None)
 
@@ -152,7 +142,7 @@ class ProjectRoleSelectView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         try:
@@ -214,7 +204,7 @@ class ProjectRoleSelectView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         try:

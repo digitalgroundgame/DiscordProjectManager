@@ -9,6 +9,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import PriorityLevel, TaskStatus
 from src.domain.exceptions import PermissionDeniedError
@@ -98,8 +99,10 @@ class TaskQuickControlsView(BaseView):
         auth_service: AuthService | None = None,
         bot: discord.Client | None = None,
         workspace: ITaskDiscordWorkspace | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task = task
         self.task_service = task_service
         self.auth_service = auth_service
@@ -176,7 +179,7 @@ class TaskQuickControlsView(BaseView):
 
         discard_btn = discord.ui.Button(
             label="Discard Changes",
-            style=discord.ButtonStyle.danger,
+            style=discord.ButtonStyle.secondary,
             row=0,
         )
         discard_btn.callback = self._on_cancel_clicked
@@ -375,23 +378,17 @@ class TaskQuickControlsView(BaseView):
         if updated_task:
             self.task = updated_task
         self.stop()
-        embed = discord.Embed(
-            title=f"Updated [{self.task.short_id}]",
-            description="Task changes have been saved to the workspace.",
-            color=discord.Color.green(),
-        )
-        from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-        attach_dismissal_footer(embed, delay=3.0)
-        is_done = False
-        if hasattr(interaction, "response") and hasattr(interaction.response, "is_done"):
-            res = interaction.response.is_done()
-            if isinstance(res, bool):
-                is_done = res
-        if hasattr(interaction, "response") and not is_done:
-            await interaction.response.edit_message(embed=embed, view=None)
-        elif hasattr(interaction, "edit_original_response"):
-            await interaction.edit_original_response(embed=embed, view=None)
+        from src.adapters.discord_bot.menu_manager import edit_toast, menu_manager
+        from src.adapters.discord_bot.ui_constants import ToastType
+
+        await edit_toast(
+            interaction,
+            "Task changes have been saved to the workspace.",
+            toast_type=ToastType.SUCCESS,
+            title=f"Updated [{self.task.short_id}]",
+            delay=TOAST_DURATION_STANDARD,
+        )
 
         if self.bot and hasattr(self.bot, "sync_root_task_message"):
             await self.bot.sync_root_task_message(self.task)
@@ -399,7 +396,6 @@ class TaskQuickControlsView(BaseView):
                 await self.bot.sync_task_thread(self.task, sync_title=title_changed, sync_archive=False)
 
         menu_manager.unregister_menu(interaction)
-        menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
 
     _on_done_clicked = _on_save_clicked
 

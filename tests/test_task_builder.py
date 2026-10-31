@@ -30,7 +30,9 @@ async def test_task_details_modal_submission(services):
     empty_interaction.response.send_message = AsyncMock()
     await modal.on_submit(empty_interaction)
     empty_interaction.response.send_message.assert_awaited_once()
-    assert "cannot be empty" in empty_interaction.response.send_message.call_args[0][0]
+    sent_embed = empty_interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "cannot be empty" in sent_embed.description
 
     # 2. Valid title and description submission launches TaskCreateDraftView
     modal.title_input._value = "Setup Redis Cluster"
@@ -196,8 +198,10 @@ async def test_custom_due_date_modal(services):
         await modal.on_submit(invalid_interaction)
         invalid_interaction.response.edit_message.assert_awaited_once()
         invalid_interaction.followup.send.assert_awaited_once()
-        assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
-        assert "*⏱️ Auto-dismisses <t:" in invalid_interaction.followup.send.call_args[0][0]
+        sent_embed = invalid_interaction.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Could not parse" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
         assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
@@ -271,9 +275,10 @@ async def test_edit_details_and_cancel_in_draft_view(services):
         invalid_sub_interaction.response.edit_message.assert_awaited_once()
         assert invalid_sub_interaction.response.edit_message.call_args.kwargs.get("view") is draft_view
         invalid_sub_interaction.followup.send.assert_awaited_once()
-        toast_text = invalid_sub_interaction.followup.send.call_args[0][0]
-        assert "Task title cannot be empty" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        sent_embed = invalid_sub_interaction.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Task title cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
     assert draft_view.title == "Original Title"
 
@@ -361,7 +366,7 @@ async def test_confirm_task_creation_in_forum_channel(services):
     assert "Task Created: [API-1] Implement Rate Limiter" in success_embed.title
     assert success_embed.footer is not None
     assert "Task UUID:" in success_embed.footer.text
-    assert "⏱️ Auto-dismisses <t:" in success_embed.description
+    assert "Auto-dismisses <t:" in success_embed.description
 
     # 3. Database task created with all parameters
     tasks, total = await task_srv.list_tasks(guild_id=guild_id, project_id=project.id)
@@ -381,4 +386,4 @@ async def test_confirm_task_creation_in_forum_channel(services):
     await draft_view._on_cancel_clicked(cancel_interaction)
     cancel_interaction.response.edit_message.assert_awaited_once()
     cancel_embed = cancel_interaction.response.edit_message.call_args.kwargs["embed"]
-    assert "⏱️ Auto-dismisses <t:" in cancel_embed.description
+    assert "Auto-dismisses <t:" in cancel_embed.description

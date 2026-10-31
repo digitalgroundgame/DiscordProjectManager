@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseModal, BaseView
 from src.adapters.discord_bot.views.project.wizard_embeds import build_project_draft_embed
 
@@ -115,7 +116,14 @@ class ProjectCreateModal(BaseModal):
 
         name = self.name_input.value.strip()
         if not name:
-            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+            from src.adapters.discord_bot.menu_manager import build_toast_embed, menu_manager
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            toast_embed = build_toast_embed(
+                "Project name cannot be empty.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_STANDARD,
+            )
 
             if self.draft_view:
                 self.draft_view._rebuild_items()
@@ -131,11 +139,11 @@ class ProjectCreateModal(BaseModal):
                 )
                 await interaction.response.edit_message(embed=embed, view=self.draft_view)
                 toast = await interaction.followup.send(
-                    format_toast_message("❌ Project name cannot be empty.", delay=8.0),
+                    embed=toast_embed,
                     ephemeral=True,
                     wait=True,
                 )
-                menu_manager.schedule_toast_dismissal(toast, delay=8.0)
+                menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_STANDARD)
             elif self.parent_view:
                 if hasattr(self.parent_view, "_rebuild_items"):
                     self.parent_view._rebuild_items()
@@ -145,14 +153,14 @@ class ProjectCreateModal(BaseModal):
                 else:
                     await interaction.response.edit_message(view=self.parent_view)
                 toast = await interaction.followup.send(
-                    format_toast_message("❌ Project name cannot be empty.", delay=8.0),
+                    embed=toast_embed,
                     ephemeral=True,
                     wait=True,
                 )
-                menu_manager.schedule_toast_dismissal(toast, delay=8.0)
+                menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_STANDARD)
             else:
-                await interaction.response.send_message("❌ Project name cannot be empty.", ephemeral=True)
-                menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                await interaction.response.send_message(embed=toast_embed, ephemeral=True)
+                menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         prefix = self.prefix_input.value.strip() or None
@@ -213,14 +221,14 @@ class ProjectChannelSelectView(BaseView):
         initial_interaction: discord.Interaction | None = None,
         user_service: UserService | None = None,
         return_to: str = "projects",
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.return_to = return_to
-        self._initial_interaction = initial_interaction
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -251,17 +259,6 @@ class ProjectChannelSelectView(BaseView):
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
 
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
-
     async def _on_channel_selected(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
@@ -270,14 +267,20 @@ class ProjectChannelSelectView(BaseView):
         if not chan or not isinstance(chan, discord.ForumChannel):
             self._rebuild_items()
             await interaction.response.edit_message(view=self)
-            from src.adapters.discord_bot.menu_manager import format_toast_message, menu_manager
+            from src.adapters.discord_bot.menu_manager import build_toast_embed, menu_manager
+            from src.adapters.discord_bot.ui_constants import ToastType
 
+            embed_toast = build_toast_embed(
+                "Selected channel must be a Forum Channel.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_STANDARD,
+            )
             toast = await interaction.followup.send(
-                format_toast_message("❌ Selected channel must be a Forum Channel.", delay=8.0),
+                embed=embed_toast,
                 ephemeral=True,
                 wait=True,
             )
-            menu_manager.schedule_toast_dismissal(toast, delay=8.0)
+            menu_manager.schedule_toast_dismissal(toast, delay=TOAST_DURATION_STANDARD)
             return
 
         modal = ProjectCreateModal(
@@ -298,7 +301,7 @@ class ProjectChannelSelectView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
         modal = ProjectCreateModal(
             self.project_service,

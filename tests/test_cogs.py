@@ -109,7 +109,8 @@ async def test_project_create_rejects_non_forum(services):
     )
 
     interaction.response.send_message.assert_awaited_once()
-    assert "Forum Channel" in interaction.response.send_message.call_args.args[0]
+    sent_embed = interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Forum Channel" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -446,8 +447,9 @@ async def test_dynamic_task_button_rejects_cross_guild(services):
     await bot._handle_dynamic_task_button(foreign_interaction, "note", task.id)
 
     foreign_interaction.response.send_message.assert_awaited_once()
-    error_msg = foreign_interaction.response.send_message.await_args.args[0]
-    assert "does not belong to this server" in error_msg
+    sent_embed = foreign_interaction.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "does not belong to this server" in sent_embed.description
 
     # Task unchanged
     refreshed = await task_srv.get_by_id(task.id)
@@ -802,7 +804,8 @@ async def test_pm_cog_menu_and_notifications(services):
     # 2. Test /pm notifications with value
     await pm_cog.notifications.callback(pm_cog, interaction=interaction, notify_preference="channel")
     interaction.followup.send.assert_awaited_once()
-    assert "CHANNEL" in interaction.followup.send.call_args.args[0]
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "CHANNEL" in sent_embed.description
 
     pref = await user_srv.get_preference(guild_id, 1001)
     assert pref == NotificationPreference.CHANNEL
@@ -948,7 +951,7 @@ async def test_task_quick_controls_view_callbacks(services):
     save_interaction.response.edit_message.assert_awaited_once()
     saved_embed = save_interaction.response.edit_message.call_args.kwargs["embed"]
     assert "Updated" in saved_embed.title
-    assert "⏱️ Auto-dismisses <t:" in saved_embed.description
+    assert "Auto-dismisses <t:" in saved_embed.description
     assert controls_view.task.priority == PriorityLevel.HIGH
     assert controls_view.task.assignee_discord_id == 4001
     assert controls_view.task.watchers == [5001]
@@ -1016,8 +1019,10 @@ async def test_quick_controls_custom_due_date_flow(services):
         await modal.on_submit(invalid_interaction)
         invalid_interaction.response.edit_message.assert_awaited_once()
         invalid_interaction.followup.send.assert_awaited_once()
-        assert "Could not parse" in invalid_interaction.followup.send.call_args[0][0]
-        assert "*⏱️ Auto-dismisses <t:" in invalid_interaction.followup.send.call_args[0][0]
+        sent_embed = invalid_interaction.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Could not parse" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert invalid_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
         assert invalid_interaction.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
@@ -1999,8 +2004,9 @@ async def test_task_status_blocked_guard_with_force_unauthorized(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     task_in_db = await task_srv.get_by_id(blocked_task.id)
     assert task_in_db.status == TaskStatus.NOT_STARTED
@@ -2250,8 +2256,8 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         action="add",
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "Mapped role" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Mapped role" in sent_embed.description
 
     # 2. Regular user (does NOT have team_lead_role_id, manage_guild=False)
     other_role = MagicMock(spec=discord.Role, id=other_role_id, name="Member")
@@ -2273,8 +2279,9 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         role=squad_role,
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
     # Regular user fails mapping role to project
     interaction.followup.send.reset_mock()
@@ -2286,8 +2293,9 @@ async def test_project_and_squad_create_by_team_lead_role(services, repos):
         action="add",
     )
     interaction.followup.send.assert_awaited()
-    sent_msg = interaction.followup.send.call_args[0][0]
-    assert "You do not have permission" in sent_msg
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "You do not have permission" in sent_embed.description
 
 
 def test_pm_cog_does_not_expose_squad_command_group():
@@ -2483,8 +2491,8 @@ async def test_task_create_with_invalid_prereqs_format(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    sent_text = interaction.followup.send.call_args[0][0]
-    assert "Could not parse any valid task short IDs" in sent_text
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Could not parse any valid task short IDs" in sent_embed.description
 
 
 @pytest.mark.asyncio
@@ -2532,5 +2540,5 @@ async def test_task_create_with_nonexistent_prereq(services):
     )
 
     interaction.followup.send.assert_awaited_once()
-    sent_text = interaction.followup.send.call_args[0][0]
-    assert "Prerequisite task `INF-999` was not found" in sent_text
+    sent_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Prerequisite task `INF-999` was not found" in sent_embed.description

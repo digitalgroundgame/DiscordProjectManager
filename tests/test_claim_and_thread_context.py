@@ -107,7 +107,9 @@ async def test_claim_task_action_flow(services):
 
     await adapter.handle_action(interaction_same, "claim", task.id)
     interaction_same.response.send_message.assert_awaited_once()
-    assert "already assigned" in interaction_same.response.send_message.await_args.args[0]
+    sent_embed1 = interaction_same.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed1 is not None
+    assert "already assigned" in sent_embed1.description
 
     # 3. Different member tries to claim already assigned task -> warning ephemeral
     other_member = MagicMock(spec=discord.Member)
@@ -124,7 +126,9 @@ async def test_claim_task_action_flow(services):
 
     await adapter.handle_action(interaction_other, "claim", task.id)
     interaction_other.response.send_message.assert_awaited_once()
-    assert "already claimed" in interaction_other.response.send_message.await_args.args[0]
+    sent_embed2 = interaction_other.response.send_message.call_args.kwargs.get("embed")
+    assert sent_embed2 is not None
+    assert "already claimed" in sent_embed2.description
 
     # 4. Assigned member clicks Unassign Me -> unassigns task
     interaction_unassign = MagicMock(spec=discord.Interaction)
@@ -195,13 +199,15 @@ async def test_in_thread_context_resolution(services):
     interaction_outside = MagicMock(spec=discord.Interaction)
     interaction_outside.guild = MagicMock(id=guild_id)
     interaction_outside.channel_id = 999999999  # Not a task thread
+    interaction_outside.response = MagicMock()
+    interaction_outside.response.is_done.return_value = True
     interaction_outside.followup = MagicMock()
     interaction_outside.followup.send = AsyncMock()
 
     resolved_none = await cog._resolve_task_context(interaction_outside, None)
     assert resolved_none is None
-    interaction_outside.followup.send.assert_awaited_once()
-    assert "No task specified" in interaction_outside.followup.send.await_args.args[0]
+    sent_embed = interaction_outside.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "No task specified" in sent_embed.description
 
 
 @pytest.mark.asyncio

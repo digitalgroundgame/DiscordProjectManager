@@ -593,8 +593,8 @@ async def test_pm_cog_post_hub_and_subgroups(services):
     await pm_cog.post_hub.callback(pm_cog, interaction=interaction_hub, channel=mock_forum)
 
     interaction_hub.followup.send.assert_awaited_once()
-    hub_res = interaction_hub.followup.send.await_args.args[0]
-    assert "Created and pinned" in hub_res
+    sent_embed = interaction_hub.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed is not None and "Created and pinned" in sent_embed.description
 
     # 2. /pm menu
     interaction_menu = MagicMock(spec=discord.Interaction)

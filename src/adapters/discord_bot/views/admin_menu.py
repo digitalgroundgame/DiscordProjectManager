@@ -9,6 +9,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.admin_team_leads_view import (
     LeadRolesAdminView,
     TeamLeadsAdminView,
@@ -125,13 +126,13 @@ class PmDashboardOverviewView(BaseView):
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self._initial_interaction = initial_interaction
 
         self.back_btn = discord.ui.Button(
             label="Back to Control Center",
@@ -184,14 +185,14 @@ class PmDashboardView(BaseView):
         is_server_manager: bool | None = None,
         is_server_admin: bool | None = None,
         auth_service: AuthService | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
         self.auth_service = auth_service
-        self._initial_interaction = initial_interaction
 
         effective_user = user or (initial_interaction.user if initial_interaction else None)
         if is_server_manager is not None:
@@ -269,20 +270,6 @@ class PmDashboardView(BaseView):
         )
         self.guides_btn.callback = self._on_guides_clicked
         self.add_item(self.guides_btn)
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.unregister_menu(self._initial_interaction)
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     async def _on_new_project_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:

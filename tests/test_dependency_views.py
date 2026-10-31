@@ -150,13 +150,15 @@ async def test_dependency_and_tree_cogs_slash_commands(services):
     # 1. /pm task depend
     await pm_cog.task_depend.callback(pm_cog, interaction=interaction, task=t2.short_id, depends_on=t1.short_id)
     interaction.followup.send.assert_awaited_once()
-    assert "Linked dependency" in interaction.followup.send.call_args.args[0]
+    sent_embed1 = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed1 is not None and "Linked dependency" in sent_embed1.description
 
     # 2. /pm task undepend
     interaction.followup.send.reset_mock()
     await pm_cog.task_undepend.callback(pm_cog, interaction=interaction, task=t2.short_id, depends_on=t1.short_id)
     interaction.followup.send.assert_awaited_once()
-    assert "Unlinked dependency" in interaction.followup.send.call_args.args[0]
+    sent_embed2 = interaction.followup.send.call_args.kwargs.get("embed")
+    assert sent_embed2 is not None and "Unlinked dependency" in sent_embed2.description
 
     # 3. /pm project tree
     interaction.followup.send.reset_mock()
@@ -234,7 +236,9 @@ async def test_task_blocked_confirm_view_and_embed(services):
 
     await view.cancel_transition.callback(cancel_interaction)
     cancel_interaction.response.edit_message.assert_awaited_once()
-    assert "cancelled" in cancel_interaction.response.edit_message.call_args.kwargs["content"]
+    cancel_embed = cancel_interaction.response.edit_message.call_args.kwargs["embed"]
+    assert "cancelled" in cancel_embed.description
+    assert "*Auto-dismisses <t:" in cancel_embed.description
 
     t2_after_cancel = await task_srv.get_by_id(t2.id)
     assert t2_after_cancel.status == TaskStatus.NOT_STARTED
@@ -247,9 +251,10 @@ async def test_task_blocked_confirm_view_and_embed(services):
 
     await view.confirm_proceed.callback(proceed_interaction)
     proceed_interaction.response.edit_message.assert_awaited_once()
-    assert "Bypassed" in proceed_interaction.response.edit_message.call_args.kwargs["content"]
+    proceed_embed = proceed_interaction.response.edit_message.call_args.kwargs["embed"]
+    assert "Bypassed" in proceed_embed.description
+    assert "*Auto-dismisses <t:" in proceed_embed.description
 
     t2_after_proceed = await task_srv.get_by_id(t2.id)
     assert t2_after_proceed.status == TaskStatus.IN_PROGRESS
-    mock_workspace.refresh_action_card.assert_awaited_once()
     mock_workspace.sync_workspace.assert_awaited_once()

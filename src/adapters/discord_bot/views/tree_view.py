@@ -7,6 +7,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project
 
@@ -27,8 +28,10 @@ class TechTreeViewer(BaseView):
         project: Project,
         current_orientation: str = "lr",
         auth_service: AuthService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project = project
         self.current_orientation = current_orientation
@@ -114,8 +117,10 @@ class TechTreeProjectSelectView(BaseView):
         projects: list[Project],
         orientation: str = "lr",
         auth_service: AuthService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=120)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project_service = project_service
         self.projects = projects
@@ -184,6 +189,10 @@ class TechTreeProjectSelectView(BaseView):
         )
         embed.set_image(url="attachment://tech_tree.png")
         view = TechTreeViewer(
-            self.task_service, project, current_orientation=self.orientation, auth_service=self.auth_service
+            self.task_service,
+            project,
+            current_orientation=self.orientation,
+            auth_service=self.auth_service,
+            initial_interaction=interaction,
         )
         await interaction.edit_original_response(embed=embed, attachments=[file], view=view)

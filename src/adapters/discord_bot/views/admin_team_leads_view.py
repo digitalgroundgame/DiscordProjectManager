@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import NotificationPreference
 from src.services.auth_service import AuthService
@@ -31,8 +32,9 @@ class TeamLeadsAdminView(BaseView):
         user_service: UserService | None = None,
         auth_service: AuthService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service

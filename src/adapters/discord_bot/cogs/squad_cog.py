@@ -7,6 +7,8 @@ from discord import app_commands
 
 from src.adapters.discord_bot.cogs.autocomplete import AutocompleteMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import send_toast
+from src.adapters.discord_bot.ui_constants import ToastType
 
 logger = logging.getLogger("dgg_pm.cogs.squad")
 
@@ -47,22 +49,19 @@ class SquadCommandsMixin(AutocompleteMixin):
                 await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             squad = await self.squad_service.get_or_create_squad_for_role(interaction.guild.id, role.id, role.name)
 
             if action == "add":
                 await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
-                msg = f"🔗 Mapped role **{role.name}** (<@&{role.id}>) to project **{project.name}**."
+                msg = f"Mapped role **{role.name}** (<@&{role.id}>) to project **{project.name}**."
             else:
                 await self.project_service.remove_squad_from_project(project_id=project.id, squad_id=squad.id)
-                msg = f"✂️ Unmapped role **{role.name}** from project **{project.name}**."
+                msg = f"Unmapped role **{role.name}** from project **{project.name}**."
 
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            await send_toast(interaction, msg, toast_type=ToastType.SUCCESS)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"managing project role for '{project_name}'", logger, ephemeral=True
@@ -94,12 +93,16 @@ class SquadCommandsMixin(AutocompleteMixin):
         try:
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             squads = await self.project_service.list_squads_for_project(project.id)
             if not squads:
-                await interaction.followup.send(f"❌ Project '{project.name}' has no assigned squads.", ephemeral=True)
+                await send_toast(
+                    interaction,
+                    f"Project '{project.name}' has no assigned squads.",
+                    toast_type=ToastType.ERROR,
+                )
                 return
 
             # Check auth: server manager or active lead
@@ -111,9 +114,10 @@ class SquadCommandsMixin(AutocompleteMixin):
                         is_any_lead = True
                         break
                 if not is_any_lead:
-                    await interaction.followup.send(
-                        "❌ You do not have permission to manage squad leads for this project.",
-                        ephemeral=True,
+                    await send_toast(
+                        interaction,
+                        "You do not have permission to manage squad leads for this project.",
+                        toast_type=ToastType.ERROR,
                     )
                     return
 
@@ -123,24 +127,22 @@ class SquadCommandsMixin(AutocompleteMixin):
             if action == "add":
                 if not matching_squads:
                     role_mentions = ", ".join(f"<@&{s.discord_role_id}>" for s in squads)
-                    await interaction.followup.send(
-                        f"❌ <@{user.id}> does not hold any of project **{project.name}**'s assigned roles "
+                    await send_toast(
+                        interaction,
+                        f"<@{user.id}> does not hold any of project **{project.name}**'s assigned roles "
                         f"({role_mentions}).\nPlease assign them the Discord role first.",
-                        ephemeral=True,
+                        toast_type=ToastType.ERROR,
                     )
                     return
                 for s in matching_squads:
                     await self.squad_service.add_squad_lead(s.id, user.id)
-                msg = f"⭐ Designated <@{user.id}> as **Squad Lead** for project **{project.name}**."
+                msg = f"Designated <@{user.id}> as **Squad Lead** for project **{project.name}**."
             else:
                 for s in squads:
                     await self.squad_service.remove_squad_lead(s.id, user.id)
-                msg = f"✅ Removed Squad Lead status from <@{user.id}> for project **{project.name}**."
+                msg = f"Removed Squad Lead status from <@{user.id}> for project **{project.name}**."
 
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            await send_toast(interaction, msg, toast_type=ToastType.SUCCESS)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"managing lead for project '{project_name}'", logger, ephemeral=True
@@ -174,25 +176,22 @@ class SquadCommandsMixin(AutocompleteMixin):
                 await self.auth_service.require_project_management(interaction.user, interaction.guild.id)
             project = await self.project_service.get_by_name(interaction.guild.id, project_name)
             if not project:
-                await interaction.followup.send(f"❌ Project '{project_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Project '{project_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             squad = await self.squad_service.get_by_name(interaction.guild.id, squad_name)
             if not squad:
-                await interaction.followup.send(f"❌ Squad '{squad_name}' not found.", ephemeral=True)
+                await send_toast(interaction, f"Squad '{squad_name}' not found.", toast_type=ToastType.ERROR)
                 return
 
             if action == "map":
                 await self.project_service.assign_squad_to_project(project_id=project.id, squad_id=squad.id)
-                msg = f"🔗 Mapped squad **{squad.name}** (<@&{squad.discord_role_id}>) to project **{project.name}**."
+                msg = f"Mapped squad **{squad.name}** (<@&{squad.discord_role_id}>) to project **{project.name}**."
             else:
                 await self.project_service.remove_squad_from_project(project_id=project.id, squad_id=squad.id)
-                msg = f"✂️ Unmapped squad **{squad.name}** from project **{project.name}**."
+                msg = f"Unmapped squad **{squad.name}** from project **{project.name}**."
 
-            await interaction.followup.send(msg)
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            await send_toast(interaction, msg, toast_type=ToastType.SUCCESS)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"mapping squad to project '{project_name}'", logger, ephemeral=True

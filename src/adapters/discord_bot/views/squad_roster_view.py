@@ -9,6 +9,10 @@ from uuid import UUID
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.squad_embeds import build_squad_menu_embed
 from src.domain.enums import SquadRoleType
@@ -40,8 +44,9 @@ class SquadRosterDetailView(BaseView):
         selected_squad_id: UUID | None = None,
         member_page: int = 0,
         member_query: str = "",
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_squads = list(squads)
         self.squad_service = squad_service
         self.project_service = project_service
@@ -242,17 +247,6 @@ class SquadRosterDetailView(BaseView):
         self.back_btn.callback = self._on_back_clicked
         self.add_item(self.back_btn)
 
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
-
     async def _on_select(self, interaction: discord.Interaction) -> None:
         val = self.select.values[0]
         if val == "none":
@@ -264,7 +258,7 @@ class SquadRosterDetailView(BaseView):
             await interaction.response.send_message("❌ Squad not found.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         self.selected_squad_id = squad.id

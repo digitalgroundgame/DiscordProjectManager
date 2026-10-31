@@ -3,6 +3,7 @@ from datetime import UTC
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.models import Task
@@ -71,8 +72,9 @@ class TaskListView(BaseView):
         title_context: str = "Active Tasks",
         current_page: int = 0,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.tasks = tasks
         self.total_count = total_count
         self.title_context = title_context
@@ -84,17 +86,6 @@ class TaskListView(BaseView):
         self.total_pages = max(1, math.ceil(total_count / PAGE_SIZE))
         self._initial_interaction = initial_interaction
         self._update_buttons()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _update_buttons(self) -> None:
         self.prev_btn.disabled = self.current_page <= 0

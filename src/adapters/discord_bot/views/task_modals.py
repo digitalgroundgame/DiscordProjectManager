@@ -8,6 +8,12 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.menu_manager import build_toast_embed, get_menu_manager
+from src.adapters.discord_bot.ui_constants import (
+    TOAST_DURATION_EXTENDED,
+    TOAST_DURATION_STANDARD,
+    ToastType,
+)
 from src.adapters.discord_bot.views.base_view import BaseModal
 from src.adapters.discord_bot.views.forum_helpers import unarchive_thread_if_needed
 from src.adapters.discord_bot.workspace_protocol import ITaskDiscordWorkspace
@@ -55,7 +61,13 @@ class TaskNoteModal(BaseModal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         note_text = self.note_input.value.strip()
         if not note_text:
-            await interaction.response.send_message("❌ Note cannot be empty.", ephemeral=True)
+            embed = build_toast_embed(
+                "Note cannot be empty.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_EXTENDED)
             return
 
         try:
@@ -71,13 +83,16 @@ class TaskNoteModal(BaseModal):
             thread = interaction.channel if isinstance(interaction.channel, discord.Thread) else None
             keep_archived = (task.status == TaskStatus.COMPLETED or task.is_archived) if task else False
             async with unarchive_thread_if_needed(thread, keep_archived=keep_archived):
+                embed = build_toast_embed(
+                    f"Note added to **{self.short_id}**.",
+                    toast_type=ToastType.SUCCESS,
+                    delay=TOAST_DURATION_STANDARD,
+                )
                 await interaction.response.send_message(
-                    f"✅ Note added to **{self.short_id}**.",
+                    embed=embed,
                     ephemeral=True,
                 )
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                menu_manager.schedule_toast_dismissal(interaction, delay=6.0)
+                get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(
                 interaction, e, f"adding note to task '{self.short_id}'", logger, ephemeral=True
@@ -145,7 +160,13 @@ class TaskEditModal(BaseModal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
         if not title:
-            await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
+            embed = build_toast_embed(
+                "Task title cannot be empty.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_EXTENDED)
             return
 
         body_val = self.body_input.value.strip()
@@ -193,10 +214,16 @@ class TaskEditModal(BaseModal):
             if interaction.message:
                 await ws.refresh_action_card(interaction, updated_task)
             else:
+                embed = build_toast_embed(
+                    f"Updated **[{updated_task.short_id}] {updated_task.title}**.",
+                    toast_type=ToastType.SUCCESS,
+                    delay=TOAST_DURATION_STANDARD,
+                )
                 await interaction.response.send_message(
-                    f"✅ Updated **[{updated_task.short_id}] {updated_task.title}**.",
+                    embed=embed,
                     ephemeral=True,
                 )
+                get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
 
             sync_res = await ws.sync_workspace(
                 updated_task, sync_title=True, sync_archive=False, sync_starter_card=True
@@ -209,12 +236,15 @@ class TaskEditModal(BaseModal):
                 title_deferred = bool(getattr(legacy_res, "title_deferred", False))
 
             if title_deferred:
-                notice = (
-                    "ℹ️ Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
-                    "thread title will reflect changes shortly)."
+                notice = build_toast_embed(
+                    "Task title updated. (Note: Discord limits thread renames to 2 per 10 minutes; "
+                    "thread title will reflect changes shortly).",
+                    toast_type=ToastType.INFO,
+                    delay=TOAST_DURATION_EXTENDED,
                 )
                 try:
-                    await interaction.followup.send(notice, ephemeral=True)
+                    toast = await interaction.followup.send(embed=notice, ephemeral=True, wait=True)
+                    get_menu_manager().schedule_toast_dismissal(toast, delay=TOAST_DURATION_EXTENDED)
                 except Exception:
                     pass
         except Exception as e:
@@ -254,7 +284,13 @@ class TaskQuickEditTitleModal(BaseModal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         title = self.title_input.value.strip()
         if not title:
-            await interaction.response.send_message("❌ Task title cannot be empty.", ephemeral=True)
+            embed = build_toast_embed(
+                "Task title cannot be empty.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            get_menu_manager().schedule_toast_dismissal(interaction, delay=TOAST_DURATION_EXTENDED)
             return
 
         body = self.desc_input.value.strip() or None

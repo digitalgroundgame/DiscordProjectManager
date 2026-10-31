@@ -351,10 +351,10 @@ def test_unified_controls_view_displays_clear_draft_indicators():
     # 4. Footer displays the single clear unsaved draft warning with alert emoji
     assert "⚠️ Unsaved Draft" in embed.footer.text
 
-    # 5. Row 0 has "Discard Changes" with danger style immediately adjacent to "Save Changes"
+    # 5. Row 0 has "Discard Changes" with secondary style immediately adjacent to "Save Changes"
     row0_buttons = [item for item in view.children if isinstance(item, discord.ui.Button) and item.row == 0]
     button_labels = [b.label for b in row0_buttons]
     assert button_labels[:3] == ["Save Changes", "Discard Changes", "Edit Title / Body"]
     discard_btn = next((b for b in row0_buttons if b.label == "Discard Changes"), None)
     assert discard_btn is not None
-    assert discard_btn.style == discord.ButtonStyle.danger
+    assert discard_btn.style == discord.ButtonStyle.secondary
