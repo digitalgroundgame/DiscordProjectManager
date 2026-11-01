@@ -54,9 +54,9 @@ async def test_project_menu_and_modal(services):
 
     # 1. Test ProjectMenuView and embed
     view = ProjectMenuView(proj_srv, squad_srv, task_service=services["task"])
-    # 9 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
-    # Archive, Restore, Rebuild Workspace, Tech Tree, Hub
-    assert len(view.children) == 9
+    # 10 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
+    # Archive, Restore, Rebuild Workspace, Tech Tree, Hub, Close
+    assert len(view.children) == 10
 
     # Test clicking New Project opens ProjectChannelSelectView
     new_proj_interaction = MagicMock(spec=discord.Interaction)
@@ -412,7 +412,7 @@ async def test_task_menu_and_modal(services):
     view = TaskMenuView(task_srv, proj_srv, squad_service=services["squad"], projects=[project])
     embed = build_task_menu_embed()
     assert "Task Operations Control Center" in embed.title
-    assert len(view.children) == 9
+    assert len(view.children) == 10
 
     board_embed = build_task_board_embed([], 0, "Global Scope", "Active", "All")
     assert "Task Board" in board_embed.title

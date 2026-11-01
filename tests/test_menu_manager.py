@@ -14,11 +14,13 @@ async def test_register_menu_supersedes_previous_menu():
     inter1 = MagicMock()
     inter1.guild_id = 111
     inter1.user.id = 999
+    inter1.message = None
     inter1.delete_original_response = AsyncMock()
 
     inter2 = MagicMock()
     inter2.guild_id = 111
     inter2.user.id = 999
+    inter2.message = None
     inter2.delete_original_response = AsyncMock()
 
     await manager.register_menu(inter1)
@@ -28,6 +30,44 @@ async def test_register_menu_supersedes_previous_menu():
     await manager.register_menu(inter2)
     inter1.delete_original_response.assert_awaited_once()
     inter2.delete_original_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_register_menu_rejects_non_ephemeral_message():
+    manager = MenuSessionManager()
+
+    inter = MagicMock()
+    inter.guild_id = 111
+    inter.user.id = 999
+    # Non-ephemeral public message (e.g., Forum Control Hub)
+    inter.message = MagicMock()
+    inter.message.flags = MagicMock()
+    inter.message.flags.ephemeral = False
+    inter.delete_original_response = AsyncMock()
+
+    await manager.register_menu(inter)
+
+    # Must NOT be stored in active menus
+    assert (111, 999) not in manager._active_menus
+    inter.delete_original_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_register_menu_accepts_ephemeral_message():
+    manager = MenuSessionManager()
+
+    inter = MagicMock()
+    inter.guild_id = 111
+    inter.user.id = 999
+    inter.message = MagicMock()
+    inter.message.flags = MagicMock()
+    inter.message.flags.ephemeral = True
+    inter.delete_original_response = AsyncMock()
+
+    await manager.register_menu(inter)
+
+    assert manager._active_menus.get((111, 999)) is inter
+    inter.delete_original_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio

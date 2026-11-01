@@ -198,6 +198,23 @@ class ProjectMenuView(BaseView):
             self.tech_tree_btn = None
             self.hub_btn = None
 
+        self.close_btn = discord.ui.Button(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            row=2 if self.is_server_manager else 0,
+        )
+        self.close_btn.callback = self._on_close_clicked
+        self.add_item(self.close_btn)
+
+    async def _on_close_clicked(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception as e:
+            logger.debug("Failed to delete project menu on close: %s", e)
+
     async def _on_tech_tree_clicked(self, interaction: discord.Interaction) -> None:
         if not interaction.guild or not self.task_service:
             return
