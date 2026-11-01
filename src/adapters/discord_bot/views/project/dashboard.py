@@ -215,10 +215,14 @@ class ProjectMenuView(BaseView):
                 accessible_projects.append(p)
 
         if not accessible_projects:
-            await interaction.response.send_message(
-                "❌ You do not have permission to view any project visual graphs.\n"
-                "You must hold a project squad's Discord role, be a Project Lead, or be a server manager.",
-                ephemeral=True,
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(
+                interaction,
+                "You do not have permission to view any project visual graphs.\n"
+                "> You must hold a project squad's Discord role, be a Project Lead, or be a server manager.",
+                toast_type=ToastType.ERROR,
             )
             return
 
@@ -319,19 +323,43 @@ class ProjectMenuView(BaseView):
             return
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         if not projects:
-            await interaction.response.send_message("No active projects found in this server.", ephemeral=True)
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
+            await send_toast(
+                interaction,
+                "No active projects found in this server.",
+                toast_type=ToastType.INFO,
+            )
             return
 
-        embed = build_active_projects_embed(projects, page=0, total_count=len(projects))
+        auth_service = self.auth_service
+        if not auth_service:
+            from src.services.auth_service import AuthService
+
+            auth_service = AuthService(self.project_service, self.squad_service)
+
+        accessible_projects = await auth_service.filter_visible_projects(interaction.user, projects)
+        if not accessible_projects:
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(
+                interaction,
+                "You do not have permission to view any active projects in this server.\n"
+                "> You must hold a project squad's Discord role, be a Project Lead, or be a server manager.",
+                toast_type=ToastType.ERROR,
+            )
+            return
+
+        embed = build_active_projects_embed(accessible_projects, page=0, total_count=len(accessible_projects))
         view = ProjectActiveListView(
-            projects,
+            accessible_projects,
             self.project_service,
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
+            auth_service=auth_service,
         )
         await interaction.response.edit_message(embed=embed, view=view)
 

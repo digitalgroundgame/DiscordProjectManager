@@ -2152,5 +2152,6 @@ async def test_pm_hub_new_task_channel_permission_scoping(services):
     call_kwargs = mock_inter.response.send_message.call_args.kwargs
     # Should NOT send TaskSelectProjectView containing p3
     assert call_kwargs.get("view") is None
-    msg = mock_inter.response.send_message.call_args.args[0]
+    embed = call_kwargs.get("embed")
+    msg = embed.description if embed else mock_inter.response.send_message.call_args.args[0]
     assert "You do not have permission to create tasks in this channel's projects" in msg

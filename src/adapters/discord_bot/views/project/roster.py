@@ -16,7 +16,7 @@ from src.services.squad_service import SquadService
 from src.services.task_service import TaskService
 
 if TYPE_CHECKING:
-    pass
+    from src.services.auth_service import AuthService
 
 logger = logging.getLogger("dgg_pm.views.project")
 
@@ -98,6 +98,7 @@ class ProjectActiveListView(BaseView):
         current_page: int = 0,
         query: str = "",
         initial_interaction: discord.Interaction | None = None,
+        auth_service: AuthService | None = None,
         timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
         page_size: int = 8,
     ):
@@ -106,6 +107,7 @@ class ProjectActiveListView(BaseView):
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
+        self.auth_service = auth_service
         self.current_page = current_page
         self.query = query
         self.page_size = page_size
@@ -224,5 +226,6 @@ class ProjectActiveListView(BaseView):
             self.squad_service,
             self.task_service,
             initial_interaction=interaction,
+            auth_service=self.auth_service,
         )
         await interaction.response.edit_message(content=None, embed=embed, view=view)

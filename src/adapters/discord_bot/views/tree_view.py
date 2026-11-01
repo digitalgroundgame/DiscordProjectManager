@@ -75,10 +75,15 @@ class TechTreeViewer(BaseView):
 
         if self.auth_service:
             if not await self.auth_service.can_view_project(interaction.user, self.project.id):
-                await interaction.response.send_message(
-                    "❌ You do not have permission to view this project's visual graph.\n"
-                    "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
-                    ephemeral=True,
+                from src.adapters.discord_bot.menu_manager import send_toast
+                from src.adapters.discord_bot.ui_constants import ToastType
+
+                await send_toast(
+                    interaction,
+                    f"You do not have permission to view the visual graph for **{self.project.name}**.\n"
+                    "> You must hold the project squad's Discord role, "
+                    "be the Project Lead, or be a server manager.",
+                    toast_type=ToastType.ERROR,
                 )
                 return
 
@@ -161,15 +166,23 @@ class TechTreeProjectSelectView(BaseView):
         selected_id = UUID(values[0])
         project = next((p for p in self.projects if p.id == selected_id), None)
         if not project:
-            await interaction.response.send_message("❌ Project not found.", ephemeral=True)
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(interaction, "Project not found.", toast_type=ToastType.ERROR)
             return
 
         if self.auth_service:
             if not await self.auth_service.can_view_project(interaction.user, project.id):
-                await interaction.response.send_message(
-                    f"❌ You do not have permission to view the visual graph for **{project.name}**.\n"
-                    "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
-                    ephemeral=True,
+                from src.adapters.discord_bot.menu_manager import send_toast
+                from src.adapters.discord_bot.ui_constants import ToastType
+
+                await send_toast(
+                    interaction,
+                    f"You do not have permission to view the visual graph for **{project.name}**.\n"
+                    "> You must hold the project squad's Discord role, "
+                    "be the Project Lead, or be a server manager.",
+                    toast_type=ToastType.ERROR,
                 )
                 return
 

@@ -432,13 +432,16 @@ class AuthService(TransactionalService):
                 project_id=project_id,
             )
 
-    async def can_view_project(self, user: ActorPrincipal | Any, project_id: UUID) -> bool:
+    async def can_view_project(self, user: ActorPrincipal | Any, project_id: Project | UUID) -> bool:
         """Determines if a user is authorized to view a project's details, task list, or visual tech tree graph."""
         if self.is_server_manager(user):
             return True
 
         user_id = _extract_user_id(user)
-        project = await self.project_service.get_by_id(project_id)
+        if isinstance(project_id, Project):
+            project = project_id
+        else:
+            project = await self.project_service.get_by_id(project_id)
         if not project:
             return False
 
@@ -452,14 +455,32 @@ class AuthService(TransactionalService):
 
         return True
 
-    async def require_project_view(self, user: ActorPrincipal | Any, project_id: UUID) -> None:
+    async def filter_visible_projects(
+        self,
+        user: ActorPrincipal | Any,
+        projects: list[Project],
+    ) -> list[Project]:
+        """Filters a list of projects returning only those the user is authorized to view."""
+        if not projects:
+            return []
+        if self.is_server_manager(user):
+            return list(projects)
+
+        visible: list[Project] = []
+        for p in projects:
+            if await self.can_view_project(user, p):
+                visible.append(p)
+        return visible
+
+    async def require_project_view(self, user: ActorPrincipal | Any, project_id: Project | UUID) -> None:
         """Raises PermissionDeniedError if the user cannot view the project or its visual graph."""
         if not await self.can_view_project(user, project_id):
+            p_id = project_id.id if isinstance(project_id, Project) else project_id
             raise PermissionDeniedError(
                 "You do not have permission to view this project's visual graph. "
                 "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
                 user_id=_extract_user_id(user),
-                project_id=project_id,
+                project_id=p_id,
             )
 
     async def can_assign_task_to_user(
