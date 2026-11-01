@@ -1659,7 +1659,8 @@ async def test_pm_hub_view_auto_wires_lead_role_repo_and_has_create_project_butt
     await hub_view.create_project_btn.callback(inter)
     inter.response.send_message.assert_awaited_once()
     args, kwargs = inter.response.send_message.call_args
-    error_msg = kwargs.get("content", args[0] if args else "")
+    error_embed = kwargs.get("embed")
+    error_msg = error_embed.description if error_embed else kwargs.get("content", args[0] if args else "")
     assert "You do not have permission" in error_msg
 
 
@@ -1728,3 +1729,377 @@ async def test_pm_cog_menu_authorizes_lead_role_for_project_creation(services, r
     assert proj_view.is_server_manager is True
     assert proj_view.new_project_btn is not None
     assert proj_view.new_project_btn.label == "Create Project"
+
+
+@pytest.mark.asyncio
+async def test_auth_service_filter_visible_projects(services):
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    guild_id = 999444
+    # 1. Project with squad role A (role 101)
+    p_squad_a = await proj_srv.create_project(
+        guild_id=guild_id, name="Squad A Project", prefix="SQA", discord_role_id=101
+    )
+    # 2. Project with squad role B (role 102) and lead 5001
+    p_squad_b = await proj_srv.create_project(
+        guild_id=guild_id, name="Squad B Project", prefix="SQB", discord_role_id=102, lead_discord_id=5001
+    )
+    # 3. Public project (no squad roles)
+    p_public = await proj_srv.create_project(guild_id=guild_id, name="Public Project", prefix="PUB")
+
+    all_projects = [p_squad_a, p_squad_b, p_public]
+
+    # Server Manager sees all projects
+    admin = _make_mock_member(9999, is_admin=True)
+    visible_admin = await auth_srv.filter_visible_projects(admin, all_projects)
+    assert len(visible_admin) == 3
+
+    # Member of Squad A (role 101) sees Squad A + Public (not Squad B)
+    member_a = _make_mock_member(2001, role_ids=[101])
+    visible_a = await auth_srv.filter_visible_projects(member_a, all_projects)
+    assert {p.id for p in visible_a} == {p_squad_a.id, p_public.id}
+
+    # Project lead of Squad B (user 5001, no roles) sees Squad B + Public (not Squad A)
+    lead_b = _make_mock_member(5001, role_ids=[])
+    visible_b = await auth_srv.filter_visible_projects(lead_b, all_projects)
+    assert {p.id for p in visible_b} == {p_squad_b.id, p_public.id}
+
+    # Outsider with no roles sees only Public project
+    outsider = _make_mock_member(3001, role_ids=[999])
+    visible_outsider = await auth_srv.filter_visible_projects(outsider, all_projects)
+    assert {p.id for p in visible_outsider} == {p_public.id}
+
+    # Verify can_view_project works with Project instance directly (no extra DB query)
+    assert await auth_srv.can_view_project(member_a, p_squad_a) is True
+    assert await auth_srv.can_view_project(member_a, p_squad_b) is False
+
+
+@pytest.mark.asyncio
+async def test_project_menu_view_active_projects_filtered(services):
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    guild_id = 999555
+    p_squad_a = await proj_srv.create_project(
+        guild_id=guild_id, name="Alpha Private", prefix="ALP", discord_role_id=888
+    )
+
+    from src.adapters.discord_bot.views.project.dashboard import ProjectMenuView
+    from src.adapters.discord_bot.views.project.roster import ProjectActiveListView
+
+    # 1. Outsider clicks Active Projects -> Denied with toast
+    outsider = _make_mock_member(4001, role_ids=[111])
+    inter_outsider = MagicMock(spec=discord.Interaction)
+    inter_outsider.guild = MagicMock(id=guild_id)
+    inter_outsider.user = outsider
+    inter_outsider.response = MagicMock()
+    inter_outsider.response.send_message = AsyncMock()
+
+    view_outsider = ProjectMenuView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        auth_service=auth_srv,
+        is_server_manager=False,
+    )
+    await view_outsider._on_list_projects_clicked(inter_outsider)
+    inter_outsider.response.send_message.assert_awaited_once()
+    kwargs = inter_outsider.response.send_message.call_args.kwargs
+    embed = kwargs.get("embed")
+    assert embed is not None
+    assert "You do not have permission to view any active projects in this server." in embed.description
+    assert (
+        "> You must hold a project squad's Discord role, be a Project Lead, or be a server manager."
+        in embed.description
+    )
+    assert "*Auto-dismisses <t:" in embed.description
+    assert embed.color == discord.Color.red()
+
+    # 2. Squad Member clicks Active Projects -> Allowed with filtered view
+    squad_member = _make_mock_member(4002, role_ids=[888])
+    inter_member = MagicMock(spec=discord.Interaction)
+    inter_member.guild = MagicMock(id=guild_id)
+    inter_member.user = squad_member
+    inter_member.response = MagicMock()
+    inter_member.response.edit_message = AsyncMock()
+
+    view_member = ProjectMenuView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        auth_service=auth_srv,
+        is_server_manager=False,
+    )
+    await view_member._on_list_projects_clicked(inter_member)
+    inter_member.response.edit_message.assert_awaited_once()
+    roster_view = inter_member.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(roster_view, ProjectActiveListView)
+    assert len(roster_view.all_projects) == 1
+    assert roster_view.all_projects[0].id == p_squad_a.id
+    assert roster_view.auth_service is auth_srv
+
+    # 3. Back button preserves auth_service
+    inter_back = MagicMock(spec=discord.Interaction)
+    inter_back.guild = inter_member.guild
+    inter_back.user = squad_member
+    inter_back.response = MagicMock()
+    inter_back.response.edit_message = AsyncMock()
+
+    await roster_view._on_back_clicked(inter_back)
+    inter_back.response.edit_message.assert_awaited_once()
+    back_menu_view = inter_back.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(back_menu_view, ProjectMenuView)
+    assert back_menu_view.auth_service is auth_srv
+
+
+@pytest.mark.asyncio
+async def test_project_list_command_authorization(services):
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    guild_id = 999666
+    p_squad_x = await proj_srv.create_project(
+        guild_id=guild_id, name="Project Secret X", prefix="SECX", discord_role_id=301
+    )
+    p_squad_y = await proj_srv.create_project(
+        guild_id=guild_id, name="Project Secret Y", prefix="SECY", discord_role_id=302
+    )
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+    )
+
+    # 1. Member of squad X runs /pm project list
+    member_x = _make_mock_member(5001, role_ids=[301])
+    inter_x = MagicMock(spec=discord.Interaction)
+    inter_x.guild = MagicMock(id=guild_id)
+    inter_x.user = member_x
+    inter_x.response = MagicMock()
+    inter_x.response.defer = AsyncMock()
+    inter_x.followup = MagicMock()
+    inter_x.followup.send = AsyncMock()
+
+    await cog.project_list.callback(cog, inter_x)
+    inter_x.followup.send.assert_awaited_once()
+    embed_x = inter_x.followup.send.call_args.kwargs["embed"]
+    assert len(embed_x.fields) == 1
+    assert p_squad_x.name in embed_x.fields[0].name
+    assert p_squad_y.name not in embed_x.fields[0].name
+
+    # 2. Outsider runs /pm project list -> receives permission toast
+    outsider = _make_mock_member(5002, role_ids=[999])
+    inter_out = MagicMock(spec=discord.Interaction)
+    inter_out.guild = MagicMock(id=guild_id)
+    inter_out.user = outsider
+    inter_out.response = MagicMock()
+    inter_out.response.defer = AsyncMock()
+    inter_out.followup = MagicMock()
+    inter_out.followup.send = AsyncMock()
+
+    await cog.project_list.callback(cog, inter_out)
+    inter_out.followup.send.assert_awaited_once()
+    embed_out = inter_out.followup.send.call_args.kwargs["embed"]
+    assert "You do not have permission to view any active projects" in embed_out.description
+
+
+@pytest.mark.asyncio
+async def test_project_autocomplete_authorization(services):
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    guild_id = 999777
+    p_alpha = await proj_srv.create_project(guild_id=guild_id, name="Alpha Core", prefix="ALP", discord_role_id=401)
+    p_beta = await proj_srv.create_project(guild_id=guild_id, name="Beta Shield", prefix="BET", discord_role_id=402)
+
+    bot = MagicMock()
+    cog = PmCog(
+        bot=bot,
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+    )
+
+    # 1. Member of Alpha squad (role 401) autocompletes
+    member_alpha = _make_mock_member(6001, role_ids=[401])
+    inter_alpha = MagicMock(spec=discord.Interaction)
+    inter_alpha.guild = MagicMock(id=guild_id)
+    inter_alpha.user = member_alpha
+
+    choices_alpha = await cog.project_autocomplete(inter_alpha, current="")
+    assert len(choices_alpha) == 1
+    assert choices_alpha[0].value == p_alpha.name
+
+    # 2. Outsider autocompletes -> 0 choices
+    outsider = _make_mock_member(6002, role_ids=[999])
+    inter_out = MagicMock(spec=discord.Interaction)
+    inter_out.guild = MagicMock(id=guild_id)
+    inter_out.user = outsider
+
+    choices_out = await cog.project_autocomplete(inter_out, current="")
+    assert len(choices_out) == 0
+
+    # 3. Server Manager autocompletes -> sees both projects
+    admin = _make_mock_member(6003, is_admin=True)
+    inter_admin = MagicMock(spec=discord.Interaction)
+    inter_admin.guild = MagicMock(id=guild_id)
+    inter_admin.user = admin
+
+    choices_admin = await cog.project_autocomplete(inter_admin, current="")
+    assert len(choices_admin) == 2
+    assert {c.value for c in choices_admin} == {p_alpha.name, p_beta.name}
+
+
+@pytest.mark.asyncio
+async def test_visual_graph_permission_toasts_scheduled_for_dismissal(services):
+    proj_srv = services["project"]
+    squad_srv = services["squad"]
+    task_srv = services["task"]
+    user_srv = services["user"]
+    auth_srv = AuthService(proj_srv, squad_srv)
+
+    from src.adapters.discord_bot.menu_manager import menu_manager
+    from src.adapters.discord_bot.views.hub_menu import PmHubView
+    from src.adapters.discord_bot.views.project.dashboard import ProjectMenuView
+    from src.adapters.discord_bot.views.tree_view import TechTreeProjectSelectView
+
+    guild_id = 999888
+    project = await proj_srv.create_project(
+        guild_id=guild_id, name="Research & Policy", prefix="RES", discord_role_id=777
+    )
+
+    outsider = _make_mock_member(7001, role_ids=[999])
+
+    # 1. PmHubView.tree_tab dismissal check
+    inter_hub = MagicMock(spec=discord.Interaction)
+    inter_hub.guild = MagicMock(id=guild_id)
+    inter_hub.user = outsider
+    inter_hub.channel = MagicMock(id=12345, parent_id=None)
+    inter_hub.response = MagicMock()
+    inter_hub.response.send_message = AsyncMock()
+
+    hub_view = PmHubView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        user_service=user_srv,
+        auth_service=auth_srv,
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mock_schedule = MagicMock()
+        mp.setattr(menu_manager, "schedule_toast_dismissal", mock_schedule)
+        await hub_view.tech_tree_tab.callback(inter_hub)
+        inter_hub.response.send_message.assert_awaited_once()
+        embed_hub = inter_hub.response.send_message.call_args.kwargs.get("embed")
+        assert embed_hub is not None
+        assert "You do not have permission to view the visual graph for **Research & Policy**." in embed_hub.description
+        assert (
+            "> You must hold the project squad's Discord role, be the Project Lead, or be a server manager."
+            in embed_hub.description
+        )
+        assert "*Auto-dismisses <t:" in embed_hub.description
+        assert embed_hub.color == discord.Color.red()
+        mock_schedule.assert_called_once_with(inter_hub, delay=6.0)
+
+    # 2. PmHubView.create_project_btn dismissal check
+    inter_create = MagicMock(spec=discord.Interaction)
+    inter_create.guild = MagicMock(id=guild_id)
+    inter_create.user = outsider
+    inter_create.response = MagicMock()
+    inter_create.response.send_message = AsyncMock()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mock_schedule = MagicMock()
+        mp.setattr(menu_manager, "schedule_toast_dismissal", mock_schedule)
+        await hub_view.create_project_btn.callback(inter_create)
+        inter_create.response.send_message.assert_awaited_once()
+        embed_create = inter_create.response.send_message.call_args.kwargs.get("embed")
+        assert embed_create is not None
+        assert "You do not have permission to create projects." in embed_create.description
+        assert "> Contact a Server Manager or hold an authorized Team Lead role." in embed_create.description
+        assert "*Auto-dismisses <t:" in embed_create.description
+        assert embed_create.color == discord.Color.red()
+        mock_schedule.assert_called_once_with(inter_create, delay=6.0)
+
+    # 3. ProjectMenuView._on_tech_tree_clicked dismissal check
+    inter_pm_tree = MagicMock(spec=discord.Interaction)
+    inter_pm_tree.guild = MagicMock(id=guild_id)
+    inter_pm_tree.user = outsider
+    inter_pm_tree.response = MagicMock()
+    inter_pm_tree.response.send_message = AsyncMock()
+
+    pm_view = ProjectMenuView(
+        project_service=proj_srv,
+        squad_service=squad_srv,
+        task_service=task_srv,
+        auth_service=auth_srv,
+        is_server_manager=False,
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mock_schedule = MagicMock()
+        mp.setattr(menu_manager, "schedule_toast_dismissal", mock_schedule)
+        await pm_view._on_tech_tree_clicked(inter_pm_tree)
+        inter_pm_tree.response.send_message.assert_awaited_once()
+        embed_pm_tree = inter_pm_tree.response.send_message.call_args.kwargs.get("embed")
+        assert embed_pm_tree is not None
+        assert "You do not have permission to view any project visual graphs." in embed_pm_tree.description
+        assert (
+            "> You must hold a project squad's Discord role, be a Project Lead, or be a server manager."
+            in embed_pm_tree.description
+        )
+        assert "*Auto-dismisses <t:" in embed_pm_tree.description
+        assert embed_pm_tree.color == discord.Color.red()
+        mock_schedule.assert_called_once_with(inter_pm_tree, delay=6.0)
+
+    # 4. TechTreeProjectSelectView._on_select_project dismissal check
+    inter_tree_select = MagicMock(spec=discord.Interaction)
+    inter_tree_select.guild = MagicMock(id=guild_id)
+    inter_tree_select.user = outsider
+    inter_tree_select.response = MagicMock()
+    inter_tree_select.response.send_message = AsyncMock()
+
+    inter_tree_select.data = {"values": [str(project.id)]}
+
+    tree_select_view = TechTreeProjectSelectView(
+        task_service=task_srv,
+        project_service=proj_srv,
+        projects=[project],
+        auth_service=auth_srv,
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mock_schedule = MagicMock()
+        mp.setattr(menu_manager, "schedule_toast_dismissal", mock_schedule)
+        await tree_select_view._on_select_project(inter_tree_select)
+        inter_tree_select.response.send_message.assert_awaited_once()
+        embed_select = inter_tree_select.response.send_message.call_args.kwargs.get("embed")
+        assert embed_select is not None
+        assert (
+            "You do not have permission to view the visual graph for **Research & Policy**." in embed_select.description
+        )
+        assert (
+            "> You must hold the project squad's Discord role, be the Project Lead, or be a server manager."
+            in embed_select.description
+        )
+        assert "*Auto-dismisses <t:" in embed_select.description
+        assert embed_select.color == discord.Color.red()
+        mock_schedule.assert_called_once_with(inter_tree_select, delay=6.0)

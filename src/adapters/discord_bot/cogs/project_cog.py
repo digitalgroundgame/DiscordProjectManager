@@ -120,6 +120,17 @@ class ProjectCommandsMixin(SquadCommandsMixin):
                 )
                 return
 
+            if self.auth_service:
+                projects = await self.auth_service.filter_visible_projects(interaction.user, projects)
+
+            if not projects:
+                await send_toast(
+                    interaction,
+                    "You do not have permission to view any active projects in this server.",
+                    toast_type=ToastType.INFO,
+                )
+                return
+
             embed = discord.Embed(title="📁 Server Projects", color=discord.Color.blue())
             for p in projects:
                 chan_str = f"<#{p.discord_channel_id}>" if p.discord_channel_id else "*No channel bound*"
