@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Discord Configuration
     DISCORD_BOT_TOKEN: str = ""
     DISCORD_CLIENT_ID: str = ""
+    DISCORD_CLIENT_SECRET: str = ""
+    DISCORD_OAUTH_REDIRECT_URI: str = ""
     DISCORD_GUILD_ID: int | None = None
 
     @field_validator("DISCORD_GUILD_ID", mode="before")
@@ -66,6 +68,7 @@ class Settings(BaseSettings):
     # If set, /metrics requires `Authorization: Bearer <API_METRICS_TOKEN>`.
     # When empty, /metrics is left open for local/dev use.
     API_METRICS_TOKEN: str = ""
+    SESSION_SECRET_KEY: str = "dev-session-secret-change-in-production"
 
     # Command Sync & Startup Backoff Configuration
     SYNC_COMMANDS_ON_STARTUP: bool | None = None

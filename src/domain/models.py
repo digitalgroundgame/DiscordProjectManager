@@ -59,6 +59,24 @@ class Task(DomainModel):
         due = self.due_at if self.due_at.tzinfo else self.due_at.replace(tzinfo=UTC)
         return due < datetime.now(UTC)
 
+    @property
+    def discord_jump_url(self) -> str | None:
+        """Returns direct Discord jump URL to the Task Action Card message or Thread Workspace."""
+        if not self.guild_id or not self.discord_thread_id:
+            return None
+        if self.discord_message_id:
+            return f"https://discord.com/channels/{self.guild_id}/{self.discord_thread_id}/{self.discord_message_id}"
+        return f"https://discord.com/channels/{self.guild_id}/{self.discord_thread_id}"
+
+    @property
+    def discord_app_url(self) -> str | None:
+        """Returns native Discord desktop/mobile app URI (discord://) for the task."""
+        if not self.guild_id or not self.discord_thread_id:
+            return None
+        if self.discord_message_id:
+            return f"discord://-/channels/{self.guild_id}/{self.discord_thread_id}/{self.discord_message_id}"
+        return f"discord://-/channels/{self.guild_id}/{self.discord_thread_id}"
+
 
 class TaskHistory(DomainModel):
     id: UUID = Field(default_factory=uuid4)
@@ -112,6 +130,20 @@ class Project(DomainModel):
     @property
     def is_archived(self) -> bool:
         return self.archived_at is not None
+
+    @property
+    def discord_jump_url(self) -> str | None:
+        """Returns direct Discord jump URL to the Project's bound Discord channel."""
+        if not self.guild_id or not self.discord_channel_id:
+            return None
+        return f"https://discord.com/channels/{self.guild_id}/{self.discord_channel_id}"
+
+    @property
+    def discord_app_url(self) -> str | None:
+        """Returns native Discord desktop/mobile app URI (discord://) for the project channel."""
+        if not self.guild_id or not self.discord_channel_id:
+            return None
+        return f"discord://-/channels/{self.guild_id}/{self.discord_channel_id}"
 
 
 class Squad(DomainModel):

@@ -163,6 +163,24 @@ class AuthService(TransactionalService):
             return await self.guild_lead_user_repo.list_lead_user_ids(guild_id)
         return set()
 
+    async def _is_guild_lead(self, user: ActorPrincipal | Any, target_guild_id: int | None) -> bool:
+        if not target_guild_id:
+            return False
+        user_id = _extract_user_id(user)
+        if self.guild_lead_user_repo and user_id:
+            if user_id in await self.guild_lead_user_repo.list_lead_user_ids(target_guild_id):
+                return True
+        user_role_ids = _extract_role_ids(user)
+        if not user_role_ids and self.member_directory and user_id:
+            resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
+            if resolved:
+                user_role_ids = set(resolved.role_ids)
+        if self.guild_lead_role_repo:
+            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(target_guild_id)
+            if lead_role_ids and any(rid in user_role_ids for rid in lead_role_ids):
+                return True
+        return False
+
     async def can_manage_projects(
         self,
         user: ActorPrincipal | Any,
@@ -182,23 +200,10 @@ class AuthService(TransactionalService):
         if not target_guild_id:
             return False
 
+        if await self._is_guild_lead(user, target_guild_id):
+            return True
+
         user_id = _extract_user_id(user)
-        if self.guild_lead_user_repo and user_id:
-            lead_user_ids = await self.guild_lead_user_repo.list_lead_user_ids(target_guild_id)
-            if user_id in lead_user_ids:
-                return True
-
-        user_role_ids = _extract_role_ids(user)
-        if not user_role_ids and self.member_directory and user_id:
-            resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
-            if resolved:
-                user_role_ids = set(resolved.role_ids)
-
-        if self.guild_lead_role_repo:
-            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(target_guild_id)
-            if lead_role_ids and any(rid in user_role_ids for rid in lead_role_ids):
-                return True
-
         if self.squad_service and user_id:
             squads = await self.squad_service.list_squads(target_guild_id)
             for s in squads:
@@ -438,14 +443,14 @@ class AuthService(TransactionalService):
             return True
 
         user_id = _extract_user_id(user)
-        if isinstance(project_id, Project):
-            project = project_id
-        else:
-            project = await self.project_service.get_by_id(project_id)
+        project = project_id if isinstance(project_id, Project) else await self.project_service.get_by_id(project_id)
         if not project:
             return False
 
         if project.lead_discord_id and user_id == project.lead_discord_id:
+            return True
+
+        if await self._is_guild_lead(user, project.guild_id):
             return True
 
         project_roles = await self.get_project_role_ids(project)
