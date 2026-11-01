@@ -1,19 +1,60 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src import __version__
+from src.adapters.api.auth_routes import auth_router
+from src.adapters.api.dashboard_routes import dashboard_router
 from src.config import get_settings
 from src.services.calendar_service import CalendarService
 from src.services.observability_service import ObservabilityService
 
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_STATIC_MEDIA_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+}
+
 api_app = FastAPI(
     title="dgg-pm Service API",
-    description="Health, metrics, and calendar subscription feeds for Discord-Native Task Management Platform",
+    description="Health, metrics, calendar feeds, and Web Dashboard Portal for Discord-Native Task Management",
     version=__version__,
 )
+api_app.include_router(auth_router)
+api_app.include_router(dashboard_router)
+
+
+@api_app.get("/", include_in_schema=False)
+async def root_redirect() -> RedirectResponse:
+    """Redirects root requests to the Web Dashboard Portal."""
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@api_app.get("/dashboard", response_class=HTMLResponse)
+async def portal_dashboard() -> HTMLResponse:
+    """Serves the responsive Web Dashboard & Portal HTML shell."""
+    index_path = _STATIC_DIR / "index.html"
+    if not index_path.is_file():
+        raise HTTPException(status_code=404, detail="Dashboard portal index not found.")
+    return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
+
+
+@api_app.get("/static/{asset_name}", include_in_schema=False)
+async def portal_static_asset(asset_name: str) -> Response:
+    """Serves static CSS and ES module assets for the Web Dashboard Portal."""
+    if "/" in asset_name or "\\" in asset_name or ".." in asset_name:
+        raise HTTPException(status_code=404, detail="Static asset not found.")
+    asset_path = (_STATIC_DIR / asset_name).resolve()
+    if not asset_path.is_file() or asset_path.parent != _STATIC_DIR.resolve():
+        raise HTTPException(status_code=404, detail="Static asset not found.")
+    media_type = _STATIC_MEDIA_TYPES.get(asset_path.suffix.lower(), "application/octet-stream")
+    return Response(content=asset_path.read_text(encoding="utf-8"), media_type=media_type)
+
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
