@@ -264,3 +264,34 @@ def test_discord_bot_adapter_modules_do_not_exceed_600_lines() -> None:
     assert not oversized_files, "Modularity violation: modules exceed 600 lines (AGENTS.md):\n" + "\n".join(
         f"  - {path}: {count} lines" for path, count in oversized_files
     )
+
+
+def test_pm_hub_view_never_registers_menu() -> None:
+    """PmHubView resides on a public channel post; registering it with MenuSessionManager
+    would cause auto-dismissal to delete the public message itself (AGENTS.md UI Safety Rule).
+    """
+    hub_menu_file = ADAPTERS_DIR / "discord_bot" / "views" / "hub_menu.py"
+    assert hub_menu_file.is_file(), f"File not found: {hub_menu_file}"
+
+    tree = ast.parse(hub_menu_file.read_text(encoding="utf-8"), filename=str(hub_menu_file))
+    pm_hub_class = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "PmHubView":
+            pm_hub_class = node
+            break
+
+    assert pm_hub_class is not None, "PmHubView class definition not found in hub_menu.py"
+
+    violations: list[tuple[int, str]] = []
+    for node in ast.walk(pm_hub_class):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "register_menu":
+                violations.append((node.lineno, "register_menu"))
+            elif isinstance(func, ast.Name) and func.id == "register_menu":
+                violations.append((node.lineno, "register_menu"))
+
+    assert not violations, (
+        "Public Message Deletion Trap Violation: PmHubView contains call(s) to register_menu:\n"
+        + "\n".join(f"  - Line {line}: {call}" for line, call in violations)
+    )

@@ -287,7 +287,7 @@ class TaskMenuView(BaseView):
         self.assignee_select.callback = self._on_assignee_filter_changed
         self.add_item(self.assignee_select)
 
-        # Row 4: Clear Member Filter Button
+        # Row 4: Clear Member Filter Button & Close Action
         self.clear_member_btn = discord.ui.Button(
             label="Clear Assignee Filter",
             style=discord.ButtonStyle.secondary,
@@ -295,6 +295,23 @@ class TaskMenuView(BaseView):
         )
         self.clear_member_btn.callback = self._on_clear_member_clicked
         self.add_item(self.clear_member_btn)
+
+        self.close_btn = discord.ui.Button(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            row=4,
+        )
+        self.close_btn.callback = self._on_close_clicked
+        self.add_item(self.close_btn)
+
+    async def _on_close_clicked(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception as e:
+            logger.debug("Failed to delete task menu on close: %s", e)
 
     @property
     def selected_status(self) -> TaskStatus | None:

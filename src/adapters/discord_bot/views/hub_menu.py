@@ -168,9 +168,6 @@ class PmHubView(BaseView):
             )
             await interaction.response.send_modal(modal)
         elif len(channel_projects) > 1:
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            await menu_manager.register_menu(interaction)
             picker_view = HubTaskProjectSelectView(
                 task_service=self.task_service,
                 channel_projects=channel_projects,
@@ -234,9 +231,6 @@ class PmHubView(BaseView):
                     )
                     return
             else:
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                await menu_manager.register_menu(interaction)
                 view = DiscordViewRouter.build_task_select_project_view(
                     projects=allowed_projects,
                     task_service=self.task_service,
@@ -267,9 +261,6 @@ class PmHubView(BaseView):
     async def tasks_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild:
             return
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         await self._refresh_hub_message(interaction, projects=projects)
@@ -338,10 +329,7 @@ class PmHubView(BaseView):
         custom_id="pm_hub:projects",
     )
     async def projects_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
         await self._refresh_hub_message(interaction)
-        await menu_manager.register_menu(interaction)
         can_manage = (
             await self.auth_service.can_manage_projects(
                 interaction.user,
@@ -392,10 +380,6 @@ class PmHubView(BaseView):
                 toast_type=ToastType.ERROR,
             )
             return
-
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         embed, view = DiscordViewRouter.build_project_channel_select(
             self.project_service,
@@ -511,9 +495,6 @@ class PmHubView(BaseView):
     async def overdue_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild:
             return
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         await self._refresh_hub_message(interaction, projects=projects)

@@ -36,6 +36,23 @@ class MenuSessionManager:
         if not interaction.guild_id or not interaction.user:
             return
 
+        # Public Message Deletion Protection Invariant:
+        # If an interaction originates from a component on a public message, calling
+        # delete_original_response() will delete the public message itself (e.g. Forum Control Hub).
+        # Reject registration if the interaction message is non-ephemeral.
+        msg = getattr(interaction, "message", None)
+        if msg is not None:
+            flags = getattr(msg, "flags", None)
+            is_ephemeral = getattr(flags, "ephemeral", False) if flags is not None else False
+            if not is_ephemeral:
+                logger.warning(
+                    "Blocked attempt to register public message interaction in MenuSessionManager "
+                    "(user_id=%s, guild_id=%s). Public channel posts must never be registered for auto-dismissal.",
+                    interaction.user.id,
+                    interaction.guild_id,
+                )
+                return
+
         key = (interaction.guild_id, interaction.user.id)
         prev_interaction = self._active_menus.get(key)
         if prev_interaction and prev_interaction != interaction:

@@ -70,6 +70,11 @@ This project uses modern Python tooling with [`uv`](https://docs.astral.sh/uv/) 
    - Avoid decorative or excessive emojis across embeds, messages, and UI components.
    - **Buttons**: Emojis should **ONLY** be used on buttons if they tangibly improve UX (e.g., status color indicators like `🟡`/`🟢` or layout orientation arrows like `↔️`/`↕️`). Never add emojis to buttons purely for decoration if a clear text label suffices.
 
+2. **Ephemeral vs. Public Message Interaction Safety**:
+   - **The Public Component Deletion Trap**: In Discord API, when a component interaction originates from a **public message** (e.g., the pinned Forum Control Hub post `PmHubView`, thread starter task cards), `interaction.message` points directly to that public message. Calling `interaction.delete_original_response()` on such an interaction triggers Discord to **permanently delete the public message itself** (leaving *"Original message was deleted"*).
+   - **`MenuSessionManager` Registration Invariant**: NEVER register an interaction originating from a public message into `MenuSessionManager.register_menu(interaction)`. `MenuSessionManager` executes `delete_original_response()` to auto-dismiss previous sessions, which is lethal to public posts.
+   - **Ephemeral Followup Deletion**: For ephemeral views spawned as followups from a public post (e.g. Visual Graphs, project selectors), never call `delete_original_response()` on the parent public interaction. Only delete the ephemeral card via component interactions attached directly to that ephemeral view (or by clearing components with `view=None`).
+
 
 ## LLM Agent Workflow Protocol
 

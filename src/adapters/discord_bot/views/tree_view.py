@@ -55,6 +55,23 @@ class TechTreeViewer(BaseView):
         self.tb_btn.callback = self._on_tb_clicked
         self.add_item(self.tb_btn)
 
+        self.close_btn = discord.ui.Button(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+        )
+        self.close_btn.callback = self._on_close_clicked
+        self.add_item(self.close_btn)
+
+    async def _on_close_clicked(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception as e:
+            logger.debug("Failed to delete visual graph on close: %s", e)
+
     async def _on_lr_clicked(self, interaction: discord.Interaction) -> None:
         if self.current_orientation == "lr":
             await interaction.response.defer()

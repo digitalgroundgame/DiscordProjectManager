@@ -726,7 +726,7 @@ async def test_permission_aware_project_menu_ui(services):
     manager_member = _make_mock_member(1001, manage_guild=True)
     manager_view = ProjectMenuView(proj_srv, squad_srv, task_srv, user=manager_member)
     assert manager_view.is_server_manager is True
-    assert len(manager_view.children) == 9
+    assert len(manager_view.children) == 10
     assert manager_view.new_project_btn is not None
     assert manager_view.set_role_btn is not None
     assert manager_view.set_lead_btn is not None
@@ -736,6 +736,7 @@ async def test_permission_aware_project_menu_ui(services):
     assert manager_view.list_projects_btn is not None
     assert manager_view.tech_tree_btn is not None
     assert manager_view.hub_btn is not None
+    assert manager_view.close_btn is not None
 
     manager_embed = build_project_menu_embed(is_server_manager=True)
     assert "Create Project" in manager_embed.description
@@ -747,7 +748,7 @@ async def test_permission_aware_project_menu_ui(services):
     regular_member = _make_mock_member(2002, manage_guild=False, administrator=False)
     regular_view = ProjectMenuView(proj_srv, squad_srv, task_srv, user=regular_member)
     assert regular_view.is_server_manager is False
-    assert len(regular_view.children) == 3  # Active Projects, Tech Tree, and PM Main Menu
+    assert len(regular_view.children) == 4  # Active Projects, Tech Tree, PM Main Menu, and Close
     assert regular_view.new_project_btn is None
     assert regular_view.set_role_btn is None
     assert regular_view.set_lead_btn is None
@@ -756,6 +757,7 @@ async def test_permission_aware_project_menu_ui(services):
     assert regular_view.list_projects_btn is not None
     assert regular_view.tech_tree_btn is not None
     assert regular_view.hub_btn is not None
+    assert regular_view.close_btn is not None
 
     regular_embed = build_project_menu_embed(is_server_manager=False)
     assert "Active Projects" in regular_embed.description
