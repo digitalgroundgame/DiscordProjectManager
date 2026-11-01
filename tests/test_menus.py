@@ -1422,7 +1422,7 @@ async def test_pm_dashboard_view_and_embed(services):
     assert dash_view.new_proj_btn is not None
     assert dash_view.projects_btn is not None
     assert dash_view.settings_btn is not None
-    assert dash_view.overview_btn is not None
+    assert not hasattr(dash_view, "overview_btn")
     assert dash_view.guides_btn is not None
 
     # 3. Test New Project button opens ChannelSelectView
@@ -1480,26 +1480,18 @@ async def test_pm_dashboard_view_and_embed(services):
     back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(back_dash_view, PmDashboardView)
 
-    # 7. Test Overview button and OverviewView Back button
-    inter.response.defer = AsyncMock()
-    inter.edit_original_response = AsyncMock()
-    await dash_view._on_overview_clicked(inter)
-    inter.edit_original_response.assert_awaited_once()
-    overview_view = inter.edit_original_response.call_args.kwargs["view"]
-    assert isinstance(overview_view, PmDashboardOverviewView)
-
-    back_inter.response.edit_message.reset_mock()
-    await overview_view._on_back_clicked(back_inter)
-    back_inter.response.edit_message.assert_awaited_once()
-    back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
-    assert isinstance(back_dash_view, PmDashboardView)
-
-    # 8. Test Guides button
+    # 7. Test Guides button and back to dashboard
     inter.response.edit_message.reset_mock()
     await dash_view._on_guides_clicked(inter)
     inter.response.edit_message.assert_awaited_once()
     guides_view = inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(guides_view, PmDashboardOverviewView)
+
+    back_inter.response.edit_message.reset_mock()
+    await guides_view._on_back_clicked(back_inter)
+    back_inter.response.edit_message.assert_awaited_once()
+    back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(back_dash_view, PmDashboardView)
 
 
 @pytest.mark.asyncio
