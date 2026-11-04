@@ -10,7 +10,9 @@ import time
 from typing import Any
 
 SESSION_COOKIE_NAME = "dgg_pm_session"
+OAUTH_STATE_COOKIE_NAME = "dgg_pm_oauth_state"
 DEFAULT_MAX_AGE_SECONDS = 86400 * 7  # 7 days
+OAUTH_STATE_MAX_AGE_SECONDS = 600  # 10 minutes
 
 
 def create_session_token(

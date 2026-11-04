@@ -29,6 +29,25 @@ api_app.include_router(auth_router)
 api_app.include_router(dashboard_router)
 
 
+_PORTAL_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' https://cdn.discordapp.com data:; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'; "
+    "form-action 'self'"
+)
+_PORTAL_SECURITY_HEADERS = {
+    "Content-Security-Policy": _PORTAL_CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+}
+
+
 @api_app.get("/", include_in_schema=False)
 async def root_redirect() -> RedirectResponse:
     """Redirects root requests to the Web Dashboard Portal."""
@@ -41,7 +60,10 @@ async def portal_dashboard() -> HTMLResponse:
     index_path = _STATIC_DIR / "index.html"
     if not index_path.is_file():
         raise HTTPException(status_code=404, detail="Dashboard portal index not found.")
-    return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=index_path.read_text(encoding="utf-8"),
+        headers=_PORTAL_SECURITY_HEADERS,
+    )
 
 
 @api_app.get("/static/{asset_name}", include_in_schema=False)
@@ -53,7 +75,11 @@ async def portal_static_asset(asset_name: str) -> Response:
     if not asset_path.is_file() or asset_path.parent != _STATIC_DIR.resolve():
         raise HTTPException(status_code=404, detail="Static asset not found.")
     media_type = _STATIC_MEDIA_TYPES.get(asset_path.suffix.lower(), "application/octet-stream")
-    return Response(content=asset_path.read_text(encoding="utf-8"), media_type=media_type)
+    return Response(
+        content=asset_path.read_text(encoding="utf-8"),
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)

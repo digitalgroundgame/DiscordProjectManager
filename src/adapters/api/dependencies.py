@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import HTTPException, Query, Request
 
 from src.adapters.api.session import SESSION_COOKIE_NAME, verify_session_token
-from src.config import Settings, get_settings
+from src.config import DEFAULT_DEV_SESSION_SECRET, Settings, get_settings
 from src.domain.actor import ActorPrincipal
 from src.ports.member_directory import MemberDirectoryPort
 from src.services.auth_service import AuthService
@@ -20,6 +20,15 @@ from src.services.workspace_service import WorkspaceService
 def get_active_settings(request: Request) -> Settings:
     """Resolves active Settings from FastAPI application state or fallback configuration."""
     return getattr(request.app.state, "settings", None) or get_settings()
+
+
+def resolve_session_secret(settings: Settings) -> str:
+    """Resolves the session secret key, refusing empty or default secrets outside development."""
+    is_dev = settings.ENVIRONMENT.strip().lower() == "development"
+    secret = (settings.SESSION_SECRET_KEY or "").strip()
+    if not is_dev and (not secret or secret == DEFAULT_DEV_SESSION_SECRET):
+        raise HTTPException(status_code=503, detail="Session secret key is not configured.")
+    return secret or DEFAULT_DEV_SESSION_SECRET
 
 
 def get_project_service(request: Request) -> ProjectService:
@@ -64,7 +73,7 @@ def get_member_directory(request: Request) -> MemberDirectoryPort | None:
 def get_session_data(request: Request) -> dict[str, Any]:
     """Extracts and validates the signed session cookie from the incoming HTTP request."""
     settings = get_active_settings(request)
-    secret = settings.SESSION_SECRET_KEY or "dev-session-secret-change-in-production"
+    secret = resolve_session_secret(settings)
     token = request.cookies.get(SESSION_COOKIE_NAME)
     session_data = verify_session_token(token, secret)
     if session_data is None or not session_data.get("user_id"):
@@ -107,7 +116,11 @@ async def get_current_principal(
             return principal
 
     settings = get_active_settings(request)
-    if session_data.get("is_dev_fallback") and settings.ENVIRONMENT.lower() == "development":
+    if (
+        session_data.get("is_dev_fallback")
+        and settings.ENVIRONMENT.strip().lower() == "development"
+        and settings.DEV_AUTH_FALLBACK_ENABLED
+    ):
         raw_roles = session_data.get("role_ids") or []
         return ActorPrincipal(
             user_id=user_id,

@@ -54,6 +54,28 @@ async function fetchJson(url) {
   return resp.json();
 }
 
+const HTML_ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]);
+}
+
+function sanitizeDiscordHref(url) {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (/^(?:https?:\/\/|discord:\/\/)/i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
 function formatDate(isoStr) {
   if (!isoStr) return "—";
   const dt = new Date(isoStr);
@@ -63,9 +85,11 @@ function formatDate(isoStr) {
 
 function resolveDiscordAppUrl(item) {
   if (!item) return null;
-  if (item.discord_app_url) return item.discord_app_url;
+  if (item.discord_app_url) return sanitizeDiscordHref(item.discord_app_url);
   if (item.discord_jump_url) {
-    return item.discord_jump_url.replace(/^https?:\/\/(?:ptb\.|canary\.)?discord\.com\/channels\//, "discord://-/channels/");
+    return sanitizeDiscordHref(
+      item.discord_jump_url.replace(/^https?:\/\/(?:ptb\.|canary\.)?discord\.com\/channels\//, "discord://-/channels/")
+    );
   }
   return null;
 }
@@ -73,7 +97,7 @@ function resolveDiscordAppUrl(item) {
 function resolveDiscordLink(item) {
   if (!item) return { url: null, isWeb: state.discordLinkMode === "web" };
   if (state.discordLinkMode === "web") {
-    return { url: item.discord_jump_url || null, isWeb: true };
+    return { url: sanitizeDiscordHref(item.discord_jump_url), isWeb: true };
   }
   return { url: resolveDiscordAppUrl(item), isWeb: false };
 }
@@ -441,7 +465,7 @@ function renderKanban() {
     colEl.className = "kanban-col";
     colEl.innerHTML = `
       <div class="kanban-col-header">
-        <span>${col.title}</span>
+        <span>${escapeHtml(col.title)}</span>
         <span class="task-short-id">${col.items.length}</span>
       </div>
       <div class="kanban-col-body"></div>
@@ -454,22 +478,24 @@ function renderKanban() {
       const { url: linkUrl, isWeb } = resolveDiscordLink(t);
       const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
       const discordLink = linkUrl
-        ? `<a href="${linkUrl}"${targetAttr} class="btn btn-sm btn-discord" onclick="event.stopPropagation()">${isWeb ? "Web" : "Discord"} &#8599;</a>`
+        ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">${isWeb ? "Web" : "Discord"} &#8599;</a>`
         : "";
+      const safeState = escapeHtml(t.readiness_state);
       card.innerHTML = `
         <div class="task-card-top">
-          <span class="task-short-id">[${t.short_id}]</span>
+          <span class="task-short-id">[${escapeHtml(t.short_id)}]</span>
           <div>
             ${overdueBadge}
-            <span class="legend-pill state-${t.readiness_state}">${t.readiness_state}</span>
+            <span class="legend-pill state-${safeState}">${safeState}</span>
           </div>
         </div>
-        <div class="task-card-title">${t.title}</div>
+        <div class="task-card-title">${escapeHtml(t.title)}</div>
         <div class="task-card-footer">
-          <span>${t.assignee_name || "Unassigned"} • ${ formatDate(t.due_at) }</span>
+          <span>${escapeHtml(t.assignee_name || "Unassigned")} • ${escapeHtml(formatDate(t.due_at))}</span>
           ${discordLink}
         </div>
       `;
+      card.querySelector(".btn-discord")?.addEventListener("click", (e) => e.stopPropagation());
       card.addEventListener("click", () => openInspector(t.id));
       bodyEl.appendChild(card);
     }
@@ -491,20 +517,22 @@ function renderMatrix() {
     const { url: linkUrl, isWeb } = resolveDiscordLink(t);
     const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
     const jumpBtn = linkUrl
-      ? `<a href="${linkUrl}"${targetAttr} class="btn btn-sm btn-discord" onclick="event.stopPropagation()">Open &#8599;</a>`
+      ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">Open &#8599;</a>`
       : "—";
+    const safeState = escapeHtml(t.readiness_state);
 
     tr.innerHTML = `
-      <td class="task-short-id">[${t.short_id}]</td>
-      <td><strong>${t.title}</strong></td>
-      <td><span class="legend-pill state-${t.readiness_state}">${t.readiness_state}</span></td>
-      <td>${STATUS_LABELS[t.status] || t.status}</td>
-      <td>${PRIORITY_LABELS[t.priority] || t.priority}</td>
-      <td>${t.assignee_name || "Unassigned"}</td>
-      <td>${combinedMeta}</td>
-      <td>${dueLabel}</td>
+      <td class="task-short-id">[${escapeHtml(t.short_id)}]</td>
+      <td><strong>${escapeHtml(t.title)}</strong></td>
+      <td><span class="legend-pill state-${safeState}">${safeState}</span></td>
+      <td>${escapeHtml(STATUS_LABELS[t.status] || t.status)}</td>
+      <td>${escapeHtml(PRIORITY_LABELS[t.priority] || t.priority)}</td>
+      <td>${escapeHtml(t.assignee_name || "Unassigned")}</td>
+      <td>${escapeHtml(combinedMeta)}</td>
+      <td>${escapeHtml(dueLabel)}</td>
       <td>${jumpBtn}</td>
     `;
+    tr.querySelector(".btn-discord")?.addEventListener("click", (e) => e.stopPropagation());
     tr.addEventListener("click", () => openInspector(t.id));
     tbody.appendChild(tr);
   }
@@ -569,9 +597,10 @@ function openInspector(taskId) {
     for (const item of items) {
       const li = document.createElement("li");
       li.className = "dep-item";
+      const safeItemState = escapeHtml(item.state);
       li.innerHTML = `
-        <span><strong>[${item.short_id}]</strong> ${item.title}</span>
-        <span class="legend-pill state-${item.state}">${item.state}</span>
+        <span><strong>[${escapeHtml(item.short_id)}]</strong> ${escapeHtml(item.title)}</span>
+        <span class="legend-pill state-${safeItemState}">${safeItemState}</span>
       `;
       li.addEventListener("click", () => openInspector(item.id));
       listEl.appendChild(li);

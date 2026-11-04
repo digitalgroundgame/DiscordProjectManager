@@ -141,18 +141,28 @@ async def list_visible_projects(
     lead_ids = {p.lead_discord_id for p in visible_projects if p.lead_discord_id}
     lead_names = await _resolve_display_names(member_directory, guild_id, lead_ids)
 
+    workspaces_by_id = await workspace_service.get_projects_workspaces(
+        guild_id,
+        visible_projects,
+        include_archived_tasks=include_archived,
+    )
+
     serialized: list[dict[str, Any]] = []
     for proj in visible_projects:
-        ws = await workspace_service.get_project_workspace(
+        ws = workspaces_by_id.get(proj.id) or await workspace_service.get_project_workspace(
             proj.id,
+            project=proj,
             include_archived_tasks=include_archived,
         )
+        project_role_ids = await auth_service.get_project_role_ids(proj, squads=ws.squads)
         can_create = await auth_service.can_create_task_in_project(
             principal,
             proj.id,
             guild_id=proj.guild_id,
+            project=proj,
+            project_role_ids=project_role_ids,
         )
-        is_lead = await auth_service.is_project_lead(principal, proj.id)
+        is_lead = await auth_service.is_project_lead(principal, proj.id, project=proj)
         serialized.append(
             _serialize_project_summary(
                 proj,
@@ -181,19 +191,21 @@ async def get_project_workspace_endpoint(
 ) -> dict[str, Any]:
     """Returns consolidated project workspace data for Kanban and Table Matrix views."""
     project = await project_service.get_by_id(project_id)
-    if not project:
+    if not project or (principal.guild_id and project.guild_id != principal.guild_id):
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-    if not await auth_service.can_view_project(principal, project):
+    ws = await workspace_service.get_project_workspace(
+        project.id,
+        project=project,
+        include_archived_tasks=include_archived,
+    )
+    project_role_ids = await auth_service.get_project_role_ids(project, squads=ws.squads)
+
+    if not await auth_service.can_view_project(principal, project, project_role_ids=project_role_ids):
         raise HTTPException(
             status_code=403,
             detail="You do not have permission to view this project workspace.",
         )
-
-    ws = await workspace_service.get_project_workspace(
-        project.id,
-        include_archived_tasks=include_archived,
-    )
 
     member_directory = get_member_directory(request)
     user_ids: set[int] = set()
@@ -205,15 +217,21 @@ async def get_project_workspace_endpoint(
             user_ids.add(t.assignee_discord_id)
 
     name_map = await _resolve_display_names(member_directory, project.guild_id, user_ids)
+    active_ws_tasks = [t for t in ws.tasks if not t.is_archived]
     tree = await task_service.get_project_tech_tree(
         project.guild_id,
         project.id,
         member_resolver=name_map,
+        tasks=active_ws_tasks,
     )
 
     # Map users to squads in this project so tasks can be filtered by squad
     squad_member_map: dict[int, list[dict[str, str]]] = {}
+    seen_squad_ids: set[UUID] = set()
     for sq in ws.squads:
+        if sq.id in seen_squad_ids:
+            continue
+        seen_squad_ids.add(sq.id)
         members = await squad_service.list_members(sq.id)
         for m in members:
             squad_member_map.setdefault(m.user_discord_id, []).append({"id": str(sq.id), "name": sq.name})
@@ -259,8 +277,17 @@ async def get_project_workspace_endpoint(
             else default_squads
         )
 
-        can_mutate = await auth_service.can_mutate_task(principal, t)
-        can_delete = await auth_service.can_delete_task(principal, t)
+        can_mutate = await auth_service.can_mutate_task(
+            principal,
+            t,
+            project=project,
+            project_role_ids=project_role_ids,
+        )
+        can_delete = await auth_service.can_delete_task(
+            principal,
+            t,
+            project=project,
+        )
 
         tasks_payload.append(
             {
@@ -308,8 +335,10 @@ async def get_project_workspace_endpoint(
         principal,
         project.id,
         guild_id=project.guild_id,
+        project=project,
+        project_role_ids=project_role_ids,
     )
-    is_lead = await auth_service.is_project_lead(principal, project.id)
+    is_lead = await auth_service.is_project_lead(principal, project.id, project=project)
 
     return {
         "project": _serialize_project_summary(
@@ -343,7 +372,7 @@ async def get_project_tech_tree_endpoint(
 ) -> dict[str, Any]:
     """Returns the analyzed Tech Tree DAG (nodes, edges, readiness states, critical path, and bottlenecks)."""
     project = await project_service.get_by_id(project_id)
-    if not project:
+    if not project or (principal.guild_id and project.guild_id != principal.guild_id):
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
     if not await auth_service.can_view_project(principal, project):
@@ -368,6 +397,7 @@ async def get_project_tech_tree_endpoint(
         project.guild_id,
         project.id,
         member_resolver=name_map,
+        tasks=tasks,
     )
 
     metrics = tree.metrics()

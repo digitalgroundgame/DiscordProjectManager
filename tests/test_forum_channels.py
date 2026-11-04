@@ -853,20 +853,25 @@ async def test_remove_project_tag_forbidden():
 
 @pytest.mark.asyncio
 async def test_prune_archived_project_tags_success():
-    """Verify prune_archived_project_tags removes all matching tags for archived projects."""
+    """Verify prune_archived_project_tags removes archived project tags while preserving standard PM tags."""
     mock_forum = MagicMock(spec=discord.ForumChannel)
     mock_forum.id = 54321
     t_todo = _create_mock_tag(1, "To Do")
+    t_completed = _create_mock_tag(5, "Completed")
+    t_overdue = _create_mock_tag(6, "Overdue")
     t_active = _create_mock_tag(2, "📁 Active Proj")
     t_arch1 = _create_mock_tag(3, "📁 Old Proj 1")
     t_arch2 = _create_mock_tag(4, "📁 Old Proj 2")
-    mock_forum.available_tags = [t_todo, t_active, t_arch1, t_arch2]
+    mock_forum.available_tags = [t_todo, t_completed, t_overdue, t_active, t_arch1, t_arch2]
     mock_forum.edit = AsyncMock()
 
-    pruned, err = await prune_archived_project_tags(mock_forum, ["Old Proj 1", "Old Proj 2", "Nonexistent"])
+    pruned, err = await prune_archived_project_tags(
+        mock_forum,
+        ["Old Proj 1", "Old Proj 2", "Completed", "Overdue", "Nonexistent"],
+    )
     assert pruned == 2
     assert err is None
-    mock_forum.edit.assert_awaited_once_with(available_tags=[t_todo, t_active])
+    mock_forum.edit.assert_awaited_once_with(available_tags=[t_todo, t_completed, t_overdue, t_active])
 
 
 @pytest.mark.asyncio

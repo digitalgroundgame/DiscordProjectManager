@@ -152,7 +152,7 @@ async def test_auth_login_oauth_callback_me_and_logout(services) -> None:
     from httpx import ASGITransport, AsyncClient
 
     from src.adapters.api.app import api_app
-    from src.adapters.api.session import SESSION_COOKIE_NAME
+    from src.adapters.api.session import OAUTH_STATE_COOKIE_NAME, SESSION_COOKIE_NAME
     from src.services.auth_service import AuthService
 
     guild_id = 888111
@@ -185,19 +185,36 @@ async def test_auth_login_oauth_callback_me_and_logout(services) -> None:
 
     transport = ASGITransport(app=api_app)
     async with AsyncClient(transport=transport, base_url="https://pm.example.org") as client:
-        # 1. /auth/login redirects to Discord OAuth2 authorize URL
+        # 1. /auth/login redirects to Discord OAuth2 authorize URL with state parameter and state cookie
         login_resp = await client.get("/auth/login", follow_redirects=False)
         assert login_resp.status_code == 302
         loc = login_resp.headers["location"]
         assert loc.startswith("https://discord.com/oauth2/authorize?")
         assert "client_id=client-123" in loc
         assert "scope=identify" in loc
+        assert "state=" in loc
+        assert OAUTH_STATE_COOKIE_NAME in login_resp.cookies
+        oauth_state = login_resp.cookies[OAUTH_STATE_COOKIE_NAME]
 
-        # 2. /auth/callback exchanges code, sets cookie, and redirects to /dashboard
-        cb_resp = await client.get("/auth/callback?code=oauth-code-xyz", follow_redirects=False)
+        # 1b. /auth/callback rejects missing or mismatched state parameter (CSRF protection)
+        client.cookies.set(OAUTH_STATE_COOKIE_NAME, oauth_state)
+        bad_state_resp = await client.get(
+            "/auth/callback?code=oauth-code-xyz&state=wrong-state", follow_redirects=False
+        )
+        assert bad_state_resp.status_code == 400
+        missing_state_resp = await client.get("/auth/callback?code=oauth-code-xyz", follow_redirects=False)
+        assert missing_state_resp.status_code == 400
+
+        # 2. /auth/callback with valid state exchanges code, sets secure cookie, and redirects to /dashboard
+        cb_resp = await client.get(
+            f"/auth/callback?code=oauth-code-xyz&state={oauth_state}",
+            follow_redirects=False,
+        )
         assert cb_resp.status_code == 302
         assert cb_resp.headers["location"] == "/dashboard"
         assert SESSION_COOKIE_NAME in cb_resp.cookies
+        set_cookie_hdr = cb_resp.headers.get("set-cookie", "").lower()
+        assert "secure" in set_cookie_hdr
         assert len(fake_oauth.calls) == 1
         assert fake_oauth.calls[0]["code"] == "oauth-code-xyz"
 
@@ -217,8 +234,10 @@ async def test_auth_login_oauth_callback_me_and_logout(services) -> None:
         denied_resp = await client.get("/api/me")
         assert denied_resp.status_code == 403
 
-        # 5. /auth/logout clears session cookie
-        logout_resp = await client.get("/auth/logout", follow_redirects=False)
+        # 5. GET /auth/logout is disallowed (405) to prevent forced-logout CSRF; POST /auth/logout clears cookie
+        get_logout_resp = await client.get("/auth/logout", follow_redirects=False)
+        assert get_logout_resp.status_code == 405
+        logout_resp = await client.post("/auth/logout", follow_redirects=False)
         assert logout_resp.status_code == 302
         assert logout_resp.headers["location"] == "/dashboard"
 
@@ -231,16 +250,31 @@ async def test_auth_login_development_fallback(services) -> None:
     from src.adapters.api.session import SESSION_COOKIE_NAME
 
     guild_id = 888222
+    api_app.state.member_directory = FakeMemberDirectory()
+
+    # 1. Without explicit DEV_AUTH_FALLBACK_ENABLED=True, dev mode without OAuth credentials returns 503
     api_app.state.settings = Settings(
         ENVIRONMENT="development",
         DISCORD_CLIENT_ID="",
         DISCORD_CLIENT_SECRET="",
         DISCORD_GUILD_ID=guild_id,
         SESSION_SECRET_KEY="dev-secret",
+        DEV_AUTH_FALLBACK_ENABLED=False,
     )
-    api_app.state.member_directory = FakeMemberDirectory()
-
     transport = ASGITransport(app=api_app)
+    async with AsyncClient(transport=transport, base_url="http://localhost:8000") as client:
+        disabled_resp = await client.get("/auth/login?user_id=777&username=local-dev", follow_redirects=False)
+        assert disabled_resp.status_code == 503
+
+    # 2. With DEV_AUTH_FALLBACK_ENABLED=True in development, local dev session is established
+    api_app.state.settings = Settings(
+        ENVIRONMENT="development",
+        DISCORD_CLIENT_ID="",
+        DISCORD_CLIENT_SECRET="",
+        DISCORD_GUILD_ID=guild_id,
+        SESSION_SECRET_KEY="dev-secret",
+        DEV_AUTH_FALLBACK_ENABLED=True,
+    )
     async with AsyncClient(transport=transport, base_url="http://localhost:8000") as client:
         resp = await client.get("/auth/login?user_id=777&username=local-dev", follow_redirects=False)
         assert resp.status_code == 302
@@ -429,6 +463,17 @@ async def test_dashboard_projects_workspace_and_tech_tree_endpoints(services, re
         lead_beta_ws = await client.get(f"/api/projects/{proj_b.id}/workspace")
         assert lead_beta_ws.status_code == 200
 
+        # 6. Project from another guild returns 404 (guild scoping isolation)
+        other_guild_proj = await proj_srv.create_project(
+            guild_id=999999999,
+            name="Other Guild Project",
+            prefix="OGP",
+        )
+        cross_ws = await client.get(f"/api/projects/{other_guild_proj.id}/workspace")
+        assert cross_ws.status_code == 404
+        cross_tt = await client.get(f"/api/projects/{other_guild_proj.id}/tech-tree")
+        assert cross_tt.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_portal_dashboard_and_static_assets_routes() -> None:
@@ -443,17 +488,23 @@ async def test_portal_dashboard_and_static_assets_routes() -> None:
         assert r_root.status_code == 307
         assert r_root.headers["location"] == "/dashboard"
 
-        # 2. /dashboard serves the HTML portal with Tech Tree, Kanban, Matrix, and Inspector
+        # 2. /dashboard serves the HTML portal with CSP, SRI hashes, POST logout, and workspace views
         r_dash = await client.get("/dashboard")
         assert r_dash.status_code == 200
         assert "text/html" in r_dash.headers["content-type"]
+        csp = r_dash.headers.get("content-security-policy", "")
+        assert "script-src 'self' https://unpkg.com" in csp
+        assert r_dash.headers.get("x-content-type-options") == "nosniff"
         html = r_dash.text
         assert "Tech Tree DAG" in html
         assert "Kanban Board" in html
         assert "Table Matrix" in html
         assert "Open Task in Discord" in html
+        assert 'integrity="sha384-' in html
+        assert 'crossorigin="anonymous"' in html
+        assert '<form action="/auth/logout" method="post"' in html
 
-        # 3. Static CSS and JS assets are served with proper media types
+        # 3. Static CSS and JS assets are served with proper media types and XSS escaping
         r_css = await client.get("/static/styles.css")
         assert r_css.status_code == 200
         assert "text/css" in r_css.headers["content-type"]
@@ -464,6 +515,10 @@ async def test_portal_dashboard_and_static_assets_routes() -> None:
         assert "renderTechTree" in r_js.text
         assert "renderKanban" in r_js.text
         assert "renderMatrix" in r_js.text
+        assert "function escapeHtml(" in r_js.text
+        assert "escapeHtml(t.title)" in r_js.text
+        assert "escapeHtml(col.title)" in r_js.text
+        assert "onclick=" not in r_js.text
 
         # 4. Path traversal or unknown asset returns 404
         r_missing = await client.get("/static/nonexistent.js")

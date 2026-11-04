@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
@@ -14,9 +15,12 @@ from src.adapters.api.dependencies import (
     get_current_principal,
     get_member_directory,
     get_session_data,
+    resolve_session_secret,
 )
 from src.adapters.api.session import (
     DEFAULT_MAX_AGE_SECONDS,
+    OAUTH_STATE_COOKIE_NAME,
+    OAUTH_STATE_MAX_AGE_SECONDS,
     SESSION_COOKIE_NAME,
     create_session_token,
 )
@@ -93,6 +97,12 @@ def _resolve_redirect_uri(settings: Settings) -> str:
     return f"{base}/auth/callback"
 
 
+def _use_secure_cookies(settings: Settings) -> bool:
+    return settings.ENVIRONMENT.strip().lower() != "development" or (
+        settings.PUBLIC_BASE_URL or ""
+    ).strip().lower().startswith("https://")
+
+
 def _resolve_oauth_client(request: Request) -> DiscordOAuthClientPort:
     client = getattr(request.app.state, "oauth_client", None)
     if client is not None:
@@ -107,12 +117,17 @@ async def auth_login(
     username: str = Query(default="dev-admin"),
     is_guild_admin: bool = Query(default=True),
 ) -> RedirectResponse:
-    """Initiates Discord OAuth2 sign-in, or establishes a local dev session in development mode."""
+    """Initiates Discord OAuth2 sign-in, or establishes a local dev session when explicitly enabled in development."""
     settings = get_active_settings(request)
-    secret = settings.SESSION_SECRET_KEY or "dev-session-secret-change-in-production"
+    secret = resolve_session_secret(settings)
+    secure_cookie = _use_secure_cookies(settings)
 
-    # Zero-config development mode fallback when DISCORD_CLIENT_SECRET is not set
-    if not settings.DISCORD_CLIENT_SECRET and settings.ENVIRONMENT.lower() == "development":
+    # Explicit opt-in development mode fallback when DISCORD_CLIENT_SECRET is not set
+    if (
+        not settings.DISCORD_CLIENT_SECRET
+        and settings.ENVIRONMENT.strip().lower() == "development"
+        and settings.DEV_AUTH_FALLBACK_ENABLED
+    ):
         token = create_session_token(
             {
                 "user_id": int(user_id),
@@ -133,6 +148,7 @@ async def auth_login(
             max_age=DEFAULT_MAX_AGE_SECONDS,
             httponly=True,
             samesite="lax",
+            secure=secure_cookie,
         )
         return response
 
@@ -142,6 +158,7 @@ async def auth_login(
             detail="Discord OAuth2 is not configured (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET are required).",
         )
 
+    state = secrets.token_urlsafe(32)
     redirect_uri = _resolve_redirect_uri(settings)
     query = urlencode(
         {
@@ -149,20 +166,35 @@ async def auth_login(
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": "identify",
+            "state": state,
         }
     )
-    return RedirectResponse(url=f"{DISCORD_OAUTH_AUTHORIZE_URL}?{query}", status_code=302)
+    response = RedirectResponse(url=f"{DISCORD_OAUTH_AUTHORIZE_URL}?{query}", status_code=302)
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        value=state,
+        max_age=OAUTH_STATE_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=secure_cookie,
+    )
+    return response
 
 
 @auth_router.get("/auth/callback")
 async def auth_callback(
     request: Request,
     code: str = Query(...),
+    state: str | None = Query(default=None),
 ) -> RedirectResponse:
     """Completes Discord OAuth2 flow, establishes a signed session cookie, and redirects to /dashboard."""
     settings = get_active_settings(request)
     if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
         raise HTTPException(status_code=503, detail="Discord OAuth2 is not configured.")
+
+    expected_state = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
+    if not state or not expected_state or not secrets.compare_digest(state, expected_state):
+        raise HTTPException(status_code=400, detail="Invalid or missing OAuth2 state parameter.")
 
     oauth_client = _resolve_oauth_client(request)
     redirect_uri = _resolve_redirect_uri(settings)
@@ -183,7 +215,8 @@ async def auth_callback(
     avatar_hash = user_data.get("avatar")
     avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png" if avatar_hash else None
 
-    secret = settings.SESSION_SECRET_KEY or "dev-session-secret-change-in-production"
+    secret = resolve_session_secret(settings)
+    secure_cookie = _use_secure_cookies(settings)
     token = create_session_token(
         {
             "user_id": user_id,
@@ -203,16 +236,29 @@ async def auth_callback(
         max_age=DEFAULT_MAX_AGE_SECONDS,
         httponly=True,
         samesite="lax",
+        secure=secure_cookie,
+    )
+    response.delete_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        httponly=True,
+        samesite="lax",
+        secure=secure_cookie,
     )
     return response
 
 
-@auth_router.get("/auth/logout")
 @auth_router.post("/auth/logout")
-async def auth_logout() -> RedirectResponse:
+async def auth_logout(request: Request) -> RedirectResponse:
     """Clears the session cookie and redirects to the portal login view."""
+    settings = get_active_settings(request)
+    secure_cookie = _use_secure_cookies(settings)
     response = RedirectResponse(url="/dashboard", status_code=302)
-    response.delete_cookie(key=SESSION_COOKIE_NAME)
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        samesite="lax",
+        secure=secure_cookie,
+    )
     return response
 
 

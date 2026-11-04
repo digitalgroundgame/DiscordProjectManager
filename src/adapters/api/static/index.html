@@ -6,9 +6,24 @@
   <title>DGG-PM | Web Dashboard &amp; Portal</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <!-- Cytoscape & Dagre for interactive Tech Tree DAG rendering -->
-  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js" defer></script>
-  <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js" defer></script>
-  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js" defer></script>
+  <script
+    src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"
+    integrity="sha384-2IH3T69EIKYC4c+RXZifZRvaH5SRUdacJW7j6HtE5rQbvLhKKdawxq6vpIzJ7j9M"
+    crossorigin="anonymous"
+    defer
+  ></script>
+  <script
+    src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"
+    integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4"
+    crossorigin="anonymous"
+    defer
+  ></script>
+  <script
+    src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"
+    integrity="sha384-u69h9ebXeSjlg6q/rb1zKTRAGu/h8deCl0409xpS/QJctMKnc4M9Fzkm01VOQdeF"
+    crossorigin="anonymous"
+    defer
+  ></script>
   <script type="module" src="/static/app.js" defer></script>
 </head>
 <body>
@@ -51,7 +66,9 @@
     <div id="auth-controls" class="auth-controls">
       <span id="user-badge" class="user-badge hidden"></span>
       <a id="login-btn" href="/auth/login" class="btn btn-primary">Sign in with Discord</a>
-      <a id="logout-btn" href="/auth/logout" class="btn btn-secondary hidden">Sign out</a>
+      <form action="/auth/logout" method="post" style="display:inline">
+        <button type="submit" id="logout-btn" class="btn btn-secondary hidden">Sign out</button>
+      </form>
     </div>
   </header>
 

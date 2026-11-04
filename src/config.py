@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     # When empty, /metrics is left open for local/dev use.
     API_METRICS_TOKEN: str = ""
     SESSION_SECRET_KEY: str = "dev-session-secret-change-in-production"
+    DEV_AUTH_FALLBACK_ENABLED: bool = False
 
     # Command Sync & Startup Backoff Configuration
     SYNC_COMMANDS_ON_STARTUP: bool | None = None
@@ -90,9 +91,22 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def compute_sync_commands_on_startup(self) -> Settings:
+        is_dev = self.ENVIRONMENT.strip().lower() == "development"
         if self.SYNC_COMMANDS_ON_STARTUP is None:
-            self.SYNC_COMMANDS_ON_STARTUP = self.ENVIRONMENT.lower() == "development"
+            self.SYNC_COMMANDS_ON_STARTUP = is_dev
+
+        if not is_dev:
+            secret = (self.SESSION_SECRET_KEY or "").strip()
+            if not secret or secret == DEFAULT_DEV_SESSION_SECRET:
+                raise ValueError(
+                    "SESSION_SECRET_KEY must be set to a strong non-default secret when ENVIRONMENT != 'development'."
+                )
+            if self.DEV_AUTH_FALLBACK_ENABLED:
+                raise ValueError("DEV_AUTH_FALLBACK_ENABLED cannot be enabled when ENVIRONMENT != 'development'.")
         return self
+
+
+DEFAULT_DEV_SESSION_SECRET = "dev-session-secret-change-in-production"
 
 
 _settings: Settings | None = None

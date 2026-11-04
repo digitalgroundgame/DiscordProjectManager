@@ -51,6 +51,13 @@ STANDARD_PM_TAG_DEFINITIONS = [
 ]
 
 PROJECT_TAG_EMOJI = "📁"
+STANDARD_PM_TAG_NAMES: frozenset[str] = frozenset(str(d["name"]).strip().lower() for d in STANDARD_PM_TAG_DEFINITIONS)
+
+
+def _is_standard_pm_tag(tag_name: str) -> bool:
+    """Returns True if tag_name matches one of the built-in STANDARD_PM_TAG_DEFINITIONS names."""
+    clean = tag_name.lower().replace(PROJECT_TAG_EMOJI, "").replace("[", "").replace("]", "").strip()
+    return clean in STANDARD_PM_TAG_NAMES
 
 
 def project_tag_name(project_name: str) -> str:
@@ -324,7 +331,9 @@ async def remove_project_tag(forum_channel: discord.ForumChannel, project_name: 
         return False, "Channel is not a ForumChannel"
 
     existing_tags = list(getattr(forum_channel, "available_tags", []) or [])
-    new_tags = [t for t in existing_tags if not _matches_project_tag(t.name, project_name)]
+    new_tags = [
+        t for t in existing_tags if _is_standard_pm_tag(t.name) or not _matches_project_tag(t.name, project_name)
+    ]
 
     if len(new_tags) == len(existing_tags):
         return False, None
@@ -372,6 +381,9 @@ async def prune_archived_project_tags(
     pruned_count = 0
 
     for t in existing_tags:
+        if _is_standard_pm_tag(t.name):
+            new_tags.append(t)
+            continue
         is_archived = any(_matches_project_tag(t.name, arch_name) for arch_name in archived_project_names)
         if is_archived:
             pruned_count += 1
