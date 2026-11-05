@@ -102,7 +102,7 @@ class Settings(BaseSettings):
                     "SESSION_SECRET_KEY must be set to a strong non-default secret when ENVIRONMENT != 'development'."
                 )
             if self.DEV_AUTH_FALLBACK_ENABLED:
-                raise ValueError("DEV_AUTH_FALLBACK_ENABLED cannot be enabled when ENVIRONMENT != 'development'.")
+                self.DEV_AUTH_FALLBACK_ENABLED = False
         return self
 
 

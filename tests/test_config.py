@@ -62,13 +62,13 @@ def test_session_secret_key_required_outside_development(monkeypatch):
     with pytest.raises(ValidationError, match="SESSION_SECRET_KEY"):
         Settings(_env_file=None, ENVIRONMENT="production", SESSION_SECRET_KEY="")
 
-    with pytest.raises(ValidationError, match="DEV_AUTH_FALLBACK_ENABLED"):
-        Settings(
-            _env_file=None,
-            ENVIRONMENT="production",
-            SESSION_SECRET_KEY="strong-prod-secret",
-            DEV_AUTH_FALLBACK_ENABLED=True,
-        )
+    prod_with_flag = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        SESSION_SECRET_KEY="strong-prod-secret",
+        DEV_AUTH_FALLBACK_ENABLED=True,
+    )
+    assert prod_with_flag.DEV_AUTH_FALLBACK_ENABLED is False
 
 
 def test_startup_crash_backoff_seconds_defaults(monkeypatch):

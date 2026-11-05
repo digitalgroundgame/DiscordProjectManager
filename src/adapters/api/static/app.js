@@ -314,17 +314,6 @@ function renderTechTree() {
   const tt = state.techTree;
   if (!tt) return;
 
-  const banner = el("bottleneck-banner");
-  if (tt.bottlenecks && tt.bottlenecks.length > 0) {
-    const top = tt.bottlenecks
-      .map((b) => `[${b.short_id}] ${b.title} (blocks ${b.blocked_dependents_count})`)
-      .join(" • ");
-    banner.textContent = `Bottlenecks: ${top}`;
-    banner.classList.remove("hidden");
-  } else {
-    banner.classList.add("hidden");
-  }
-
   const container = el("cy-canvas");
   const filteredIds = new Set(getFilteredTasks().map((t) => t.id));
 

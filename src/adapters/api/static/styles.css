@@ -376,14 +376,6 @@ body {
 .legend-pill.state-blocked,
 .legend-pill.state-overdue { background-color: var(--state-blocked); }
 
-.bottleneck-banner {
-  background-color: rgba(240, 178, 50, 0.12);
-  border-bottom: 1px solid rgba(240, 178, 50, 0.35);
-  color: #f8d377;
-  padding: 0.45rem 0.85rem;
-  font-size: 0.82rem;
-}
-
 .cy-canvas {
   flex: 1;
   min-height: 480px;
