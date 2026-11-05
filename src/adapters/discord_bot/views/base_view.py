@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.domain.exceptions import DggPmError, StaleVersionError
 
 logger = logging.getLogger("dgg_pm.adapters.discord_bot.views.base_view")
@@ -62,7 +63,30 @@ async def _handle_component_error(
 
 
 class BaseView(discord.ui.View):
-    """Base interactive View providing standardized error handling across component callbacks."""
+    """Base interactive View providing standardized error handling and lifecycle timeout handling."""
+
+    def __init__(
+        self,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self._initial_interaction: discord.Interaction | None = initial_interaction
+
+    async def on_timeout(self) -> None:
+        """Uniform timeout handler: unregisters and deletes ephemeral menu before interaction token expires."""
+        try:
+            if (
+                hasattr(self, "_initial_interaction")
+                and self._initial_interaction
+                and hasattr(self._initial_interaction, "delete_original_response")
+            ):
+                from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+                get_menu_manager().unregister_menu(self._initial_interaction)
+                await self._initial_interaction.delete_original_response()
+        except Exception:
+            pass
 
     async def on_error(
         self,
@@ -96,3 +120,10 @@ class BaseModal(discord.ui.Modal):
             class_name=self.__class__.__name__,
             item=None,
         )
+
+
+__all__ = [
+    "EPHEMERAL_MENU_TIMEOUT_SECONDS",
+    "BaseModal",
+    "BaseView",
+]

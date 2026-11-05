@@ -41,25 +41,59 @@ class WorkspaceService(TransactionalService):
         self,
         project_id: UUID,
         *,
+        project: Project | None = None,
         include_archived_tasks: bool = True,
         task_limit: int = 1000,
     ) -> ProjectWorkspaceView:
         """Retrieves complete project workspace context (project, linked squads, and tasks) in O(1) queries."""
-        project = await self.project_repo.get_by_id(project_id)
-        if not project:
+        resolved_project = project or await self.project_repo.get_by_id(project_id)
+        if not resolved_project:
             raise ProjectNotFoundError(f"Project with ID '{project_id}' not found.")
 
-        squads = await self.project_repo.list_squads_for_project(project_id)
+        squads = await self.project_repo.list_squads_for_project(resolved_project.id)
         tasks, _ = await self.task_repo.list_tasks(
-            guild_id=project.guild_id,
-            project_id=project.id,
+            guild_id=resolved_project.guild_id,
+            project_id=resolved_project.id,
             include_archived=include_archived_tasks,
             limit=task_limit,
             count_total=False,
         )
 
         return ProjectWorkspaceView(
-            project=project,
+            project=resolved_project,
             squads=squads,
             tasks=tasks,
         )
+
+    async def get_projects_workspaces(
+        self,
+        guild_id: int,
+        projects: list[Project],
+        *,
+        include_archived_tasks: bool = True,
+        task_limit: int = 10000,
+    ) -> dict[UUID, ProjectWorkspaceView]:
+        """Batch-loads workspace views for a list of projects in a guild without per-project task queries."""
+        if not projects:
+            return {}
+
+        all_tasks, _ = await self.task_repo.list_tasks(
+            guild_id=guild_id,
+            include_archived=include_archived_tasks,
+            limit=task_limit,
+            count_total=False,
+        )
+        tasks_by_project: dict[UUID, list[Task]] = {p.id: [] for p in projects}
+        for t in all_tasks:
+            if t.project_id in tasks_by_project:
+                tasks_by_project[t.project_id].append(t)
+
+        workspaces: dict[UUID, ProjectWorkspaceView] = {}
+        for proj in projects:
+            squads = await self.project_repo.list_squads_for_project(proj.id)
+            workspaces[proj.id] = ProjectWorkspaceView(
+                project=proj,
+                squads=squads,
+                tasks=tasks_by_project.get(proj.id, []),
+            )
+        return workspaces

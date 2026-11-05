@@ -9,6 +9,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 
 if TYPE_CHECKING:
@@ -31,14 +35,15 @@ class HubTaskProjectSelectView(BaseView):
         target_channel: discord.ForumChannel | discord.TextChannel | discord.Thread | None,
         auth_service: AuthService | None = None,
         allow_standalone: bool = False,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=60)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.channel_projects = channel_projects
         self.target_channel = target_channel
         self.auth_service = auth_service
         self.allow_standalone = allow_standalone
-        self._initial_interaction: discord.Interaction | None = None
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -140,16 +145,9 @@ class HubTaskProjectSelectView(BaseView):
             await interaction.response.edit_message(embed=embed, view=None)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             logger.debug("Error in cancel button: %s", e)
-
-    async def on_timeout(self) -> None:
-        try:
-            if self._initial_interaction and hasattr(self._initial_interaction, "delete_original_response"):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
         val = self.select.values[0]
@@ -170,8 +168,10 @@ class HubBoardProjectSelectView(BaseView):
         current_channel_id: int | None = None,
         parent_channel_id: int | None = None,
         assignee_id: int | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=120)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project_service = project_service
         self.squad_service = squad_service
@@ -223,20 +223,9 @@ class HubBoardProjectSelectView(BaseView):
             await interaction.response.edit_message(embed=embed, view=None)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             logger.debug("Error in cancel button: %s", e)
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:

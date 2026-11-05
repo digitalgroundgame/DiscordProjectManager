@@ -10,6 +10,10 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.squad_embeds import build_squad_menu_embed
 from src.domain.enums import SquadRoleType
@@ -38,8 +42,9 @@ class SquadMemberAssignView(BaseView):
         initial_interaction: discord.Interaction | None = None,
         current_page: int = 0,
         query: str = "",
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_squads = list(squads)
         self.squads = {s.id: s for s in self.all_squads}
         self.squad_service = squad_service
@@ -287,7 +292,7 @@ class SquadMemberAssignView(BaseView):
             await interaction.response.send_message("❌ Please select a squad first.", ephemeral=True)
             from src.adapters.discord_bot.menu_manager import menu_manager
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
             return
 
         if not self.selected_user:
@@ -297,7 +302,7 @@ class SquadMemberAssignView(BaseView):
                 await interaction.response.send_message("❌ Please select a Discord member first.", ephemeral=True)
                 from src.adapters.discord_bot.menu_manager import menu_manager
 
-                menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
                 return
 
         action_type = self.selected_role_type_str
@@ -318,7 +323,7 @@ class SquadMemberAssignView(BaseView):
                 )
                 from src.adapters.discord_bot.menu_manager import menu_manager
 
-                menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
                 return
 
         # Validate that the user actually has the squad's Discord role for add/verify
@@ -337,7 +342,7 @@ class SquadMemberAssignView(BaseView):
                     )
                     from src.adapters.discord_bot.menu_manager import menu_manager
 
-                    menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                    menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
                     return
 
         try:

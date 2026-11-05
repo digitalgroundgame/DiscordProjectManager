@@ -8,6 +8,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.workspace_protocol import (
     IProjectDiscordWorkspace,
@@ -35,8 +36,9 @@ class RebuildConfirmView(BaseView):
         interaction: discord.Interaction,
         task_count: int,
         return_to: str = "dashboard",
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=120)
+        super().__init__(timeout=timeout, initial_interaction=interaction)
         self.project_workspace = project_workspace
         self.project = project
         self.target_channel = target_channel
@@ -99,7 +101,7 @@ class RebuildConfirmView(BaseView):
                 interaction, e, f"rebuilding workspace for {self.project.name}", logger, ephemeral=True
             )
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="❌")
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.edit_message(
             content=f"❌ Workspace rebuild for **{self.project.name}** was cancelled.",
@@ -120,15 +122,15 @@ class ProjectRebuildSelectView(BaseView):
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.projects = projects
         self.project_service = project_service
         self.project_workspace = project_workspace
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self._initial_interaction = initial_interaction
 
         options = [
             discord.SelectOption(

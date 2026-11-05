@@ -5,6 +5,10 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_STANDARD,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.exceptions import ValidationError
@@ -71,8 +75,10 @@ class TaskDependencyView(BaseView):
         sibling_tasks: list[Task],
         prerequisites: list[Task],
         dependents: list[Task],
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.task = task
         self.sibling_tasks = sibling_tasks
@@ -180,3 +186,6 @@ class TaskDependencyView(BaseView):
             embed=None,
             view=None,
         )
+        from src.adapters.discord_bot.menu_manager import menu_manager
+
+        menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)

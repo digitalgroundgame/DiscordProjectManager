@@ -7,6 +7,13 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from src.adapters.discord_bot.menu_manager import edit_toast, send_toast
+from src.adapters.discord_bot.ui_constants import (
+    EPHEMERAL_MENU_TIMEOUT_SECONDS,
+    TOAST_DURATION_EXTENDED,
+    TOAST_DURATION_STANDARD,
+    ToastType,
+)
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.enums import TaskStatus
 from src.domain.exceptions import StaleVersionError
@@ -54,6 +61,10 @@ def build_task_blocked_confirm_embed(
     return embed
 
 
+_safe_edit_toast = edit_toast
+_safe_send_toast = send_toast
+
+
 class TaskBlockedConfirmView(BaseView):
     """Interactive confirmation view prompting users before starting or completing a blocked task."""
 
@@ -69,9 +80,10 @@ class TaskBlockedConfirmView(BaseView):
         workspace: ITaskDiscordWorkspace | None = None,
         bot: discord.Client | None = None,
         notes: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        initial_interaction: discord.Interaction | None = None,
     ):
-        super().__init__(timeout=timeout)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task = task
         self.target_status = target_status
         self.incomplete_prereqs = incomplete_prereqs
@@ -88,9 +100,11 @@ class TaskBlockedConfirmView(BaseView):
                 can_bypass = await self.auth_service.can_bypass_dependencies(interaction.user, self.task)
                 if can_bypass:
                     return True
-            await interaction.response.send_message(
-                "❌ Only the command invoker or an authorized manager/lead may interact with this confirmation card.",
-                ephemeral=True,
+            await _safe_send_toast(
+                interaction,
+                "Only the command invoker or an authorized manager/lead may interact with this confirmation card.",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
             )
             return False
         return True
@@ -119,46 +133,43 @@ class TaskBlockedConfirmView(BaseView):
                 notes=note,
             )
 
-            effective_workspace = self.workspace or getattr(self.bot, "workspace", None)
-            if effective_workspace:
-                try:
-                    await effective_workspace.refresh_action_card(interaction, updated_task)
-                    await effective_workspace.sync_workspace(updated_task)
-                except Exception as ws_err:
-                    logger.warning("Error syncing workspace on blocked bypass: %s", ws_err)
-
             msg = (
-                f"⚠️ **Dependency Warning Bypassed**\n"
+                f"**Dependency Warning Bypassed**\n"
                 f"Status updated to **{self.target_status.value.upper()}** for **[{self.task.short_id}]** "
                 f"despite unresolved blockers: {blocker_ids}."
             )
-            await interaction.response.edit_message(content=msg, embed=None, view=None)
+            await _safe_edit_toast(interaction, msg, toast_type=ToastType.SUCCESS, delay=TOAST_DURATION_STANDARD)
             self.stop()
+
+            effective_workspace = self.workspace or getattr(self.bot, "workspace", None)
+            if effective_workspace:
+                try:
+                    await effective_workspace.sync_workspace(updated_task)
+                except Exception as ws_err:
+                    logger.warning("Error syncing workspace on blocked bypass: %s", ws_err)
         except StaleVersionError:
-            await interaction.response.edit_message(
-                content=f"⚠️ Task **[{self.task.short_id}]** was modified by another user. Please retry.",
-                embed=None,
-                view=None,
+            await _safe_edit_toast(
+                interaction,
+                f"Task **[{self.task.short_id}]** was modified by another user. Please retry.",
+                toast_type=ToastType.WARNING,
+                delay=TOAST_DURATION_EXTENDED,
             )
             self.stop()
         except Exception as e:
             logger.exception("Error confirming blocked task transition: %s", e)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"❌ Failed to update status: {e}", ephemeral=True)
-            else:
-                await interaction.followup.send(f"❌ Failed to update status: {e}", ephemeral=True)
+            await _safe_send_toast(
+                interaction,
+                f"Failed to update status: {e}",
+                toast_type=ToastType.ERROR,
+                delay=TOAST_DURATION_EXTENDED,
+            )
 
     @discord.ui.button(
         label="Cancel",
         style=discord.ButtonStyle.secondary,
-        emoji="✖️",
         custom_id="btn_cancel_blocked_transition",
     )
     async def cancel_transition(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         msg = f"Status update to **{self.target_status.value.upper()}** for **[{self.task.short_id}]** was cancelled."
-        await interaction.response.edit_message(
-            content=msg,
-            embed=None,
-            view=None,
-        )
+        await _safe_edit_toast(interaction, msg, toast_type=ToastType.INFO, delay=TOAST_DURATION_STANDARD)
         self.stop()

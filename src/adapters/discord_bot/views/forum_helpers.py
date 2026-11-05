@@ -7,15 +7,50 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 from src.adapters.discord_bot.router import DiscordViewRouter
-from src.domain.enums import PriorityLevel, TaskStatus
+from src.adapters.discord_bot.views.forum_tags import (
+    OVERDUE_KEYWORDS,
+    PRIORITY_KEYWORDS,
+    PROJECT_TAG_EMOJI,
+    STANDARD_PM_TAG_DEFINITIONS,
+    STATUS_KEYWORDS,
+    UNASSIGNED_KEYWORDS,
+    _matches_keyword,
+    _matches_project_tag,
+    ensure_project_tag,
+    project_tag_name,
+    prune_archived_project_tags,
+    remove_project_tag,
+    resolve_forum_tags,
+    setup_forum_tags,
+    sync_thread_forum_tags,
+)
 
 if TYPE_CHECKING:
-    from src.domain.models import Task
     from src.services.auth_service import AuthService
     from src.services.project_service import ProjectService
     from src.services.squad_service import SquadService
     from src.services.task_service import TaskService
     from src.services.user_service import UserService
+
+__all__ = [
+    "OVERDUE_KEYWORDS",
+    "PRIORITY_KEYWORDS",
+    "PROJECT_TAG_EMOJI",
+    "STANDARD_PM_TAG_DEFINITIONS",
+    "STATUS_KEYWORDS",
+    "UNASSIGNED_KEYWORDS",
+    "_matches_keyword",
+    "_matches_project_tag",
+    "ensure_pinned_hub_post",
+    "ensure_project_tag",
+    "project_tag_name",
+    "prune_archived_project_tags",
+    "remove_project_tag",
+    "resolve_forum_tags",
+    "setup_forum_tags",
+    "sync_thread_forum_tags",
+    "unarchive_thread_if_needed",
+]
 
 logger = logging.getLogger("dgg_pm.views.forum_helpers")
 
@@ -59,296 +94,6 @@ async def unarchive_thread_if_needed(
                 logger.debug("Failed to restore archived state for thread %s: %s", getattr(thread, "id", None), e)
 
 
-STATUS_KEYWORDS = {
-    TaskStatus.NOT_STARTED: ["not started", "to do", "todo", "backlog", "open"],
-    TaskStatus.IN_PROGRESS: ["in progress", "doing", "active", "wip", "in-progress"],
-    TaskStatus.COMPLETED: ["completed", "done", "closed", "resolved", "complete"],
-}
-
-PRIORITY_KEYWORDS = {
-    PriorityLevel.HIGH: ["high", "urgent", "critical", "p0", "p1", "high priority", "p:high"],
-    PriorityLevel.NORMAL: ["normal", "medium", "p2", "normal priority", "p:normal"],
-    PriorityLevel.LOW: ["low", "minor", "p3", "low priority", "p:low"],
-}
-
-UNASSIGNED_KEYWORDS = ["unassigned", "not assigned", "un-assigned", "no assignee", "needs assignee"]
-OVERDUE_KEYWORDS = ["overdue", "late", "past due"]
-
-STANDARD_PM_TAG_DEFINITIONS = [
-    {"name": "Not Started", "emoji": "⏳", "keywords": ["not started", "to do", "todo", "backlog", "open"]},
-    {"name": "In Progress", "emoji": "🟡", "keywords": ["in progress", "doing", "active", "wip", "in-progress"]},
-    {"name": "Completed", "emoji": "✅", "keywords": ["completed", "done", "closed", "resolved", "complete"]},
-    {
-        "name": "High Priority",
-        "emoji": "🔴",
-        "keywords": ["high", "urgent", "critical", "p0", "p1", "high priority", "p:high"],
-    },
-    {"name": "Normal Priority", "emoji": "🟡", "keywords": ["normal", "medium", "p2", "normal priority", "p:normal"]},
-    {"name": "Low Priority", "emoji": "🟢", "keywords": ["low", "minor", "p3", "low priority", "p:low"]},
-    {
-        "name": "Unassigned",
-        "emoji": "👤",
-        "keywords": UNASSIGNED_KEYWORDS,
-    },
-    {
-        "name": "Overdue",
-        "emoji": "⏰",
-        "keywords": OVERDUE_KEYWORDS,
-    },
-]
-
-PROJECT_TAG_EMOJI = "📁"
-
-
-def project_tag_name(project_name: str) -> str:
-    """Builds the per-project forum tag name, e.g. 'Mobile App'."""
-    return project_name.strip()
-
-
-def _matches_project_tag(tag_name: str, project_name: str | None) -> bool:
-    """Checks if a tag name is the per-project tag for the given project."""
-    if not project_name:
-        return False
-    expected = project_name.strip().lower()
-    clean = tag_name.lower().replace(PROJECT_TAG_EMOJI, "").replace("[", "").replace("]", "").strip()
-    return clean == expected
-
-
-def _matches_keyword(tag_name: str, keywords: list[str]) -> bool:
-    """Checks if a tag name matches any of the target keywords (ignoring emojis/brackets/case)."""
-    clean_name = tag_name.lower().replace("[", "").replace("]", "").replace(":", " ").strip()
-    words = clean_name.split()
-    for kw in keywords:
-        if kw == clean_name or kw in words:
-            return True
-    return False
-
-
-def resolve_forum_tags(
-    forum_channel: discord.ForumChannel,
-    task: Task | None = None,
-    *,
-    status: TaskStatus | None = None,
-    priority: PriorityLevel | None = None,
-    is_unassigned: bool | None = None,
-    is_overdue: bool | None = None,
-    project_name: str | None = None,
-    existing_tags: list[discord.ForumTag] | None = None,
-) -> list[discord.ForumTag]:
-    """Finds matching ForumTag objects for a task's status, priority, overdue, and unassigned state.
-
-    Applies the per-project tag when a ``project_name`` is provided. Preserves any
-    non-status/priority/overdue/unassigned/project custom tags already applied on the thread
-    (up to Discord's maximum limit of 5 applied tags per thread, prioritizing status,
-    priority, overdue, and project/squad tags over unassigned state).
-    """
-    if not hasattr(forum_channel, "available_tags") or not forum_channel.available_tags:
-        return []
-
-    if task is not None:
-        status = status or task.status
-        priority = priority or task.priority
-        if is_unassigned is None:
-            is_unassigned = task.assignee_discord_id is None
-        if is_overdue is None:
-            is_overdue = task.is_overdue
-
-    target_status = status or TaskStatus.NOT_STARTED
-    target_priority = priority or PriorityLevel.NORMAL
-    unassigned_flag = bool(is_unassigned)
-    overdue_flag = bool(is_overdue)
-
-    available = forum_channel.available_tags
-    applied: list[discord.ForumTag] = []
-
-    # 1. Match status tag
-    status_kws = STATUS_KEYWORDS.get(target_status, [])
-    for tag in available:
-        if _matches_keyword(tag.name, status_kws):
-            applied.append(tag)
-            break
-
-    # 2. Match priority tag
-    prio_kws = PRIORITY_KEYWORDS.get(target_priority, [])
-    for tag in available:
-        if _matches_keyword(tag.name, prio_kws):
-            if tag not in applied:
-                applied.append(tag)
-            break
-
-    # 3. Match Overdue tag if task is overdue
-    if overdue_flag:
-        for tag in available:
-            if _matches_keyword(tag.name, OVERDUE_KEYWORDS):
-                if tag not in applied:
-                    applied.append(tag)
-                break
-
-    # 4. Match per-project tag
-    if project_name:
-        for tag in available:
-            if _matches_project_tag(tag.name, project_name):
-                if tag not in applied:
-                    applied.append(tag)
-                break
-
-    # 5. Preserve custom tags (e.g. squad or category tags) that don't represent
-    # status, priority, overdue, unassigned, or project state
-    if existing_tags:
-        all_managed_kws = [
-            kw
-            for kws in list(STATUS_KEYWORDS.values())
-            + list(PRIORITY_KEYWORDS.values())
-            + [UNASSIGNED_KEYWORDS, OVERDUE_KEYWORDS]
-            for kw in kws
-        ]
-        for tag in existing_tags:
-            if not _matches_keyword(tag.name, all_managed_kws) and not _matches_project_tag(tag.name, project_name):
-                if tag not in applied:
-                    applied.append(tag)
-
-    # 6. Match Unassigned tag if unassigned (lowest priority under the 5-tag cap)
-    if unassigned_flag:
-        for tag in available:
-            if _matches_keyword(tag.name, UNASSIGNED_KEYWORDS):
-                if tag not in applied:
-                    applied.append(tag)
-                break
-
-    return applied[:5]
-
-
-async def sync_thread_forum_tags(
-    thread: discord.Thread,
-    task: Task,
-    *,
-    project_name: str | None = None,
-) -> list[discord.ForumTag]:
-    """Synchronizes forum tags on a thread workspace to reflect the current task state.
-
-    Resolves tags via resolve_forum_tags (applying ⏰ Overdue when task is overdue,
-    alongside status, priority, project, and squad tags up to the 5-tag cap) and
-    updates the thread if tags have changed.
-    """
-    parent = getattr(thread, "parent", None)
-    if not isinstance(parent, discord.ForumChannel):
-        return []
-
-    existing = getattr(thread, "applied_tags", None) or []
-    tags = resolve_forum_tags(
-        parent,
-        task=task,
-        project_name=project_name,
-        existing_tags=existing,
-    )
-
-    if hasattr(thread, "edit"):
-        edit_res = thread.edit(applied_tags=tags)
-        if hasattr(edit_res, "__await__"):
-            await edit_res
-
-    return tags
-
-
-async def setup_forum_tags(forum_channel: discord.ForumChannel) -> tuple[int, int, str | None]:
-    """Ensures standard project management tags exist in the given ForumChannel.
-
-    Preserves existing tags and appends missing standard PM tags up to Discord's 20-tag limit.
-    Returns (tags_added_count, total_tags_count, error_message_or_None).
-    """
-    if not isinstance(forum_channel, discord.ForumChannel):
-        return 0, 0, "Channel is not a ForumChannel"
-
-    existing_tags = list(getattr(forum_channel, "available_tags", []) or [])
-    new_tags_to_add: list[discord.ForumTag] = []
-
-    for tag_def in STANDARD_PM_TAG_DEFINITIONS:
-        # Check if an existing tag already covers this category
-        already_exists = any(_matches_keyword(t.name, tag_def["keywords"]) for t in existing_tags + new_tags_to_add)
-        if not already_exists:
-            if len(existing_tags) + len(new_tags_to_add) < 20:
-                new_tags_to_add.append(
-                    discord.ForumTag(
-                        name=tag_def["name"],
-                        emoji=tag_def["emoji"],
-                        moderated=False,
-                    )
-                )
-
-    if not new_tags_to_add:
-        return 0, len(existing_tags), None
-
-    updated_tag_list = existing_tags + new_tags_to_add
-    try:
-        await forum_channel.edit(available_tags=updated_tag_list)
-        return len(new_tags_to_add), len(updated_tag_list), None
-    except discord.Forbidden:
-        logger.warning(
-            "Missing 'Manage Channels' permission to configure tags in forum #%s (%s)",
-            getattr(forum_channel, "name", forum_channel.id),
-            forum_channel.id,
-        )
-        return 0, len(existing_tags), "Bot lacks 'Manage Channels' permission in this forum."
-    except Exception as e:
-        logger.exception("Failed to update tags in forum channel %s: %s", forum_channel.id, e)
-        return 0, len(existing_tags), str(e)
-
-
-async def ensure_project_tag(forum_channel: discord.ForumChannel, project_name: str) -> str | None:
-    """Ensures a per-project tag (e.g. 'Mobile App' with emoji '📁') exists in the ForumChannel.
-
-    Returns an error message on failure, or None on success.
-    """
-    if not isinstance(forum_channel, discord.ForumChannel):
-        return "Channel is not a ForumChannel"
-
-    new_tag = discord.ForumTag(
-        name=project_tag_name(project_name),
-        emoji=PROJECT_TAG_EMOJI,
-        moderated=False,
-    )
-
-    existing_tags = list(getattr(forum_channel, "available_tags", []) or [])
-    for idx, t in enumerate(existing_tags):
-        if _matches_project_tag(t.name, project_name):
-            # If the tag has a legacy double-emoji name ('📁 Project Name'), clean it up
-            if t.name.startswith(f"{PROJECT_TAG_EMOJI} "):
-                tag_emoji = getattr(t, "emoji", None)
-                if not isinstance(tag_emoji, (str, discord.Emoji, discord.PartialEmoji)):
-                    tag_emoji = PROJECT_TAG_EMOJI
-                is_mod = bool(getattr(t, "moderated", False))
-                updated_tag = discord.ForumTag(
-                    name=project_tag_name(project_name),
-                    emoji=tag_emoji,
-                    moderated=is_mod,
-                )
-                existing_tags[idx] = updated_tag
-                try:
-                    await forum_channel.edit(available_tags=existing_tags)
-                    logger.info(
-                        "Migrated legacy forum tag '%s' to '%s' in forum #%s",
-                        t.name,
-                        updated_tag.name,
-                        forum_channel.id,
-                    )
-                except Exception as e:
-                    logger.debug("Could not clean up legacy forum tag name: %s", e)
-            return None
-
-    if len(existing_tags) >= 20:
-        return "Forum is at Discord's 20-tag limit; could not add project tag."
-
-    try:
-        await forum_channel.edit(available_tags=[*existing_tags, new_tag])
-        logger.info("Added per-project forum tag '%s' (emoji 📁) to forum #%s", project_name, forum_channel.id)
-        return None
-    except discord.Forbidden:
-        return "Bot lacks 'Manage Channels' permission in this forum."
-    except Exception as e:
-        logger.exception("Failed to add project tag to forum channel %s: %s", forum_channel.id, e)
-        return str(e)
-
-
 async def ensure_pinned_hub_post(
     channel: discord.ForumChannel | discord.TextChannel,
     project_service: ProjectService | None = None,
@@ -362,11 +107,13 @@ async def ensure_pinned_hub_post(
     from src.domain.models import Project
 
     bound_projects: list[Project] = []
+    archived_project_names: list[str] = []
     guild = getattr(channel, "guild", None)
     if project_service and guild and hasattr(guild, "id"):
         try:
-            all_projs = await project_service.list_projects(guild.id, include_archived=False)
-            bound_projects = [p for p in all_projs if p.discord_channel_id == channel.id]
+            all_projs = await project_service.list_projects(guild.id, include_archived=True)
+            bound_projects = [p for p in all_projs if p.discord_channel_id == channel.id and not p.is_archived]
+            archived_project_names = [p.name for p in all_projs if p.discord_channel_id == channel.id and p.is_archived]
         except Exception as e:
             logger.warning("Could not list projects for channel %s: %s", channel.id, e)
 
@@ -429,13 +176,32 @@ async def ensure_pinned_hub_post(
             project_squads_map=project_squads_map,
         )
 
+    tag_warnings: list[str] = []
     if isinstance(channel, discord.ForumChannel):
-        # 1. Setup standard tags first
-        await setup_forum_tags(channel)
+        # 1. Prune any orphaned tags belonging to archived projects bound to this channel
+        if archived_project_names:
+            _pruned, prune_err = await prune_archived_project_tags(channel, archived_project_names)
+            if prune_err:
+                tag_warnings.append(prune_err)
+
+        # 2. Setup standard tags
+        _added, _total, std_err = await setup_forum_tags(channel)
+        if std_err:
+            tag_warnings.append(std_err)
+
+        # 3. Ensure tags for active projects
         for bp in bound_projects:
-            await ensure_project_tag(channel, bp.name)
-        if project_name and not any(bp.name == project_name for bp in bound_projects):
-            await ensure_project_tag(channel, project_name)
+            err = await ensure_project_tag(channel, bp.name)
+            if err:
+                tag_warnings.append(err)
+        if (
+            project_name
+            and not any(bp.name == project_name for bp in bound_projects)
+            and project_name not in archived_project_names
+        ):
+            err = await ensure_project_tag(channel, project_name)
+            if err:
+                tag_warnings.append(err)
 
         # 2. Check if a thread with Control Hub / Management Hub already exists
         post_title = f"📌 #{channel.name} • Forum Control Hub" if channel_name else "📌 Forum Control Hub"
@@ -491,7 +257,8 @@ async def ensure_pinned_hub_post(
                     )
 
             thread_id = getattr(existing_thread, "id", channel.id)
-            return True, f"Updated Control Hub in forum #{channel.name} (<#{thread_id}>)."
+            warn_suffix = f" (Warning: {'; '.join(tag_warnings)})" if tag_warnings else ""
+            return True, f"Updated Control Hub in forum #{channel.name} (<#{thread_id}>).{warn_suffix}"
 
         try:
             thread_with_msg = await channel.create_thread(
@@ -511,7 +278,8 @@ async def ensure_pinned_hub_post(
                 except Exception as e:
                     logger.warning("Could not pin forum thread %s: %s", getattr(thread, "id", None), e)
             thread_id = getattr(thread, "id", channel.id)
-            return True, f"Created and pinned Control Hub in forum #{channel.name} (<#{thread_id}>)."
+            warn_suffix = f" (Warning: {'; '.join(tag_warnings)})" if tag_warnings else ""
+            return True, f"Created and pinned Control Hub in forum #{channel.name} (<#{thread_id}>).{warn_suffix}"
         except Exception as e:
             logger.exception("Failed to create pinned forum hub in %s: %s", channel.id, e)
             return False, f"Failed to create forum hub: {e}"

@@ -145,15 +145,18 @@ def test_calendar_service_build_feed_urls():
     assert urls["https_url"] == "http://localhost:8000/calendar/xyz123_abc456.ics"
     assert urls["webcal_url"] == "webcal://localhost:8000/calendar/xyz123_abc456.ics"
     assert urls["subscribe_url"] == "http://localhost:8000/calendar/xyz123_abc456/subscribe"
+    assert "calendar.google.com" in urls["gcal_url"]
     assert urls["todo_https_url"] == "http://localhost:8000/calendar/xyz123_abc456.ics?format=todo"
     assert urls["todo_webcal_url"] == "webcal://localhost:8000/calendar/xyz123_abc456.ics?format=todo"
     assert urls["todo_subscribe_url"] == "http://localhost:8000/calendar/xyz123_abc456/subscribe?format=todo"
+    assert "calendar.google.com" in urls["todo_gcal_url"]
 
     # Production https URL
     urls_prod = CalendarService.build_feed_urls(token, base_url="https://pm.example.com")
     assert urls_prod["https_url"] == "https://pm.example.com/calendar/xyz123_abc456.ics"
     assert urls_prod["webcal_url"] == "webcal://pm.example.com/calendar/xyz123_abc456.ics"
     assert urls_prod["subscribe_url"] == "https://pm.example.com/calendar/xyz123_abc456/subscribe"
+    assert "calendar.google.com" in urls_prod["gcal_url"]
 
 
 @pytest.mark.asyncio
@@ -213,11 +216,25 @@ async def test_fastapi_calendar_endpoint(services, db_session):
             assert res_sub_todo.headers["location"].startswith("webcal://")
             assert "format=todo" in res_sub_todo.headers["location"]
 
-            # 6. Subscribe redirect with invalid token returns 404
+            # 6. Subscribe endpoint fetched by Google Calendar bot directly serves 200 text/calendar
+            res_sub_google = await client.get(
+                f"/calendar/{token}/subscribe",
+                headers={"user-agent": "Google-Calendar-Importer"},
+            )
+            assert res_sub_google.status_code == 200
+            assert "text/calendar" in res_sub_google.headers["content-type"]
+            assert "BEGIN:VCALENDAR" in res_sub_google.text
+
+            # 7. Subscribe endpoint with ?format=gcal redirects to Google Calendar render URL
+            res_sub_gcal = await client.get(f"/calendar/{token}/subscribe?format=gcal", follow_redirects=False)
+            assert res_sub_gcal.status_code == 307
+            assert "calendar.google.com" in res_sub_gcal.headers["location"]
+
+            # 8. Subscribe redirect with invalid token returns 404
             res_sub_invalid = await client.get("/calendar/unknown-nonexistent-token/subscribe")
             assert res_sub_invalid.status_code == 404
 
-            # 7. Invalid token returns 404
+            # 9. Invalid token returns 404
             res_invalid = await client.get("/calendar/unknown-nonexistent-token.ics")
             assert res_invalid.status_code == 404
             assert "Invalid or expired" in res_invalid.json()["detail"]
@@ -254,12 +271,12 @@ async def test_discord_pm_calendar_command_and_view(services):
 
     view = kwargs.get("view")
     assert isinstance(view, CalendarFeedView)
-    assert len(view.children) == 2  # Subscribe link button + Regenerate button
+    assert len(view.children) == 2  # Universal .ics link button + Regenerate button
 
-    # Button URL must use HTTP/HTTPS scheme so Discord API doesn't reject it (webcal is not allowed by Discord)
+    # Button URL must point directly to the universal HTTPS .ics feed
     sub_button = view.children[0]
     assert sub_button.url.startswith(("http://", "https://"))
-    assert "/subscribe" in sub_button.url
+    assert sub_button.url.endswith(".ics")
 
     # Test clicking regenerate button
     regen_interaction = MagicMock(spec=discord.Interaction)

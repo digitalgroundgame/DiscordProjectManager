@@ -11,6 +11,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.router import DiscordViewRouter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.views.project.roster import ProjectSearchModal
@@ -37,14 +38,14 @@ class ProjectRestoreConfirmView(BaseView):
         task_service: TaskService | None = None,
         user_service: UserService | None = None,
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project = project
         self.project_service = project_service
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self._initial_interaction = initial_interaction
 
         self.confirm_btn = discord.ui.Button(
             label="Confirm Restore",
@@ -61,17 +62,6 @@ class ProjectRestoreConfirmView(BaseView):
         )
         self.cancel_btn.callback = self._on_cancel_clicked
         self.add_item(self.cancel_btn)
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     async def _on_confirm_clicked(self, interaction: discord.Interaction) -> None:
         try:
@@ -90,17 +80,20 @@ class ProjectRestoreConfirmView(BaseView):
                     if t.discord_thread_id and t.status != TaskStatus.COMPLETED:
                         await interaction.client.sync_task_thread(t, action="unarchive")
 
+            hub_warning: str | None = None
             if interaction.guild and self.project.discord_channel_id:
                 chan = interaction.guild.get_channel(self.project.discord_channel_id)
                 if chan and isinstance(chan, (discord.ForumChannel, discord.TextChannel)):
                     try:
-                        await ensure_pinned_hub_post(
+                        _ok, hub_msg = await ensure_pinned_hub_post(
                             channel=chan,
                             project_service=self.project_service,
                             squad_service=self.squad_service,
                             task_service=self.task_service,
                             user_service=self.user_service,
                         )
+                        if "Warning:" in hub_msg:
+                            hub_warning = hub_msg.split("Warning:", 1)[1].rstrip(".)").strip()
                     except Exception as he:
                         logger.warning("Could not refresh pinned hub on project restore: %s", he)
 
@@ -111,10 +104,11 @@ class ProjectRestoreConfirmView(BaseView):
                 user_service=self.user_service,
                 initial_interaction=interaction,
             )
+            warning_note = f"\n\n⚠️ **Notice:** {hub_warning}" if hub_warning else ""
             embed.description = (
                 f"**Project Restored!**\n"
-                f"Project **{restored.name} (`{restored.prefix}`)** has been reactivated.\n\n"
-                + (embed.description or "")
+                f"Project **{restored.name} (`{restored.prefix}`)** has been reactivated."
+                f"{warning_note}\n\n" + (embed.description or "")
             )
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         except Exception as e:
@@ -168,8 +162,9 @@ class ProjectRestoreSelectView(BaseView):
         current_page: int = 0,
         query: str = "",
         initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.all_projects = projects
         self.project_service = project_service
         self.squad_service = squad_service
@@ -177,20 +172,8 @@ class ProjectRestoreSelectView(BaseView):
         self.user_service = user_service
         self.current_page = current_page
         self.query = query
-        self._initial_interaction = initial_interaction
         self._filtered_projects = self._filter_projects()
         self._rebuild_items()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-        except Exception:
-            pass
 
     def _filter_projects(self) -> list[Project]:
         if not self.query:

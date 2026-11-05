@@ -204,6 +204,10 @@ def create_container(
     # 3. FastAPI App Wiring
     api_app.state.calendar_service = calendar_service
     api_app.state.observability_service = observability_service
+    api_app.state.project_service = project_service
+    api_app.state.task_service = task_service
+    api_app.state.squad_service = squad_service
+    api_app.state.workspace_service = workspace_service
     api_app.state.settings = resolved_settings
 
     # 4. Discord Bot, Member Directory & Auth Service Wiring
@@ -230,8 +234,11 @@ def create_container(
     )
     bot.auth_service = auth_service
     bot.member_directory = member_directory
+    api_app.state.auth_service = auth_service
+    api_app.state.member_directory = member_directory
     if bot.workspace:
         bot.workspace.auth_service = auth_service
+        task_service.workspace = bot.workspace
     if bot.project_workspace:
         bot.project_workspace.auth_service = auth_service
 

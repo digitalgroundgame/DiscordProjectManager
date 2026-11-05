@@ -323,8 +323,10 @@ async def test_delete_confirm_view_flow(services):
 
     invoker_interaction.response.edit_message.assert_awaited_once()
     edit_kwargs = invoker_interaction.response.edit_message.call_args.kwargs
-    assert f"Task **[{t1.short_id}]**" in edit_kwargs["content"]
-    assert "was permanently deleted" in edit_kwargs["content"]
+    sent_embed = edit_kwargs.get("embed")
+    assert sent_embed is not None
+    assert f"Task **[{t1.short_id}]**" in sent_embed.description
+    assert "was permanently deleted" in sent_embed.description
     workspace_mock.delete_workspace.assert_awaited_once()
     assert await task_srv.get_by_id(t1.id) is None
 
@@ -361,7 +363,9 @@ async def test_delete_confirm_view_cancel(services):
     await view.cancel_delete.callback(interaction)
 
     interaction.response.edit_message.assert_awaited_once()
-    assert "cancelled" in interaction.response.edit_message.call_args.kwargs["content"]
+    sent_embed = interaction.response.edit_message.call_args.kwargs.get("embed")
+    assert sent_embed is not None
+    assert "cancelled" in sent_embed.description
     assert await task_srv.get_by_id(task.id) is not None
 
 

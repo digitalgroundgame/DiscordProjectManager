@@ -163,6 +163,24 @@ class AuthService(TransactionalService):
             return await self.guild_lead_user_repo.list_lead_user_ids(guild_id)
         return set()
 
+    async def _is_guild_lead(self, user: ActorPrincipal | Any, target_guild_id: int | None) -> bool:
+        if not target_guild_id:
+            return False
+        user_id = _extract_user_id(user)
+        if self.guild_lead_user_repo and user_id:
+            if user_id in await self.guild_lead_user_repo.list_lead_user_ids(target_guild_id):
+                return True
+        user_role_ids = _extract_role_ids(user)
+        if not user_role_ids and self.member_directory and user_id:
+            resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
+            if resolved:
+                user_role_ids = set(resolved.role_ids)
+        if self.guild_lead_role_repo:
+            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(target_guild_id)
+            if lead_role_ids and any(rid in user_role_ids for rid in lead_role_ids):
+                return True
+        return False
+
     async def can_manage_projects(
         self,
         user: ActorPrincipal | Any,
@@ -182,23 +200,10 @@ class AuthService(TransactionalService):
         if not target_guild_id:
             return False
 
+        if await self._is_guild_lead(user, target_guild_id):
+            return True
+
         user_id = _extract_user_id(user)
-        if self.guild_lead_user_repo and user_id:
-            lead_user_ids = await self.guild_lead_user_repo.list_lead_user_ids(target_guild_id)
-            if user_id in lead_user_ids:
-                return True
-
-        user_role_ids = _extract_role_ids(user)
-        if not user_role_ids and self.member_directory and user_id:
-            resolved = await self.member_directory.get_member_principal(target_guild_id, user_id)
-            if resolved:
-                user_role_ids = set(resolved.role_ids)
-
-        if self.guild_lead_role_repo:
-            lead_role_ids = await self.guild_lead_role_repo.list_lead_role_ids(target_guild_id)
-            if lead_role_ids and any(rid in user_role_ids for rid in lead_role_ids):
-                return True
-
         if self.squad_service and user_id:
             squads = await self.squad_service.list_squads(target_guild_id)
             for s in squads:
@@ -234,71 +239,72 @@ class AuthService(TransactionalService):
             return bool(admin or manage_guild)
         return False
 
-    async def is_project_lead(self, user: ActorPrincipal | Any, project_id: UUID | None) -> bool:
+    async def _resolve_project(self, project_id: UUID | None, project: Project | None = None) -> Project | None:
+        if project is not None and (project_id is None or project.id == project_id):
+            return project
+        return await self.project_service.get_by_id(project_id) if project_id else None
+
+    async def is_project_lead(
+        self, user: ActorPrincipal | Any, project_id: UUID | None, *, project: Project | None = None
+    ) -> bool:
         """Checks if the user is designated as the Project Lead or is a server manager."""
-        if not project_id:
+        if not project_id and project is None:
             return False
         if self.is_server_manager(user):
             return True
-        project = await self.project_service.get_by_id(project_id)
-        if not project or not project.lead_discord_id:
+        resolved = await self._resolve_project(project_id, project)
+        if not resolved or not resolved.lead_discord_id:
             return False
-        user_id = user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None)
-        return bool(user_id and user_id == project.lead_discord_id)
+        user_id = _extract_user_id(user)
+        return bool(user_id and user_id == resolved.lead_discord_id)
 
-    async def get_project_role_ids(self, project: Project | None) -> set[int]:
+    async def get_project_role_ids(self, project: Project | None, *, squads: list[Any] | None = None) -> set[int]:
         """Resolves all mapped Discord role IDs for a project across direct squad roles and mapped squads."""
         if not project:
             return set()
         role_ids = set(project.discord_role_ids)
         if project.discord_role_id:
             role_ids.add(project.discord_role_id)
-        if self.squad_service:
-            squads = await self.project_service.list_squads_for_project(project.id)
-            for s in squads:
-                role_ids.add(s.discord_role_id)
+        resolved_squads = (
+            squads
+            if squads is not None
+            else (await self.project_service.list_squads_for_project(project.id) if self.squad_service else [])
+        )
+        for s in resolved_squads:
+            role_ids.add(s.discord_role_id)
         return role_ids
 
-    async def can_mutate_task(self, user: ActorPrincipal | Any, task: Task) -> bool:
-        """Determines if a user is authorized to edit, reassign, update status, archive, or add notes to a task.
-
-        Authorized if:
-        1. User is a Discord Server Manager (manage_guild / administrator).
-        2. User is the task assignee.
-        3. User is the task creator.
-        4. User is the designated Project Lead for the task's project.
-        5. User holds any of the project's mapped squad Discord Roles.
-        """
-        # 1. Server Manager bypass
+    async def can_mutate_task(
+        self,
+        user: ActorPrincipal | Any,
+        task: Task,
+        *,
+        project: Project | None = None,
+        project_role_ids: set[int] | None = None,
+    ) -> bool:
+        """Determines if a user is authorized to edit, reassign, update status, archive, or add notes to a task."""
         if self.is_server_manager(user):
             return True
 
-        user_id = user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None)
-
-        # 2. Task Assignee
+        user_id = _extract_user_id(user)
         if task.assignee_discord_id is not None and user_id == task.assignee_discord_id:
             return True
-
-        # 3. Task Creator
         if user_id is not None and user_id == task.creator_discord_id:
             return True
 
-        # 4. Project Lead / Contributor Role
         if task.project_id:
-            project = await self.project_service.get_by_id(task.project_id)
-            if project:
-                if project.lead_discord_id and user_id == project.lead_discord_id:
+            resolved = await self._resolve_project(task.project_id, project)
+            if resolved:
+                if resolved.lead_discord_id and user_id == resolved.lead_discord_id:
                     return True
-                project_roles = await self.get_project_role_ids(project)
+                use_cached_roles = (
+                    project_role_ids is not None and project is not None and project.id == task.project_id
+                )
+                project_roles = project_role_ids if use_cached_roles else await self.get_project_role_ids(resolved)
                 if project_roles:
-                    if isinstance(user, ActorPrincipal):
-                        user_role_ids = set(user.role_ids)
-                    else:
-                        roles = getattr(user, "roles", [])
-                        user_role_ids = {r.id for r in roles if hasattr(r, "id")}
+                    user_role_ids = _extract_role_ids(user)
                     if any(rid in user_role_ids for rid in project_roles):
                         return True
-
         return False
 
     async def require_task_mutation(self, user: ActorPrincipal | Any, task: Task) -> None:
@@ -307,36 +313,22 @@ class AuthService(TransactionalService):
             raise PermissionDeniedError(
                 "You do not have permission to modify this task. "
                 "You must be the assignee, creator, project lead, a squad member, or a server manager.",
-                user_id=user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None),
+                user_id=_extract_user_id(user),
                 project_id=task.project_id,
             )
 
-    async def can_delete_task(self, user: ActorPrincipal | Any, task: Task) -> bool:
-        """Determines if a user is authorized to delete a task.
-
-        Authorized if:
-        1. Server Manager (manage_guild or administrator).
-        2. Designated Project Lead for the task's project.
-        3. Original task creator, strictly if the task status is notStarted.
-        """
+    async def can_delete_task(self, user: ActorPrincipal | Any, task: Task, *, project: Project | None = None) -> bool:
+        """Determines if a user is authorized to delete a task."""
         if self.is_server_manager(user):
             return True
-
-        user_id = user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None)
+        user_id = _extract_user_id(user)
         if user_id is None:
             return False
-
-        # Project Lead
         if task.project_id:
-            project = await self.project_service.get_by_id(task.project_id)
-            if project and project.lead_discord_id and user_id == project.lead_discord_id:
+            resolved = await self._resolve_project(task.project_id, project)
+            if resolved and resolved.lead_discord_id and user_id == resolved.lead_discord_id:
                 return True
-
-        # Task Creator (only if status is notStarted)
-        if user_id == task.creator_discord_id and task.status == TaskStatus.NOT_STARTED:
-            return True
-
-        return False
+        return bool(user_id == task.creator_discord_id and task.status == TaskStatus.NOT_STARTED)
 
     async def require_task_deletion(self, user: ActorPrincipal | Any, task: Task) -> None:
         """Raises PermissionDeniedError if the user is not authorized to delete the task."""
@@ -344,16 +336,12 @@ class AuthService(TransactionalService):
             raise PermissionDeniedError(
                 "You do not have permission to delete this task. "
                 "Only Server Managers, Project Leads, or the task creator (if not started) can delete tasks.",
-                user_id=user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None),
+                user_id=_extract_user_id(user),
                 project_id=task.project_id,
             )
 
     async def can_bypass_dependencies(self, user: ActorPrincipal | Any, task: Task) -> bool:
-        """Determines if a user has authority to bypass unresolved prerequisite blockers.
-
-        Server Managers, designated Project Leads, and authorized task mutators
-        can bypass with interactive confirmation.
-        """
+        """Determines if a user has authority to bypass unresolved prerequisite blockers."""
         if self.is_server_manager(user):
             return True
         if task.project_id and await self.is_project_lead(user, task.project_id):
@@ -365,7 +353,7 @@ class AuthService(TransactionalService):
         if not await self.can_bypass_dependencies(user, task):
             raise PermissionDeniedError(
                 f"You do not have permission to bypass unresolved prerequisite blockers for [{task.short_id}].",
-                user_id=user.user_id if isinstance(user, ActorPrincipal) else getattr(user, "id", None),
+                user_id=_extract_user_id(user),
                 project_id=task.project_id,
             )
 
@@ -374,14 +362,16 @@ class AuthService(TransactionalService):
         user: ActorPrincipal | Any,
         project_id: UUID | None,
         guild_id: int | None = None,
+        *,
+        project: Project | None = None,
+        project_role_ids: set[int] | None = None,
     ) -> bool:
         """Determines if a user is authorized to create tasks in a project container or unscoped."""
         if self.is_server_manager(user):
             return True
-
         user_id = _extract_user_id(user)
 
-        if not project_id:
+        if not project_id and project is None:
             if self.squad_service and user_id:
                 guild = getattr(user, "guild", None)
                 target_guild_id = (
@@ -390,31 +380,25 @@ class AuthService(TransactionalService):
                     else (guild_id or (user.guild_id if isinstance(user, ActorPrincipal) else None))
                 )
                 if target_guild_id and isinstance(target_guild_id, int):
-                    squads = await self.squad_service.list_squads(target_guild_id)
-                    for s in squads:
+                    for s in await self.squad_service.list_squads(target_guild_id):
                         if await self.squad_service.is_squad_lead(s.id, user_id):
                             return True
             return False
 
-        project = await self.project_service.get_by_id(project_id)
-        if not project:
+        resolved = await self._resolve_project(project_id, project)
+        if not resolved:
             return False
-
-        if project.lead_discord_id and user_id == project.lead_discord_id:
+        if resolved.lead_discord_id and user_id == resolved.lead_discord_id:
             return True
 
-        project_roles = await self.get_project_role_ids(project)
+        project_roles = project_role_ids if project_role_ids is not None else await self.get_project_role_ids(resolved)
         if project_roles:
             user_role_ids = _extract_role_ids(user)
             return any(rid in user_role_ids for rid in project_roles)
-
         return True
 
     async def require_task_creation(
-        self,
-        user: ActorPrincipal | Any,
-        project_id: UUID | None,
-        guild_id: int | None = None,
+        self, user: ActorPrincipal | Any, project_id: UUID | None, guild_id: int | None = None
     ) -> None:
         """Raises PermissionDeniedError if the user cannot create tasks in the project."""
         if not await self.can_create_task_in_project(user, project_id, guild_id=guild_id):
@@ -432,34 +416,68 @@ class AuthService(TransactionalService):
                 project_id=project_id,
             )
 
-    async def can_view_project(self, user: ActorPrincipal | Any, project_id: UUID) -> bool:
+    async def can_view_project(
+        self,
+        user: ActorPrincipal | Any,
+        project_id: Project | UUID,
+        *,
+        project_role_ids: set[int] | None = None,
+        is_guild_lead: bool | None = None,
+    ) -> bool:
         """Determines if a user is authorized to view a project's details, task list, or visual tech tree graph."""
         if self.is_server_manager(user):
             return True
 
         user_id = _extract_user_id(user)
-        project = await self.project_service.get_by_id(project_id)
+        project = project_id if isinstance(project_id, Project) else await self.project_service.get_by_id(project_id)
         if not project:
             return False
-
         if project.lead_discord_id and user_id == project.lead_discord_id:
             return True
+        if is_guild_lead if is_guild_lead is not None else await self._is_guild_lead(user, project.guild_id):
+            return True
 
-        project_roles = await self.get_project_role_ids(project)
+        project_roles = project_role_ids if project_role_ids is not None else await self.get_project_role_ids(project)
         if project_roles:
             user_role_ids = _extract_role_ids(user)
             return any(rid in user_role_ids for rid in project_roles)
-
         return True
 
-    async def require_project_view(self, user: ActorPrincipal | Any, project_id: UUID) -> None:
+    async def filter_visible_projects(
+        self,
+        user: ActorPrincipal | Any,
+        projects: list[Project],
+        *,
+        project_role_ids_map: dict[UUID, set[int]] | None = None,
+    ) -> list[Project]:
+        """Filters a list of projects returning only those the user is authorized to view."""
+        if not projects:
+            return []
+        if self.is_server_manager(user):
+            return list(projects)
+
+        guild_lead_cache: dict[int, bool] = {}
+        visible: list[Project] = []
+        for p in projects:
+            if p.guild_id not in guild_lead_cache:
+                guild_lead_cache[p.guild_id] = await self._is_guild_lead(user, p.guild_id)
+            if guild_lead_cache[p.guild_id]:
+                visible.append(p)
+                continue
+            role_ids = project_role_ids_map.get(p.id) if project_role_ids_map else None
+            if await self.can_view_project(user, p, project_role_ids=role_ids, is_guild_lead=False):
+                visible.append(p)
+        return visible
+
+    async def require_project_view(self, user: ActorPrincipal | Any, project_id: Project | UUID) -> None:
         """Raises PermissionDeniedError if the user cannot view the project or its visual graph."""
         if not await self.can_view_project(user, project_id):
+            p_id = project_id.id if isinstance(project_id, Project) else project_id
             raise PermissionDeniedError(
                 "You do not have permission to view this project's visual graph. "
                 "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
                 user_id=_extract_user_id(user),
-                project_id=project_id,
+                project_id=p_id,
             )
 
     async def can_assign_task_to_user(

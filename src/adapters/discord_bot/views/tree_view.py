@@ -7,6 +7,7 @@ from uuid import UUID
 import discord
 
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.domain.models import Project
 
@@ -27,8 +28,10 @@ class TechTreeViewer(BaseView):
         project: Project,
         current_orientation: str = "lr",
         auth_service: AuthService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project = project
         self.current_orientation = current_orientation
@@ -52,6 +55,23 @@ class TechTreeViewer(BaseView):
         self.tb_btn.callback = self._on_tb_clicked
         self.add_item(self.tb_btn)
 
+        self.close_btn = discord.ui.Button(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+        )
+        self.close_btn.callback = self._on_close_clicked
+        self.add_item(self.close_btn)
+
+    async def _on_close_clicked(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception as e:
+            logger.debug("Failed to delete visual graph on close: %s", e)
+
     async def _on_lr_clicked(self, interaction: discord.Interaction) -> None:
         if self.current_orientation == "lr":
             await interaction.response.defer()
@@ -72,10 +92,15 @@ class TechTreeViewer(BaseView):
 
         if self.auth_service:
             if not await self.auth_service.can_view_project(interaction.user, self.project.id):
-                await interaction.response.send_message(
-                    "❌ You do not have permission to view this project's visual graph.\n"
-                    "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
-                    ephemeral=True,
+                from src.adapters.discord_bot.menu_manager import send_toast
+                from src.adapters.discord_bot.ui_constants import ToastType
+
+                await send_toast(
+                    interaction,
+                    f"You do not have permission to view the visual graph for **{self.project.name}**.\n"
+                    "> You must hold the project squad's Discord role, "
+                    "be the Project Lead, or be a server manager.",
+                    toast_type=ToastType.ERROR,
                 )
                 return
 
@@ -114,8 +139,10 @@ class TechTreeProjectSelectView(BaseView):
         projects: list[Project],
         orientation: str = "lr",
         auth_service: AuthService | None = None,
+        initial_interaction: discord.Interaction | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=120)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.task_service = task_service
         self.project_service = project_service
         self.projects = projects
@@ -156,15 +183,23 @@ class TechTreeProjectSelectView(BaseView):
         selected_id = UUID(values[0])
         project = next((p for p in self.projects if p.id == selected_id), None)
         if not project:
-            await interaction.response.send_message("❌ Project not found.", ephemeral=True)
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(interaction, "Project not found.", toast_type=ToastType.ERROR)
             return
 
         if self.auth_service:
             if not await self.auth_service.can_view_project(interaction.user, project.id):
-                await interaction.response.send_message(
-                    f"❌ You do not have permission to view the visual graph for **{project.name}**.\n"
-                    "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
-                    ephemeral=True,
+                from src.adapters.discord_bot.menu_manager import send_toast
+                from src.adapters.discord_bot.ui_constants import ToastType
+
+                await send_toast(
+                    interaction,
+                    f"You do not have permission to view the visual graph for **{project.name}**.\n"
+                    "> You must hold the project squad's Discord role, "
+                    "be the Project Lead, or be a server manager.",
+                    toast_type=ToastType.ERROR,
                 )
                 return
 
@@ -184,6 +219,10 @@ class TechTreeProjectSelectView(BaseView):
         )
         embed.set_image(url="attachment://tech_tree.png")
         view = TechTreeViewer(
-            self.task_service, project, current_orientation=self.orientation, auth_service=self.auth_service
+            self.task_service,
+            project,
+            current_orientation=self.orientation,
+            auth_service=self.auth_service,
+            initial_interaction=interaction,
         )
         await interaction.edit_original_response(embed=embed, attachments=[file], view=view)

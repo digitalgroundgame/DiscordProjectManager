@@ -33,14 +33,42 @@ def test_sync_commands_on_startup_defaults(monkeypatch):
     dev_cfg = Settings(_env_file=None, ENVIRONMENT="development")
     assert dev_cfg.SYNC_COMMANDS_ON_STARTUP is True
 
-    prod_cfg = Settings(_env_file=None, ENVIRONMENT="production")
+    prod_cfg = Settings(_env_file=None, ENVIRONMENT="production", SESSION_SECRET_KEY="prod-secret-key")
     assert prod_cfg.SYNC_COMMANDS_ON_STARTUP is False
 
     override_dev = Settings(_env_file=None, ENVIRONMENT="development", SYNC_COMMANDS_ON_STARTUP=False)
     assert override_dev.SYNC_COMMANDS_ON_STARTUP is False
 
-    override_prod = Settings(_env_file=None, ENVIRONMENT="production", SYNC_COMMANDS_ON_STARTUP=True)
+    override_prod = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        SESSION_SECRET_KEY="prod-secret-key",
+        SYNC_COMMANDS_ON_STARTUP=True,
+    )
     assert override_prod.SYNC_COMMANDS_ON_STARTUP is True
+
+
+def test_session_secret_key_required_outside_development(monkeypatch):
+    """Verifies that Settings refuses to initialize outside development when SESSION_SECRET_KEY is empty or default."""
+    import pytest
+    from pydantic import ValidationError
+
+    monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
+    monkeypatch.delenv("DEV_AUTH_FALLBACK_ENABLED", raising=False)
+
+    with pytest.raises(ValidationError, match="SESSION_SECRET_KEY"):
+        Settings(_env_file=None, ENVIRONMENT="production")
+
+    with pytest.raises(ValidationError, match="SESSION_SECRET_KEY"):
+        Settings(_env_file=None, ENVIRONMENT="production", SESSION_SECRET_KEY="")
+
+    prod_with_flag = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        SESSION_SECRET_KEY="strong-prod-secret",
+        DEV_AUTH_FALLBACK_ENABLED=True,
+    )
+    assert prod_with_flag.DEV_AUTH_FALLBACK_ENABLED is False
 
 
 def test_startup_crash_backoff_seconds_defaults(monkeypatch):

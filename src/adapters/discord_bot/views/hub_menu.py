@@ -168,9 +168,6 @@ class PmHubView(BaseView):
             )
             await interaction.response.send_modal(modal)
         elif len(channel_projects) > 1:
-            from src.adapters.discord_bot.menu_manager import menu_manager
-
-            await menu_manager.register_menu(interaction)
             picker_view = HubTaskProjectSelectView(
                 task_service=self.task_service,
                 channel_projects=channel_projects,
@@ -187,15 +184,17 @@ class PmHubView(BaseView):
             await interaction.response.send_message(embed=embed, view=picker_view, ephemeral=True)
         elif all_channel_projects:
             # Channel is bound to projects, but user lacks permission to create tasks in any of them
-            from src.adapters.discord_bot.menu_manager import menu_manager
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
 
             proj_names = ", ".join(f"**{p.name}**" for p in all_channel_projects)
-            await interaction.response.send_message(
-                f"❌ You do not have permission to create tasks in this channel's projects ({proj_names}). "
-                "Contact a Project Lead or server manager to be added to a project squad.",
-                ephemeral=True,
+            await send_toast(
+                interaction,
+                f"You do not have permission to create tasks in this channel's projects ({proj_names}).\n"
+                "> Contact a Project Lead or server manager to be added to a project squad.",
+                toast_type=ToastType.ERROR,
             )
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            return
         else:
             # 0 channel projects (unbound channel)
             if len(allowed_projects) == 1:
@@ -221,18 +220,17 @@ class PmHubView(BaseView):
                     )
                     await interaction.response.send_modal(modal)
                 else:
-                    await interaction.response.send_message(
-                        "❌ You do not have permission to create tasks in any active projects. "
-                        "Contact a Project Lead or server manager to be added to a project squad.",
-                        ephemeral=True,
+                    from src.adapters.discord_bot.menu_manager import send_toast
+                    from src.adapters.discord_bot.ui_constants import ToastType
+
+                    await send_toast(
+                        interaction,
+                        "You do not have permission to create tasks in any active projects.\n"
+                        "> Contact a Project Lead or server manager to be added to a project squad.",
+                        toast_type=ToastType.ERROR,
                     )
-                    from src.adapters.discord_bot.menu_manager import menu_manager
-
-                    menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+                    return
             else:
-                from src.adapters.discord_bot.menu_manager import menu_manager
-
-                await menu_manager.register_menu(interaction)
                 view = DiscordViewRouter.build_task_select_project_view(
                     projects=allowed_projects,
                     task_service=self.task_service,
@@ -263,9 +261,6 @@ class PmHubView(BaseView):
     async def tasks_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild:
             return
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         await self._refresh_hub_message(interaction, projects=projects)
@@ -334,10 +329,7 @@ class PmHubView(BaseView):
         custom_id="pm_hub:projects",
     )
     async def projects_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
         await self._refresh_hub_message(interaction)
-        await menu_manager.register_menu(interaction)
         can_manage = (
             await self.auth_service.can_manage_projects(
                 interaction.user,
@@ -378,16 +370,16 @@ class PmHubView(BaseView):
             else False
         )
         if not can_manage:
-            await interaction.response.send_message(
-                "❌ You do not have permission to create projects. "
-                "Contact a Server Manager or hold an authorized Team Lead role.",
-                ephemeral=True,
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(
+                interaction,
+                "You do not have permission to create projects.\n"
+                "> Contact a Server Manager or hold an authorized Team Lead role.",
+                toast_type=ToastType.ERROR,
             )
             return
-
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         embed, view = DiscordViewRouter.build_project_channel_select(
             self.project_service,
@@ -411,7 +403,14 @@ class PmHubView(BaseView):
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         await self._refresh_hub_message(interaction, projects=projects)
         if not projects:
-            await interaction.response.send_message("ℹ️ No active projects found in this server.", ephemeral=True)
+            from src.adapters.discord_bot.menu_manager import send_toast
+            from src.adapters.discord_bot.ui_constants import ToastType
+
+            await send_toast(
+                interaction,
+                "No active projects found in this server.",
+                toast_type=ToastType.INFO,
+            )
             return
 
         channel_id = interaction.channel.id if interaction.channel else None
@@ -428,10 +427,15 @@ class PmHubView(BaseView):
         if target_project:
             if self.auth_service:
                 if not await self.auth_service.can_view_project(interaction.user, target_project.id):
-                    await interaction.response.send_message(
-                        f"❌ You do not have permission to view the visual graph for **{target_project.name}**.\n"
-                        "You must hold the project squad's Discord role, be the Project Lead, or be a server manager.",
-                        ephemeral=True,
+                    from src.adapters.discord_bot.menu_manager import send_toast
+                    from src.adapters.discord_bot.ui_constants import ToastType
+
+                    await send_toast(
+                        interaction,
+                        f"You do not have permission to view the visual graph for **{target_project.name}**.\n"
+                        "> You must hold the project squad's Discord role, "
+                        "be the Project Lead, or be a server manager.",
+                        toast_type=ToastType.ERROR,
                     )
                     return
 
@@ -462,10 +466,14 @@ class PmHubView(BaseView):
                     accessible_projects.append(p)
             projects = accessible_projects
             if not projects:
-                await interaction.response.send_message(
-                    "❌ You do not have permission to view any project visual graphs.\n"
-                    "You must hold a project squad's Discord role, be a Project Lead, or be a server manager.",
-                    ephemeral=True,
+                from src.adapters.discord_bot.menu_manager import send_toast
+                from src.adapters.discord_bot.ui_constants import ToastType
+
+                await send_toast(
+                    interaction,
+                    "You do not have permission to view any project visual graphs.\n"
+                    "> You must hold a project squad's Discord role, be a Project Lead, or be a server manager.",
+                    toast_type=ToastType.ERROR,
                 )
                 return
 
@@ -487,9 +495,6 @@ class PmHubView(BaseView):
     async def overdue_tab(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not interaction.guild:
             return
-        from src.adapters.discord_bot.menu_manager import menu_manager
-
-        await menu_manager.register_menu(interaction)
 
         projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
         await self._refresh_hub_message(interaction, projects=projects)

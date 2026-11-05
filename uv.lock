@@ -367,7 +367,7 @@ wheels = [
 
 [[package]]
 name = "dgg-pm"
-version = "0.3.0b1"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

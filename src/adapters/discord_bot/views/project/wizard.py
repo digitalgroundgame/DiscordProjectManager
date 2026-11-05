@@ -7,6 +7,7 @@ import discord
 
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.project_workspace import DiscordProjectWorkspaceAdapter
+from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS, TOAST_DURATION_STANDARD
 from src.adapters.discord_bot.views.base_view import BaseView
 from src.adapters.discord_bot.views.project.wizard_embeds import build_project_draft_embed
 from src.adapters.discord_bot.views.project.wizard_inputs import (
@@ -50,8 +51,9 @@ class ProjectCreateDraftView(BaseView):
         user_service: Any = None,
         initial_interaction: discord.Interaction | None = None,
         project_workspace: IProjectDiscordWorkspace | None = None,
+        timeout: float | None = EPHEMERAL_MENU_TIMEOUT_SECONDS,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=timeout, initial_interaction=initial_interaction)
         self.project_service = project_service
         self.channel = channel
         self.name = name
@@ -66,7 +68,6 @@ class ProjectCreateDraftView(BaseView):
         self.squad_service = squad_service
         self.task_service = task_service
         self.user_service = user_service
-        self._initial_interaction = initial_interaction
         client = getattr(initial_interaction, "client", None)
         client_workspace = getattr(client, "project_workspace", None)
         if isinstance(client_workspace, IProjectDiscordWorkspace):
@@ -81,18 +82,6 @@ class ProjectCreateDraftView(BaseView):
             )
 
         self._rebuild_items()
-
-    async def on_timeout(self) -> None:
-        try:
-            if (
-                hasattr(self, "_initial_interaction")
-                and self._initial_interaction
-                and hasattr(self._initial_interaction, "delete_original_response")
-            ):
-                await self._initial_interaction.delete_original_response()
-            pass
-        except Exception:
-            pass
 
     def _rebuild_items(self) -> None:
         self.clear_items()
@@ -154,7 +143,7 @@ class ProjectCreateDraftView(BaseView):
 
         self.cancel_btn = discord.ui.Button(
             label="Cancel",
-            style=discord.ButtonStyle.danger,
+            style=discord.ButtonStyle.secondary,
             row=2,
         )
         self.cancel_btn.callback = self._on_cancel_clicked
@@ -246,10 +235,10 @@ class ProjectCreateDraftView(BaseView):
             )
             from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-            attach_dismissal_footer(embed, delay=3.0)
+            attach_dismissal_footer(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.response.edit_message(embed=embed, view=None)
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=3.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             logger.debug("Error cancelling project draft: %s", e)
 
@@ -304,10 +293,10 @@ class ProjectCreateDraftView(BaseView):
             embed.set_footer(text=f"Project ID: {project.id}")
             from src.adapters.discord_bot.menu_manager import attach_dismissal_footer, menu_manager
 
-            attach_dismissal_footer(embed, delay=8.0)
+            attach_dismissal_footer(embed, delay=TOAST_DURATION_STANDARD)
             await interaction.response.edit_message(embed=embed, view=None)
 
-            menu_manager.schedule_toast_dismissal(interaction, delay=8.0)
+            menu_manager.schedule_toast_dismissal(interaction, delay=TOAST_DURATION_STANDARD)
         except Exception as e:
             await send_interaction_error(interaction, e, f"creating project '{self.name}'", logger, ephemeral=True)
 

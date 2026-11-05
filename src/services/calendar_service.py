@@ -5,6 +5,7 @@ import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from src.domain.standard_mappings import to_rfc5545_vcalendar
 from src.ports.unit_of_work import IUnitOfWork
@@ -119,12 +120,16 @@ class CalendarService(TransactionalService):
             webcal_base = f"webcal://{raw_base}"
         webcal_url = f"{webcal_base}{feed_path}"
         subscribe_url = f"{raw_base}/calendar/{resolved_token}/subscribe"
+        gcal_url = f"https://calendar.google.com/calendar/render?cid={quote(http_url, safe='')}"
 
+        todo_gcal_encoded = quote(f"{http_url}?format=todo", safe="")
         return {
             "https_url": http_url,
             "webcal_url": webcal_url,
             "subscribe_url": subscribe_url,
+            "gcal_url": gcal_url,
             "todo_https_url": f"{http_url}?format=todo",
             "todo_webcal_url": f"{webcal_url}?format=todo",
             "todo_subscribe_url": f"{subscribe_url}?format=todo",
+            "todo_gcal_url": f"https://calendar.google.com/calendar/render?cid={todo_gcal_encoded}",
         }

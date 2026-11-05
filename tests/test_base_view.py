@@ -386,3 +386,160 @@ def test_all_modals_in_package_subclass_base_modal():
         assert issubclass(cls, BaseModal), (
             f"Modal {cls.__name__} in module {cls.__module__} does not subclass BaseModal"
         )
+
+
+def test_base_view_default_timeout():
+    """Verify that BaseView defaults to EPHEMERAL_MENU_TIMEOUT_SECONDS (810s / 13.5m)."""
+    from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
+
+    view = BaseView()
+    assert view.timeout == EPHEMERAL_MENU_TIMEOUT_SECONDS
+    assert view.timeout == 810.0
+
+
+@pytest.mark.asyncio
+async def test_base_view_on_timeout_unregisters_and_deletes_response():
+    """Verify that BaseView.on_timeout deletes the original response and unregisters menu."""
+    from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+    inter = MagicMock(spec=discord.Interaction)
+    inter.guild_id = 999
+    inter.user.id = 888
+    inter.delete_original_response = AsyncMock()
+
+    manager = get_menu_manager()
+    await manager.register_menu(inter)
+    assert (999, 888) in manager._active_menus
+
+    view = BaseView(initial_interaction=inter)
+    await view.on_timeout()
+
+    inter.delete_original_response.assert_awaited_once()
+    assert (999, 888) not in manager._active_menus
+
+
+@pytest.mark.asyncio
+async def test_base_view_on_timeout_graceful_when_no_interaction():
+    """Verify that BaseView.on_timeout handles missing interaction without crashing."""
+    view = BaseView(initial_interaction=None)
+    # Should not raise any exception
+    await view.on_timeout()
+
+
+def test_ui_constants_values():
+    """Verify standard ephemeral timing and design language constants."""
+    from src.adapters.discord_bot.ui_constants import (
+        BUTTON_STYLE_DANGER,
+        BUTTON_STYLE_PRIMARY,
+        BUTTON_STYLE_SECONDARY,
+        BUTTON_STYLE_SUCCESS,
+        DISCORD_INTERACTION_MAX_SECONDS,
+        EPHEMERAL_MENU_TIMEOUT_SECONDS,
+        TOAST_DISMISS_PREFIX,
+        TOAST_DURATION_EXTENDED,
+        TOAST_DURATION_STANDARD,
+    )
+
+    assert DISCORD_INTERACTION_MAX_SECONDS == 900.0
+    assert EPHEMERAL_MENU_TIMEOUT_SECONDS == 810.0
+    # Exactly 10% shorter than Discord interaction max token expiry
+    assert EPHEMERAL_MENU_TIMEOUT_SECONDS == DISCORD_INTERACTION_MAX_SECONDS * 0.90
+    assert TOAST_DURATION_STANDARD == 6.0
+    assert TOAST_DURATION_EXTENDED == 10.0
+    assert TOAST_DISMISS_PREFIX == "Auto-dismisses"
+
+    assert BUTTON_STYLE_PRIMARY == discord.ButtonStyle.primary
+    assert BUTTON_STYLE_SECONDARY == discord.ButtonStyle.secondary
+    assert BUTTON_STYLE_SUCCESS == discord.ButtonStyle.success
+    assert BUTTON_STYLE_DANGER == discord.ButtonStyle.danger
+
+
+def test_views_have_standard_ephemeral_timeout():
+    """Verify that all non-persistent views default to EPHEMERAL_MENU_TIMEOUT_SECONDS."""
+    import inspect
+
+    from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
+    from src.adapters.discord_bot.views.admin_menu import PmDashboardOverviewView, PmDashboardView
+    from src.adapters.discord_bot.views.admin_team_leads_view import TeamLeadsAdminView
+    from src.adapters.discord_bot.views.calendar_feed_view import CalendarFeedView
+    from src.adapters.discord_bot.views.hub_project_select_views import (
+        HubBoardProjectSelectView,
+        HubTaskProjectSelectView,
+    )
+    from src.adapters.discord_bot.views.project.archive import ProjectArchiveConfirmView, ProjectArchiveSelectView
+    from src.adapters.discord_bot.views.project.dashboard import ProjectMenuView
+    from src.adapters.discord_bot.views.project.governance import (
+        ProjectAssignSquadView,
+        ProjectLeadSelectView,
+    )
+    from src.adapters.discord_bot.views.project.project_roles import ProjectRoleSelectView
+    from src.adapters.discord_bot.views.project.rebuild import ProjectRebuildSelectView, RebuildConfirmView
+    from src.adapters.discord_bot.views.project.restore import ProjectRestoreConfirmView, ProjectRestoreSelectView
+    from src.adapters.discord_bot.views.project.roster import ProjectActiveListView
+    from src.adapters.discord_bot.views.project.wizard import ProjectCreateDraftView
+    from src.adapters.discord_bot.views.project.wizard_inputs import ProjectChannelSelectView
+    from src.adapters.discord_bot.views.settings_menu import UserSettingsView
+    from src.adapters.discord_bot.views.squad_member_assign_view import SquadMemberAssignView
+    from src.adapters.discord_bot.views.squad_menu import (
+        SquadCreateRoleSelectView,
+        SquadMenuView,
+        SquadOverviewListView,
+    )
+    from src.adapters.discord_bot.views.squad_roster_view import SquadRosterDetailView
+    from src.adapters.discord_bot.views.task_blocked_view import TaskBlockedConfirmView
+    from src.adapters.discord_bot.views.task_builder import TaskCreateDraftView
+    from src.adapters.discord_bot.views.task_builder_inputs import DraftPrerequisiteSelectView
+    from src.adapters.discord_bot.views.task_buttons import TaskQuickControlsView
+    from src.adapters.discord_bot.views.task_delete_view import TaskDeleteConfirmView
+    from src.adapters.discord_bot.views.task_dependency_view import TaskDependencyView
+    from src.adapters.discord_bot.views.task_list_view import TaskListView
+    from src.adapters.discord_bot.views.task_menu import TaskMenuView
+    from src.adapters.discord_bot.views.task_select_project import TaskSelectProjectView
+    from src.adapters.discord_bot.views.tree_view import TechTreeProjectSelectView, TechTreeViewer
+
+    views = [
+        PmDashboardView,
+        PmDashboardOverviewView,
+        TeamLeadsAdminView,
+        CalendarFeedView,
+        HubBoardProjectSelectView,
+        HubTaskProjectSelectView,
+        ProjectArchiveConfirmView,
+        ProjectArchiveSelectView,
+        ProjectMenuView,
+        ProjectAssignSquadView,
+        ProjectLeadSelectView,
+        ProjectRoleSelectView,
+        ProjectRebuildSelectView,
+        RebuildConfirmView,
+        ProjectRestoreConfirmView,
+        ProjectRestoreSelectView,
+        ProjectActiveListView,
+        ProjectCreateDraftView,
+        ProjectChannelSelectView,
+        UserSettingsView,
+        SquadMemberAssignView,
+        SquadCreateRoleSelectView,
+        SquadOverviewListView,
+        SquadMenuView,
+        SquadRosterDetailView,
+        TaskBlockedConfirmView,
+        TaskCreateDraftView,
+        DraftPrerequisiteSelectView,
+        TaskQuickControlsView,
+        TaskDeleteConfirmView,
+        TaskDependencyView,
+        TaskListView,
+        TaskMenuView,
+        TaskSelectProjectView,
+        TechTreeProjectSelectView,
+        TechTreeViewer,
+    ]
+
+    for view_cls in views:
+        sig = inspect.signature(view_cls.__init__)
+        assert "timeout" in sig.parameters, f"{view_cls.__name__} missing timeout parameter in __init__"
+        default = sig.parameters["timeout"].default
+        assert default == EPHEMERAL_MENU_TIMEOUT_SECONDS, (
+            f"{view_cls.__name__} timeout default is {default}, expected {EPHEMERAL_MENU_TIMEOUT_SECONDS}"
+        )

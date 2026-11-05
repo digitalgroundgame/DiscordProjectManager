@@ -54,9 +54,9 @@ async def test_project_menu_and_modal(services):
 
     # 1. Test ProjectMenuView and embed
     view = ProjectMenuView(proj_srv, squad_srv, task_service=services["task"])
-    # 9 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
-    # Archive, Restore, Rebuild Workspace, Tech Tree, Hub
-    assert len(view.children) == 9
+    # 10 buttons: New Project, Active Projects, Set Squad Role, Set Lead,
+    # Archive, Restore, Rebuild Workspace, Tech Tree, Hub, Close
+    assert len(view.children) == 10
 
     # Test clicking New Project opens ProjectChannelSelectView
     new_proj_interaction = MagicMock(spec=discord.Interaction)
@@ -412,7 +412,7 @@ async def test_task_menu_and_modal(services):
     view = TaskMenuView(task_srv, proj_srv, squad_service=services["squad"], projects=[project])
     embed = build_task_menu_embed()
     assert "Task Operations Control Center" in embed.title
-    assert len(view.children) == 9
+    assert len(view.children) == 10
 
     board_embed = build_task_board_embed([], 0, "Global Scope", "Active", "All")
     assert "Task Board" in board_embed.title
@@ -1188,6 +1188,8 @@ async def test_menu_timeouts_and_hub_registration(services):
     user_srv = services["user"]
     guild_id = 999111222
 
+    from src.adapters.discord_bot.ui_constants import EPHEMERAL_MENU_TIMEOUT_SECONDS
+
     # 1. ProjectMenuView on_timeout
     inter = MagicMock(spec=discord.Interaction)
     inter.guild_id = guild_id
@@ -1196,7 +1198,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter.delete_original_response = AsyncMock()
 
     proj_view = ProjectMenuView(proj_srv, squad_srv, task_srv, initial_interaction=inter)
-    assert proj_view.timeout == 180
+    assert proj_view.timeout == EPHEMERAL_MENU_TIMEOUT_SECONDS
     await proj_view.on_timeout()
     inter.delete_original_response.assert_awaited_once()
 
@@ -1208,7 +1210,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter2.delete_original_response = AsyncMock()
 
     squad_view = SquadMenuView(squad_srv, proj_srv, task_srv, initial_interaction=inter2)
-    assert squad_view.timeout == 180
+    assert squad_view.timeout == EPHEMERAL_MENU_TIMEOUT_SECONDS
     await squad_view.on_timeout()
     inter2.delete_original_response.assert_awaited_once()
 
@@ -1220,7 +1222,7 @@ async def test_menu_timeouts_and_hub_registration(services):
     inter3.delete_original_response = AsyncMock()
 
     task_view = TaskMenuView(task_srv, proj_srv, squad_srv, initial_interaction=inter3)
-    assert task_view.timeout == 180
+    assert task_view.timeout == EPHEMERAL_MENU_TIMEOUT_SECONDS
     await task_view.on_timeout()
     inter3.delete_original_response.assert_awaited_once()
 
@@ -1242,7 +1244,7 @@ async def test_menu_timeouts_and_hub_registration(services):
         task_service=task_srv,
         initial_interaction=inter4,
     )
-    assert settings_view.timeout == 180
+    assert settings_view.timeout == EPHEMERAL_MENU_TIMEOUT_SECONDS
     await settings_view.on_timeout()
     inter4.delete_original_response.assert_awaited_once()
 
@@ -1420,7 +1422,7 @@ async def test_pm_dashboard_view_and_embed(services):
     assert dash_view.new_proj_btn is not None
     assert dash_view.projects_btn is not None
     assert dash_view.settings_btn is not None
-    assert dash_view.overview_btn is not None
+    assert not hasattr(dash_view, "overview_btn")
     assert dash_view.guides_btn is not None
 
     # 3. Test New Project button opens ChannelSelectView
@@ -1478,26 +1480,18 @@ async def test_pm_dashboard_view_and_embed(services):
     back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(back_dash_view, PmDashboardView)
 
-    # 7. Test Overview button and OverviewView Back button
-    inter.response.defer = AsyncMock()
-    inter.edit_original_response = AsyncMock()
-    await dash_view._on_overview_clicked(inter)
-    inter.edit_original_response.assert_awaited_once()
-    overview_view = inter.edit_original_response.call_args.kwargs["view"]
-    assert isinstance(overview_view, PmDashboardOverviewView)
-
-    back_inter.response.edit_message.reset_mock()
-    await overview_view._on_back_clicked(back_inter)
-    back_inter.response.edit_message.assert_awaited_once()
-    back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
-    assert isinstance(back_dash_view, PmDashboardView)
-
-    # 8. Test Guides button
+    # 7. Test Guides button and back to dashboard
     inter.response.edit_message.reset_mock()
     await dash_view._on_guides_clicked(inter)
     inter.response.edit_message.assert_awaited_once()
     guides_view = inter.response.edit_message.call_args.kwargs["view"]
     assert isinstance(guides_view, PmDashboardOverviewView)
+
+    back_inter.response.edit_message.reset_mock()
+    await guides_view._on_back_clicked(back_inter)
+    back_inter.response.edit_message.assert_awaited_once()
+    back_dash_view = back_inter.response.edit_message.call_args.kwargs["view"]
+    assert isinstance(back_dash_view, PmDashboardView)
 
 
 @pytest.mark.asyncio
@@ -1797,12 +1791,13 @@ async def test_project_channel_select_incompatible_channel_resets_dropdown(servi
 
         # Must send auto-dismissing toast via followup
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Selected channel must be a Forum Channel" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Selected channel must be a Forum Channel" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
-        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+        mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
 
     # Channel select must be reset back to empty selection and placeholder
     assert view.channel_select.placeholder == "Select target Forum channel..."
@@ -1841,12 +1836,13 @@ async def test_project_create_modal_empty_name_from_channel_select_resets_dropdo
 
         inter.response.edit_message.assert_awaited_once_with(view=view)
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Project name cannot be empty" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Project name cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
-        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+        mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
 
     assert view.channel_select.placeholder == "Select target Forum channel..."
     assert view.channel_select.values == []
@@ -1895,10 +1891,11 @@ async def test_project_create_modal_empty_name_from_draft_view_refreshes_view(se
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Project name cannot be empty" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
-        mock_schedule.assert_called_once_with(mock_toast, delay=8.0)
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Project name cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
+        mock_schedule.assert_called_once_with(mock_toast, delay=6.0)
 
 
 @pytest.mark.asyncio
@@ -1944,9 +1941,10 @@ async def test_task_details_modal_empty_title_from_task_select_project_view_rese
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Task title cannot be empty" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Task title cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         assert inter.followup.send.call_args.kwargs.get("ephemeral") is True
         assert inter.followup.send.call_args.kwargs.get("wait") is True
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
@@ -1997,9 +1995,10 @@ async def test_task_details_modal_empty_title_from_hub_task_project_select_view_
         assert inter.response.edit_message.call_args.kwargs.get("embed") is not None
 
         inter.followup.send.assert_awaited_once()
-        toast_text = inter.followup.send.call_args[0][0]
-        assert "Task title cannot be empty" in toast_text
-        assert "*⏱️ Auto-dismisses <t:" in toast_text
+        sent_embed = inter.followup.send.call_args.kwargs.get("embed")
+        assert sent_embed is not None
+        assert "Task title cannot be empty" in sent_embed.description
+        assert "*Auto-dismisses <t:" in sent_embed.description
         mock_schedule.assert_called_once_with(mock_toast, delay=10.0)
 
     assert view.select.placeholder == "Select Project for New Task..."
@@ -2145,5 +2144,6 @@ async def test_pm_hub_new_task_channel_permission_scoping(services):
     call_kwargs = mock_inter.response.send_message.call_args.kwargs
     # Should NOT send TaskSelectProjectView containing p3
     assert call_kwargs.get("view") is None
-    msg = mock_inter.response.send_message.call_args.args[0]
+    embed = call_kwargs.get("embed")
+    msg = embed.description if embed else mock_inter.response.send_message.call_args.args[0]
     assert "You do not have permission to create tasks in this channel's projects" in msg

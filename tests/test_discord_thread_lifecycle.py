@@ -619,8 +619,9 @@ async def test_task_edit_modal_sends_cooldown_notice_on_deferred_rename(services
 
     interaction.response.edit_message.assert_awaited_once()
     interaction.followup.send.assert_awaited_once()
-    notice_msg = interaction.followup.send.call_args[0][0]
-    assert "Discord limits thread renames to 2 per 10 minutes" in notice_msg
+    notice_embed = interaction.followup.send.call_args.kwargs.get("embed")
+    assert notice_embed is not None
+    assert "Discord limits thread renames to 2 per 10 minutes" in notice_embed.description
 
 
 def test_get_task_jump_url():

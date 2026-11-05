@@ -21,6 +21,9 @@ class AutocompleteMixin:
             return []
         try:
             projects = await self.project_service.list_projects(interaction.guild.id, include_archived=False)
+            auth_service = getattr(self, "auth_service", None)
+            if auth_service and interaction.user:
+                projects = await auth_service.filter_visible_projects(interaction.user, projects)
             choices = [
                 app_commands.Choice(name=f"{p.name} ({p.prefix})", value=p.name)
                 for p in projects

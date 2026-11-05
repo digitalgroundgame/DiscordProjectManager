@@ -93,6 +93,7 @@ class E2ETestEnvironment:
             DISCORD_GUILD_ID=self.guild_id,
             SYNC_COMMANDS_ON_STARTUP=False,
             OUTBOX_POLL_INTERVAL_SECONDS=0.05,
+            SESSION_SECRET_KEY="e2e-test-session-secret",
         )
 
         self.bot = DggPmBot(

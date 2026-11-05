@@ -47,7 +47,7 @@ async def test_journey_dependencies_blocker_gating_and_tech_tree(
         title="Database Schema",
         description="Design core SQL schema and migrations",
     )
-    assert "[PLT-1]" in t1_resp.content
+    assert "[PLT-1]" in t1_resp.all_text()
     await e2e_env.drain_outbox()
 
     task1 = await e2e_env.task_service.get_by_short_id(guild.id, "PLT-1")
@@ -62,7 +62,7 @@ async def test_journey_dependencies_blocker_gating_and_tech_tree(
         description="FastAPI CRUD endpoints",
         depends_on="PLT-1",
     )
-    assert "[PLT-2]" in t2_resp.content
+    assert "[PLT-2]" in t2_resp.all_text()
     await e2e_env.drain_outbox()
 
     task2 = await e2e_env.task_service.get_by_short_id(guild.id, "PLT-2")
