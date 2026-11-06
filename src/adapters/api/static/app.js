@@ -318,6 +318,103 @@ function renderCurrentView() {
   }
 }
 
+function wrapNodeTitle(text, maxChars = 36, maxLines = 2) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let current = "";
+  for (const w of words) {
+    if (lines.length === maxLines - 1) {
+      const candidate = current ? `${current} ${w}` : w;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        current = current ? `${current}…` : `${w.slice(0, maxChars - 1)}…`;
+        break;
+      }
+    } else {
+      const candidate = current ? `${current} ${w}` : w;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = w;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function createNodeSvg({
+  shortId,
+  title,
+  state,
+  isOverdue,
+  isOnCriticalPath,
+  width = 260,
+  height = 74,
+}) {
+  const stateColor = isOverdue
+    ? "#f23f43"
+    : STATE_COLORS[state] || STATE_COLORS.locked;
+  const isLocked = state === "locked";
+
+  const badgeText = isOverdue
+    ? "⚠️ OVERDUE"
+    : STATE_BADGES[state] || `● ${state.toUpperCase()}`;
+
+  const shortIdColor = isLocked ? "#949ba4" : stateColor;
+  const badgeTextColor = isLocked ? "#949ba4" : stateColor;
+
+  const badgeBg = isOverdue
+    ? "rgba(242, 63, 67, 0.15)"
+    : state === "active"
+      ? "rgba(240, 178, 50, 0.15)"
+      : state === "complete"
+        ? "rgba(35, 165, 90, 0.15)"
+        : state === "available"
+          ? "rgba(88, 101, 242, 0.15)"
+          : "rgba(255, 255, 255, 0.05)";
+
+  const badgeWidth = Math.max(68, badgeText.length * 6.5 + 16);
+  const badgeX = width - badgeWidth - 12;
+
+  const outerBorder = isOnCriticalPath
+    ? "#ffffff"
+    : isOverdue
+      ? "#f23f43"
+      : "rgba(255, 255, 255, 0.1)";
+  const outerBorderWidth = isOnCriticalPath ? 2.5 : 1;
+
+  const titleColor = isLocked ? "#949ba4" : "#f2f3f5";
+  const lines = wrapNodeTitle(title, 36, 2);
+  const titleSvg =
+    lines.length === 1
+      ? `<text x="14" y="52" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="600">${escapeXml(lines[0])}</text>`
+      : `<text x="14" y="44" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[0])}</text>
+         <text x="14" y="60" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[1])}</text>`;
+
+  const clipId = `card-clip-${encodeURIComponent(shortId)}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <defs>
+      <clipPath id="${clipId}">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="8"/>
+      </clipPath>
+    </defs>
+    <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="#2b2d31"/>
+    <g clip-path="url(#${clipId})">
+      <rect x="0" y="0" width="5" height="${height}" fill="${stateColor}"/>
+    </g>
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="8" fill="none" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
+    <text x="14" y="24" fill="${shortIdColor}" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700">[${escapeXml(shortId)}]</text>
+    <rect x="${badgeX}" y="10" width="${badgeWidth}" height="19" rx="9.5" fill="${badgeBg}"/>
+    <text x="${badgeX + badgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(badgeText)}</text>
+    ${titleSvg}
+  </svg>`;
+
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
 function renderTechTree() {
   const tt = state.techTree;
   if (!tt) return;
@@ -345,30 +442,22 @@ function renderTechTree() {
 
   const elements = [];
   for (const n of tt.nodes) {
-    const displayTitle = n.title.length > 58 ? n.title.slice(0, 56) + "…" : n.title;
-    const badge = n.is_overdue
-      ? "⚠️ OVERDUE"
-      : STATE_BADGES[n.state] || `● ${n.state.toUpperCase()}`;
-    const label = `[${n.short_id}] ${displayTitle}\n${badge}`;
-    const stateBorderColor = STATE_COLORS[n.state] || STATE_COLORS.locked;
-    const borderColor =
-      state.highlightCriticalPath && n.is_on_critical_path
-        ? "#ffffff"
-        : n.is_overdue
-          ? "#f23f43"
-          : stateBorderColor;
-    const borderWidth =
-      state.highlightCriticalPath && n.is_on_critical_path ? 4 : n.is_overdue ? 3.5 : 2.5;
+    const bgImage = createNodeSvg({
+      shortId: n.short_id,
+      title: n.title,
+      state: n.state,
+      isOverdue: Boolean(n.is_overdue),
+      isOnCriticalPath: Boolean(state.highlightCriticalPath && n.is_on_critical_path),
+      width: 260,
+      height: 74,
+    });
 
     elements.push({
       data: {
         id: n.id,
         short_id: n.short_id,
-        label,
         state: n.state,
-        backgroundColor: "#2b2d31",
-        borderColor,
-        borderWidth,
+        bgImage,
         opacity: filteredIds.has(n.id) ? 1.0 : 0.3,
       },
     });
@@ -397,20 +486,15 @@ function renderTechTree() {
         selector: "node",
         style: {
           shape: "round-rectangle",
-          width: 250,
-          height: 76,
-          "background-color": "data(backgroundColor)",
-          "border-color": "data(borderColor)",
-          "border-width": "data(borderWidth)",
+          width: 260,
+          height: 74,
+          "background-color": "#2b2d31",
+          "background-image": "data(bgImage)",
+          "background-fit": "cover",
+          "background-clip": "none",
+          "border-width": 0,
           opacity: "data(opacity)",
-          label: "data(label)",
-          color: "#f2f3f5",
-          "text-wrap": "wrap",
-          "text-max-width": 225,
-          "font-size": 11,
-          "font-weight": 600,
-          "text-valign": "center",
-          "text-halign": "center",
+          label: "",
         },
       },
       {
