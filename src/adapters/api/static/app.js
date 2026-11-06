@@ -404,9 +404,19 @@ function createNodeSvg({
       : `<text x="14" y="44" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[0])}</text>
          <text x="14" y="60" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[1])}</text>`;
 
+  const cardBorderRadius = 8;
+  const barThickness = 5;
+  const outerR = cardBorderRadius - 0.5;
+  const innerR = outerR - barThickness;
+  const topInnerY = 0.5 + barThickness;
+  const botInnerY = height - 0.5 - barThickness;
+
+  const leftBarPath = `M ${cardBorderRadius} 0.5 A ${outerR} ${outerR} 0 0 0 0.5 ${cardBorderRadius} L 0.5 ${height - cardBorderRadius} A ${outerR} ${outerR} 0 0 0 ${cardBorderRadius} ${height - 0.5} L ${cardBorderRadius} ${botInnerY} A ${innerR} ${innerR} 0 0 1 ${0.5 + barThickness} ${height - cardBorderRadius} L ${0.5 + barThickness} ${cardBorderRadius} A ${innerR} ${innerR} 0 0 1 ${cardBorderRadius} ${topInnerY} Z`;
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="8" fill="#2b2d31" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
-    <rect x="0.5" y="0.5" width="5" height="${height - 1}" rx="2.5" fill="${stateColor}"/>
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="${cardBorderRadius}" fill="#2b2d31"/>
+    <path d="${leftBarPath}" fill="${stateColor}"/>
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="${cardBorderRadius}" fill="none" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
     <text x="14" y="24" fill="${shortIdColor}" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700">[${escapeXml(shortId)}]</text>
     <rect x="${badgeX}" y="10" width="${badgeWidth}" height="19" rx="9.5" fill="${badgeBg}"/>
     <text x="${badgeX + badgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(badgeText)}</text>
