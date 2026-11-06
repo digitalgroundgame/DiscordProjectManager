@@ -71,6 +71,14 @@ class MenuSessionManager:
         if self._active_menus.get(key) == interaction:
             self._active_menus.pop(key, None)
 
+    def update_interaction(self, interaction: discord.Interaction) -> None:
+        """Updates the stored interaction for an active menu session (e.g. after message regeneration)."""
+        if not interaction.guild_id or not interaction.user:
+            return
+        key = (interaction.guild_id, interaction.user.id)
+        if key in self._active_menus:
+            self._active_menus[key] = interaction
+
     def schedule_toast_dismissal(
         self,
         target: discord.Interaction | discord.WebhookMessage | discord.Message | Any,

@@ -14,6 +14,7 @@ from uuid import uuid4
 import discord
 import pytest
 
+from src.adapters.discord_bot.views.calendar_feed_view import CalendarFeedView
 from src.adapters.discord_bot.views.hub_menu import PmHubView
 from src.adapters.discord_bot.views.project.dashboard import ProjectMenuView
 from src.adapters.discord_bot.views.task_menu import TaskMenuView
@@ -93,6 +94,37 @@ async def test_tech_tree_viewer_close_button():
 
     interaction.response.defer.assert_awaited_once()
     interaction.delete_original_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_calendar_feed_view_close_button():
+    calendar_srv = MagicMock()
+    calendar_srv.build_feed_urls.return_value = {
+        "https_url": "https://example.com/calendar.ics",
+        "todo_https_url": "https://example.com/calendar.ics?format=todo",
+    }
+    view = CalendarFeedView(calendar_service=calendar_srv, user_discord_id=123, token="token-xyz")
+
+    close_buttons = [c for c in view.children if isinstance(c, discord.ui.Button) and c.label == "Close"]
+    assert len(close_buttons) == 1, "CalendarFeedView must have exactly one Close button"
+    close_btn = close_buttons[0]
+    assert close_btn.style == discord.ButtonStyle.secondary
+    assert close_btn.row == 0
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild_id = 111
+    interaction.user = MagicMock()
+    interaction.user.id = 123
+    interaction.response = MagicMock()
+    interaction.response.is_done.return_value = False
+    interaction.response.defer = AsyncMock()
+    interaction.delete_original_response = AsyncMock()
+
+    await view._on_close_clicked(interaction)
+
+    interaction.response.defer.assert_awaited_once()
+    interaction.delete_original_response.assert_awaited_once()
+    assert view.is_finished()
 
 
 @pytest.mark.asyncio

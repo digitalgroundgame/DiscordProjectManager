@@ -75,6 +75,7 @@ class CalendarFeedView(BaseView):
             label="Open Calendar Feed (.ics)",
             style=discord.ButtonStyle.link,
             url=urls["https_url"],
+            row=0,
         )
         self.add_item(ics_button)
 
@@ -83,12 +84,43 @@ class CalendarFeedView(BaseView):
             label="Regenerate Link",
             style=discord.ButtonStyle.danger,
             custom_id="calendar_feed_regenerate",
+            row=0,
         )
         regen_button.callback = self._on_regenerate_clicked
         self.add_item(regen_button)
 
+        # Close button
+        close_button = discord.ui.Button(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+        )
+        close_button.callback = self._on_close_clicked
+        self.add_item(close_button)
+
+    async def _on_close_clicked(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        try:
+            if hasattr(self, "_initial_interaction") and self._initial_interaction:
+                from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+                get_menu_manager().unregister_menu(self._initial_interaction)
+            from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+            get_menu_manager().unregister_menu(interaction)
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await interaction.delete_original_response()
+        except Exception as e:
+            logger.debug("Failed to delete calendar feed view on close: %s", e)
+
     async def _on_regenerate_clicked(self, interaction: discord.Interaction) -> None:
         try:
+            self._initial_interaction = interaction
+            from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+            get_menu_manager().update_interaction(interaction)
+
             new_token = await self.calendar_service.regenerate_token(self.user_discord_id)
             self.token = new_token
             self._refresh_components()
