@@ -114,6 +114,35 @@ async def test_unregister_menu():
 
 
 @pytest.mark.asyncio
+async def test_update_interaction():
+    manager = MenuSessionManager()
+
+    inter1 = MagicMock()
+    inter1.guild_id = 111
+    inter1.user.id = 999
+    inter1.delete_original_response = AsyncMock()
+
+    inter2 = MagicMock()
+    inter2.guild_id = 111
+    inter2.user.id = 999
+    inter2.delete_original_response = AsyncMock()
+
+    # When not registered yet, update_interaction does nothing
+    manager.update_interaction(inter2)
+    assert (111, 999) not in manager._active_menus
+
+    # Register first interaction
+    await manager.register_menu(inter1)
+    assert manager._active_menus[(111, 999)] == inter1
+
+    # Update interaction to second interaction without calling delete
+    manager.update_interaction(inter2)
+    assert manager._active_menus[(111, 999)] == inter2
+    inter1.delete_original_response.assert_not_awaited()
+    inter2.delete_original_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_schedule_toast_dismissal():
     manager = MenuSessionManager()
     inter = MagicMock()

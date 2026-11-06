@@ -14,13 +14,9 @@ from src.adapters.discord_bot.cogs.squad_cog import SquadCommandsMixin
 from src.adapters.discord_bot.cogs.task_cog import TaskCommandsMixin
 from src.adapters.discord_bot.error_handler import send_interaction_error
 from src.adapters.discord_bot.member_resolver import resolve_discord_member_name
-from src.adapters.discord_bot.menu_manager import send_toast
+from src.adapters.discord_bot.menu_manager import get_menu_manager, send_toast
 from src.adapters.discord_bot.router import DiscordViewRouter
 from src.adapters.discord_bot.ui_constants import TOAST_DURATION_STANDARD, ToastType
-from src.adapters.discord_bot.views.calendar_feed_view import (
-    CalendarFeedView,
-    build_calendar_feed_embed,
-)
 from src.adapters.discord_bot.views.forum_helpers import ensure_pinned_hub_post
 from src.adapters.discord_bot.views.hub_menu import build_hub_welcome_embed
 from src.adapters.discord_bot.workspace_protocol import (
@@ -311,16 +307,13 @@ class PmCog(
             return
 
         try:
-            token = await self.calendar_service.get_or_create_token(interaction.user.id)
-            urls = self.calendar_service.build_feed_urls(token)
-            embed = build_calendar_feed_embed(interaction.user, urls)
-            view = CalendarFeedView(
+            embed, view = await DiscordViewRouter.build_calendar_feed_view(
                 calendar_service=self.calendar_service,
-                user_discord_id=interaction.user.id,
-                token=token,
+                user=interaction.user,
                 initial_interaction=interaction,
             )
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await get_menu_manager().register_menu(interaction)
         except Exception as e:
             await send_interaction_error(interaction, e, "retrieving calendar feed", logger, ephemeral=True)
 

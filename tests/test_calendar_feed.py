@@ -252,11 +252,14 @@ async def test_discord_pm_calendar_command_and_view(services):
     )
 
     interaction = MagicMock(spec=discord.Interaction)
+    interaction.guild_id = 111
     interaction.user = MagicMock(spec=discord.User)
     interaction.user.id = 777666555444
     interaction.user.display_name = "AliceDev"
+    interaction.message = None
     interaction.response = MagicMock()
     interaction.response.send_message = AsyncMock()
+    interaction.delete_original_response = AsyncMock()
 
     # Invoke /pm calendar callback
     await cog.calendar.callback(cog, interaction)
@@ -269,20 +272,33 @@ async def test_discord_pm_calendar_command_and_view(services):
     assert "Personal Calendar Feed" in embed.title
     assert "AliceDev" in embed.title
 
+    # Ephemeral interaction registered in MenuSessionManager
+    from src.adapters.discord_bot.menu_manager import get_menu_manager
+
+    manager = get_menu_manager()
+    assert manager._active_menus.get((111, 777666555444)) == interaction
+
     view = kwargs.get("view")
     assert isinstance(view, CalendarFeedView)
-    assert len(view.children) == 2  # Universal .ics link button + Regenerate button
+    assert len(view.children) == 3  # Universal .ics link button + Regenerate button + Close button
 
     # Button URL must point directly to the universal HTTPS .ics feed
     sub_button = view.children[0]
     assert sub_button.url.startswith(("http://", "https://"))
     assert sub_button.url.endswith(".ics")
 
+    close_button = view.children[2]
+    assert close_button.label == "Close"
+    assert close_button.style == discord.ButtonStyle.secondary
+    assert close_button.row == 0
+
     # Test clicking regenerate button
     regen_interaction = MagicMock(spec=discord.Interaction)
+    regen_interaction.guild_id = 111
     regen_interaction.user = interaction.user
     regen_interaction.response = MagicMock()
     regen_interaction.response.edit_message = AsyncMock()
+    regen_interaction.delete_original_response = AsyncMock()
 
     old_token = view.token
     await view._on_regenerate_clicked(regen_interaction)
@@ -293,3 +309,12 @@ async def test_discord_pm_calendar_command_and_view(services):
     assert await calendar_srv.get_user_id_by_token(old_token) is None
     # New token resolves
     assert await calendar_srv.get_user_id_by_token(view.token) == interaction.user.id
+    # Initial interaction updated to fresh regenerate interaction
+    assert view._initial_interaction == regen_interaction
+    # Session manager active interaction was synchronized to fresh regenerate interaction
+    assert manager._active_menus.get((111, interaction.user.id)) == regen_interaction
+
+    # Verify timeout unregisters and deletes using the refreshed interaction
+    await view.on_timeout()
+    regen_interaction.delete_original_response.assert_awaited_once()
+    assert (111, interaction.user.id) not in manager._active_menus
