@@ -318,6 +318,16 @@ function renderCurrentView() {
   }
 }
 
+function escapeXml(unsafe) {
+  if (unsafe == null) return "";
+  return String(unsafe)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function wrapNodeTitle(text, maxChars = 36, maxLines = 2) {
   const words = text.split(/\s+/);
   const lines = [];
@@ -394,18 +404,9 @@ function createNodeSvg({
       : `<text x="14" y="44" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[0])}</text>
          <text x="14" y="60" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[1])}</text>`;
 
-  const clipId = `card-clip-${encodeURIComponent(shortId)}`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <defs>
-      <clipPath id="${clipId}">
-        <rect x="0" y="0" width="${width}" height="${height}" rx="8"/>
-      </clipPath>
-    </defs>
-    <rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="#2b2d31"/>
-    <g clip-path="url(#${clipId})">
-      <rect x="0" y="0" width="5" height="${height}" fill="${stateColor}"/>
-    </g>
-    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="8" fill="none" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="8" fill="#2b2d31" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
+    <rect x="0.5" y="0.5" width="5" height="${height - 1}" rx="2.5" fill="${stateColor}"/>
     <text x="14" y="24" fill="${shortIdColor}" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700">[${escapeXml(shortId)}]</text>
     <rect x="${badgeX}" y="10" width="${badgeWidth}" height="19" rx="9.5" fill="${badgeBg}"/>
     <text x="${badgeX + badgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(badgeText)}</text>
