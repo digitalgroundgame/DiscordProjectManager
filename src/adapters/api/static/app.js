@@ -364,21 +364,16 @@ function createNodeSvg({
   width = 260,
   height = 74,
 }) {
-  const stateColor = isOverdue
-    ? "#f23f43"
-    : STATE_COLORS[state] || STATE_COLORS.locked;
+  const showOverdue = Boolean(isOverdue && state !== "complete");
+  const stateColor = STATE_COLORS[state] || STATE_COLORS.locked;
   const isLocked = state === "locked";
 
-  const badgeText = isOverdue
-    ? "OVERDUE"
-    : STATE_BADGES[state] || state.toUpperCase();
-
+  const stateBadgeText = STATE_BADGES[state] || state.toUpperCase();
   const shortIdColor = isLocked ? "#949ba4" : stateColor;
   const badgeTextColor = isLocked ? "#949ba4" : stateColor;
 
-  const badgeBg = isOverdue
-    ? "rgba(242, 63, 67, 0.15)"
-    : state === "active"
+  const stateBadgeBg =
+    state === "active"
       ? "rgba(240, 178, 50, 0.15)"
       : state === "complete"
         ? "rgba(35, 165, 90, 0.15)"
@@ -386,8 +381,24 @@ function createNodeSvg({
           ? "rgba(88, 101, 242, 0.15)"
           : "rgba(255, 255, 255, 0.05)";
 
-  const badgeWidth = Math.max(56, badgeText.length * 6.5 + 16);
-  const badgeX = width - badgeWidth - 12;
+  const stateBadgeWidth = Math.max(54, stateBadgeText.length * 6.5 + 16);
+  const stateBadgeX = width - stateBadgeWidth - 12;
+
+  let badgesSvg = `
+    <rect x="${stateBadgeX}" y="10" width="${stateBadgeWidth}" height="19" rx="9.5" fill="${stateBadgeBg}"/>
+    <text x="${stateBadgeX + stateBadgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(stateBadgeText)}</text>
+  `;
+
+  if (showOverdue) {
+    const overdueText = "OVERDUE";
+    const overdueWidth = Math.max(54, overdueText.length * 6.5 + 16);
+    const overdueX = stateBadgeX - overdueWidth - 6;
+    badgesSvg = `
+      <rect x="${overdueX}" y="10" width="${overdueWidth}" height="19" rx="9.5" fill="rgba(242, 63, 67, 0.15)"/>
+      <text x="${overdueX + overdueWidth / 2}" y="23" fill="#f23f43" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${overdueText}</text>
+      ${badgesSvg}
+    `;
+  }
 
   const outerBorder = isOnCriticalPath
     ? "#ffffff"
@@ -416,8 +427,7 @@ function createNodeSvg({
     <path d="${leftBarPath}" fill="${stateColor}"/>
     <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="${cardBorderRadius}" fill="none" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
     <text x="14" y="24" fill="${shortIdColor}" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700">[${escapeXml(shortId)}]</text>
-    <rect x="${badgeX}" y="10" width="${badgeWidth}" height="19" rx="9.5" fill="${badgeBg}"/>
-    <text x="${badgeX + badgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(badgeText)}</text>
+    ${badgesSvg}
     ${titleSvg}
   </svg>`;
 
@@ -440,8 +450,10 @@ function renderTechTree() {
       const row = document.createElement("div");
       row.className = "dep-item";
       row.style.marginBottom = "0.5rem";
+      const isOverdue = Boolean(node.is_overdue && node.state !== "complete");
       const badge = STATE_BADGES[node.state] || node.state.toUpperCase();
-      row.textContent = `[${node.short_id}] ${node.title} (${badge})`;
+      const badgeText = isOverdue ? `OVERDUE • ${badge}` : badge;
+      row.textContent = `[${node.short_id}] ${node.title} (${badgeText})`;
       row.addEventListener("click", () => openInspector(node.id));
       fallback.appendChild(row);
     }
@@ -455,7 +467,7 @@ function renderTechTree() {
       shortId: n.short_id,
       title: n.title,
       state: n.state,
-      isOverdue: Boolean(n.is_overdue),
+      isOverdue: Boolean(n.is_overdue && n.state !== "complete"),
       isOnCriticalPath: Boolean(state.highlightCriticalPath && n.is_on_critical_path),
       width: 260,
       height: 74,
@@ -573,20 +585,22 @@ function renderKanban() {
     const bodyEl = colEl.querySelector(".kanban-col-body");
     for (const t of col.items) {
       const card = document.createElement("div");
-      card.className = "task-card";
-      const overdueBadge = t.is_overdue ? '<span class="legend-pill state-overdue">Overdue</span>' : "";
+      const safeState = escapeHtml(t.readiness_state);
+      const isTaskOverdue = Boolean(t.is_overdue && t.readiness_state !== "complete");
+      const overdueClass = isTaskOverdue ? " is-overdue" : "";
+      card.className = `task-card state-${safeState}${overdueClass}`;
+      const overdueBadge = isTaskOverdue ? '<span class="legend-pill state-overdue">OVERDUE</span>' : "";
       const { url: linkUrl, isWeb } = resolveDiscordLink(t);
       const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
       const discordLink = linkUrl
         ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">${isWeb ? "Web" : "Discord"} &#8599;</a>`
         : "";
-      const safeState = escapeHtml(t.readiness_state);
       card.innerHTML = `
         <div class="task-card-top">
           <span class="task-short-id">[${escapeHtml(t.short_id)}]</span>
-          <div>
+          <div class="task-badges">
             ${overdueBadge}
-            <span class="legend-pill state-${safeState}">${safeState}</span>
+            <span class="legend-pill state-${safeState}">${safeState.toUpperCase()}</span>
           </div>
         </div>
         <div class="task-card-title">${escapeHtml(t.title)}</div>
@@ -610,21 +624,26 @@ function renderMatrix() {
 
   for (const t of tasks) {
     const tr = document.createElement("tr");
+    const safeState = escapeHtml(t.readiness_state);
+    const isTaskOverdue = Boolean(t.is_overdue && t.readiness_state !== "complete");
+    tr.className = `state-${safeState} ${isTaskOverdue ? "is-overdue" : ""}`;
     const squadNames = (t.squads || []).map((s) => s.name).join(", ");
     const tagNames = (t.tags || []).join(", ");
     const combinedMeta = [squadNames, tagNames].filter(Boolean).join(" | ") || "—";
-    const dueLabel = t.is_overdue ? `${formatDate(t.due_at)} (Overdue)` : formatDate(t.due_at);
+    const dueLabel = isTaskOverdue ? `${formatDate(t.due_at)} (Overdue)` : formatDate(t.due_at);
     const { url: linkUrl, isWeb } = resolveDiscordLink(t);
     const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
     const jumpBtn = linkUrl
       ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">Open &#8599;</a>`
       : "—";
-    const safeState = escapeHtml(t.readiness_state);
+    const overduePill = isTaskOverdue
+      ? '<span class="legend-pill state-overdue" style="margin-right: 4px;">OVERDUE</span>'
+      : "";
 
     tr.innerHTML = `
       <td class="task-short-id">[${escapeHtml(t.short_id)}]</td>
       <td><strong>${escapeHtml(t.title)}</strong></td>
-      <td><span class="legend-pill state-${safeState}">${safeState}</span></td>
+      <td>${overduePill}<span class="legend-pill state-${safeState}">${safeState.toUpperCase()}</span></td>
       <td>${escapeHtml(STATUS_LABELS[t.status] || t.status)}</td>
       <td>${escapeHtml(PRIORITY_LABELS[t.priority] || t.priority)}</td>
       <td>${escapeHtml(t.assignee_name || "Unassigned")}</td>
