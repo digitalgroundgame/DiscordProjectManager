@@ -12,11 +12,11 @@ const STATE_COLORS = {
 };
 
 const STATE_BADGES = {
-  complete: "✓ COMPLETE",
-  active: "● ACTIVE",
-  available: "○ AVAILABLE",
-  locked: "🔒 LOCKED",
-  blocked: "⛔ BLOCKED",
+  complete: "COMPLETE",
+  active: "ACTIVE",
+  available: "AVAILABLE",
+  locked: "LOCKED",
+  blocked: "BLOCKED",
 };
 
 const STATUS_LABELS = {
@@ -370,8 +370,8 @@ function createNodeSvg({
   const isLocked = state === "locked";
 
   const badgeText = isOverdue
-    ? "⚠️ OVERDUE"
-    : STATE_BADGES[state] || `● ${state.toUpperCase()}`;
+    ? "OVERDUE"
+    : STATE_BADGES[state] || state.toUpperCase();
 
   const shortIdColor = isLocked ? "#949ba4" : stateColor;
   const badgeTextColor = isLocked ? "#949ba4" : stateColor;
@@ -386,14 +386,12 @@ function createNodeSvg({
           ? "rgba(88, 101, 242, 0.15)"
           : "rgba(255, 255, 255, 0.05)";
 
-  const badgeWidth = Math.max(68, badgeText.length * 6.5 + 16);
+  const badgeWidth = Math.max(56, badgeText.length * 6.5 + 16);
   const badgeX = width - badgeWidth - 12;
 
   const outerBorder = isOnCriticalPath
     ? "#ffffff"
-    : isOverdue
-      ? "#f23f43"
-      : "rgba(255, 255, 255, 0.1)";
+    : "rgba(255, 255, 255, 0.1)";
   const outerBorderWidth = isOnCriticalPath ? 2.5 : 1;
 
   const titleColor = isLocked ? "#949ba4" : "#f2f3f5";
