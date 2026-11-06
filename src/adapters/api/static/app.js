@@ -11,6 +11,14 @@ const STATE_COLORS = {
   blocked: "#f23f43",
 };
 
+const STATE_BADGES = {
+  complete: "✓ COMPLETE",
+  active: "● ACTIVE",
+  available: "○ AVAILABLE",
+  locked: "🔒 LOCKED",
+  blocked: "⛔ BLOCKED",
+};
+
 const STATUS_LABELS = {
   notStarted: "Not Started",
   inProgress: "In Progress",
@@ -326,7 +334,8 @@ function renderTechTree() {
       const row = document.createElement("div");
       row.className = "dep-item";
       row.style.marginBottom = "0.5rem";
-      row.textContent = `[${node.short_id}] ${node.title} (${node.state.toUpperCase()})`;
+      const badge = STATE_BADGES[node.state] || node.state.toUpperCase();
+      row.textContent = `[${node.short_id}] ${node.title} (${badge})`;
       row.addEventListener("click", () => openInspector(node.id));
       fallback.appendChild(row);
     }
@@ -336,21 +345,30 @@ function renderTechTree() {
 
   const elements = [];
   for (const n of tt.nodes) {
-    const label = `[${n.short_id}] ${n.title.length > 26 ? n.title.slice(0, 24) + "…" : n.title}\n${n.state.toUpperCase()}`;
+    const displayTitle = n.title.length > 58 ? n.title.slice(0, 56) + "…" : n.title;
+    const badge = n.is_overdue
+      ? "⚠️ OVERDUE"
+      : STATE_BADGES[n.state] || `● ${n.state.toUpperCase()}`;
+    const label = `[${n.short_id}] ${displayTitle}\n${badge}`;
+    const stateBorderColor = STATE_COLORS[n.state] || STATE_COLORS.locked;
+    const borderColor =
+      state.highlightCriticalPath && n.is_on_critical_path
+        ? "#ffffff"
+        : n.is_overdue
+          ? "#f23f43"
+          : stateBorderColor;
+    const borderWidth =
+      state.highlightCriticalPath && n.is_on_critical_path ? 4 : n.is_overdue ? 3.5 : 2.5;
+
     elements.push({
       data: {
         id: n.id,
         short_id: n.short_id,
         label,
         state: n.state,
-        color: STATE_COLORS[n.state] || STATE_COLORS.locked,
-        borderColor:
-          state.highlightCriticalPath && n.is_on_critical_path
-            ? "#ffffff"
-            : n.is_overdue
-              ? "#f23f43"
-              : "#1e1f22",
-        borderWidth: state.highlightCriticalPath && n.is_on_critical_path ? 4 : n.is_overdue ? 3 : 2,
+        backgroundColor: "#2b2d31",
+        borderColor,
+        borderWidth,
         opacity: filteredIds.has(n.id) ? 1.0 : 0.3,
       },
     });
@@ -379,16 +397,16 @@ function renderTechTree() {
         selector: "node",
         style: {
           shape: "round-rectangle",
-          width: 195,
-          height: 62,
-          "background-color": "data(color)",
+          width: 250,
+          height: 76,
+          "background-color": "data(backgroundColor)",
           "border-color": "data(borderColor)",
           "border-width": "data(borderWidth)",
           opacity: "data(opacity)",
           label: "data(label)",
-          color: "#ffffff",
+          color: "#f2f3f5",
           "text-wrap": "wrap",
-          "text-max-width": 175,
+          "text-max-width": 225,
           "font-size": 11,
           "font-weight": 600,
           "text-valign": "center",
@@ -409,8 +427,8 @@ function renderTechTree() {
     layout: {
       name: "dagre",
       rankDir: state.dagOrientation,
-      nodeSep: 45,
-      rankSep: 80,
+      nodeSep: 50,
+      rankSep: 85,
       padding: 30,
     },
   });
