@@ -11,6 +11,14 @@ const STATE_COLORS = {
   blocked: "#f23f43",
 };
 
+const STATE_BADGES = {
+  complete: "COMPLETE",
+  active: "ACTIVE",
+  available: "AVAILABLE",
+  locked: "LOCKED",
+  blocked: "BLOCKED",
+};
+
 const STATUS_LABELS = {
   notStarted: "Not Started",
   inProgress: "In Progress",
@@ -310,6 +318,122 @@ function renderCurrentView() {
   }
 }
 
+function escapeXml(unsafe) {
+  if (unsafe == null) return "";
+  return String(unsafe)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function wrapNodeTitle(text, maxChars = 36, maxLines = 2) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let current = "";
+  for (const w of words) {
+    if (lines.length === maxLines - 1) {
+      const candidate = current ? `${current} ${w}` : w;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        current = current ? `${current}…` : `${w.slice(0, maxChars - 1)}…`;
+        break;
+      }
+    } else {
+      const candidate = current ? `${current} ${w}` : w;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = w;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function createNodeSvg({
+  shortId,
+  title,
+  state,
+  isOverdue,
+  isOnCriticalPath,
+  width = 260,
+  height = 74,
+}) {
+  const showOverdue = Boolean(isOverdue && state !== "complete");
+  const stateColor = STATE_COLORS[state] || STATE_COLORS.locked;
+  const isLocked = state === "locked";
+
+  const stateBadgeText = STATE_BADGES[state] || state.toUpperCase();
+  const shortIdColor = isLocked ? "#949ba4" : stateColor;
+  const badgeTextColor = isLocked ? "#949ba4" : stateColor;
+
+  const stateBadgeBg =
+    state === "active"
+      ? "rgba(240, 178, 50, 0.15)"
+      : state === "complete"
+        ? "rgba(35, 165, 90, 0.15)"
+        : state === "available"
+          ? "rgba(88, 101, 242, 0.15)"
+          : "rgba(255, 255, 255, 0.05)";
+
+  const stateBadgeWidth = Math.max(54, stateBadgeText.length * 6.5 + 16);
+  const stateBadgeX = width - stateBadgeWidth - 12;
+
+  let badgesSvg = `
+    <rect x="${stateBadgeX}" y="10" width="${stateBadgeWidth}" height="19" rx="9.5" fill="${stateBadgeBg}"/>
+    <text x="${stateBadgeX + stateBadgeWidth / 2}" y="23" fill="${badgeTextColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${escapeXml(stateBadgeText)}</text>
+  `;
+
+  if (showOverdue) {
+    const overdueText = "OVERDUE";
+    const overdueWidth = Math.max(54, overdueText.length * 6.5 + 16);
+    const overdueX = stateBadgeX - overdueWidth - 6;
+    badgesSvg = `
+      <rect x="${overdueX}" y="10" width="${overdueWidth}" height="19" rx="9.5" fill="rgba(242, 63, 67, 0.15)"/>
+      <text x="${overdueX + overdueWidth / 2}" y="23" fill="#f23f43" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" text-anchor="middle">${overdueText}</text>
+      ${badgesSvg}
+    `;
+  }
+
+  const outerBorder = isOnCriticalPath
+    ? "#ffffff"
+    : "rgba(255, 255, 255, 0.1)";
+  const outerBorderWidth = isOnCriticalPath ? 2.5 : 1;
+
+  const titleColor = isLocked ? "#949ba4" : "#f2f3f5";
+  const lines = wrapNodeTitle(title, 36, 2);
+  const titleSvg =
+    lines.length === 1
+      ? `<text x="14" y="52" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="600">${escapeXml(lines[0])}</text>`
+      : `<text x="14" y="44" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[0])}</text>
+         <text x="14" y="60" fill="${titleColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600">${escapeXml(lines[1])}</text>`;
+
+  const cardBorderRadius = 8;
+  const barThickness = 5;
+  const outerR = cardBorderRadius - 0.5;
+  const innerR = outerR - barThickness;
+  const topInnerY = 0.5 + barThickness;
+  const botInnerY = height - 0.5 - barThickness;
+
+  const leftBarPath = `M ${cardBorderRadius} 0.5 A ${outerR} ${outerR} 0 0 0 0.5 ${cardBorderRadius} L 0.5 ${height - cardBorderRadius} A ${outerR} ${outerR} 0 0 0 ${cardBorderRadius} ${height - 0.5} L ${cardBorderRadius} ${botInnerY} A ${innerR} ${innerR} 0 0 1 ${0.5 + barThickness} ${height - cardBorderRadius} L ${0.5 + barThickness} ${cardBorderRadius} A ${innerR} ${innerR} 0 0 1 ${cardBorderRadius} ${topInnerY} Z`;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="${cardBorderRadius}" fill="#2b2d31"/>
+    <path d="${leftBarPath}" fill="${stateColor}"/>
+    <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="${cardBorderRadius}" fill="none" stroke="${outerBorder}" stroke-width="${outerBorderWidth}"/>
+    <text x="14" y="24" fill="${shortIdColor}" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700">[${escapeXml(shortId)}]</text>
+    ${badgesSvg}
+    ${titleSvg}
+  </svg>`;
+
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
 function renderTechTree() {
   const tt = state.techTree;
   if (!tt) return;
@@ -326,7 +450,10 @@ function renderTechTree() {
       const row = document.createElement("div");
       row.className = "dep-item";
       row.style.marginBottom = "0.5rem";
-      row.textContent = `[${node.short_id}] ${node.title} (${node.state.toUpperCase()})`;
+      const isOverdue = Boolean(node.is_overdue && node.state !== "complete");
+      const badge = STATE_BADGES[node.state] || node.state.toUpperCase();
+      const badgeText = isOverdue ? `OVERDUE • ${badge}` : badge;
+      row.textContent = `[${node.short_id}] ${node.title} (${badgeText})`;
       row.addEventListener("click", () => openInspector(node.id));
       fallback.appendChild(row);
     }
@@ -336,21 +463,22 @@ function renderTechTree() {
 
   const elements = [];
   for (const n of tt.nodes) {
-    const label = `[${n.short_id}] ${n.title.length > 26 ? n.title.slice(0, 24) + "…" : n.title}\n${n.state.toUpperCase()}`;
+    const bgImage = createNodeSvg({
+      shortId: n.short_id,
+      title: n.title,
+      state: n.state,
+      isOverdue: Boolean(n.is_overdue && n.state !== "complete"),
+      isOnCriticalPath: Boolean(state.highlightCriticalPath && n.is_on_critical_path),
+      width: 260,
+      height: 74,
+    });
+
     elements.push({
       data: {
         id: n.id,
         short_id: n.short_id,
-        label,
         state: n.state,
-        color: STATE_COLORS[n.state] || STATE_COLORS.locked,
-        borderColor:
-          state.highlightCriticalPath && n.is_on_critical_path
-            ? "#ffffff"
-            : n.is_overdue
-              ? "#f23f43"
-              : "#1e1f22",
-        borderWidth: state.highlightCriticalPath && n.is_on_critical_path ? 4 : n.is_overdue ? 3 : 2,
+        bgImage,
         opacity: filteredIds.has(n.id) ? 1.0 : 0.3,
       },
     });
@@ -379,20 +507,15 @@ function renderTechTree() {
         selector: "node",
         style: {
           shape: "round-rectangle",
-          width: 195,
-          height: 62,
-          "background-color": "data(color)",
-          "border-color": "data(borderColor)",
-          "border-width": "data(borderWidth)",
+          width: 260,
+          height: 74,
+          "background-color": "#2b2d31",
+          "background-image": "data(bgImage)",
+          "background-fit": "cover",
+          "background-clip": "none",
+          "border-width": 0,
           opacity: "data(opacity)",
-          label: "data(label)",
-          color: "#ffffff",
-          "text-wrap": "wrap",
-          "text-max-width": 175,
-          "font-size": 11,
-          "font-weight": 600,
-          "text-valign": "center",
-          "text-halign": "center",
+          label: "",
         },
       },
       {
@@ -409,8 +532,8 @@ function renderTechTree() {
     layout: {
       name: "dagre",
       rankDir: state.dagOrientation,
-      nodeSep: 45,
-      rankSep: 80,
+      nodeSep: 50,
+      rankSep: 85,
       padding: 30,
     },
   });
@@ -462,20 +585,22 @@ function renderKanban() {
     const bodyEl = colEl.querySelector(".kanban-col-body");
     for (const t of col.items) {
       const card = document.createElement("div");
-      card.className = "task-card";
-      const overdueBadge = t.is_overdue ? '<span class="legend-pill state-overdue">Overdue</span>' : "";
+      const safeState = escapeHtml(t.readiness_state);
+      const isTaskOverdue = Boolean(t.is_overdue && t.readiness_state !== "complete");
+      const overdueClass = isTaskOverdue ? " is-overdue" : "";
+      card.className = `task-card state-${safeState}${overdueClass}`;
+      const overdueBadge = isTaskOverdue ? '<span class="legend-pill state-overdue">OVERDUE</span>' : "";
       const { url: linkUrl, isWeb } = resolveDiscordLink(t);
       const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
       const discordLink = linkUrl
         ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">${isWeb ? "Web" : "Discord"} &#8599;</a>`
         : "";
-      const safeState = escapeHtml(t.readiness_state);
       card.innerHTML = `
         <div class="task-card-top">
           <span class="task-short-id">[${escapeHtml(t.short_id)}]</span>
-          <div>
+          <div class="task-badges">
             ${overdueBadge}
-            <span class="legend-pill state-${safeState}">${safeState}</span>
+            <span class="legend-pill state-${safeState}">${safeState.toUpperCase()}</span>
           </div>
         </div>
         <div class="task-card-title">${escapeHtml(t.title)}</div>
@@ -499,21 +624,26 @@ function renderMatrix() {
 
   for (const t of tasks) {
     const tr = document.createElement("tr");
+    const safeState = escapeHtml(t.readiness_state);
+    const isTaskOverdue = Boolean(t.is_overdue && t.readiness_state !== "complete");
+    tr.className = `state-${safeState} ${isTaskOverdue ? "is-overdue" : ""}`;
     const squadNames = (t.squads || []).map((s) => s.name).join(", ");
     const tagNames = (t.tags || []).join(", ");
     const combinedMeta = [squadNames, tagNames].filter(Boolean).join(" | ") || "—";
-    const dueLabel = t.is_overdue ? `${formatDate(t.due_at)} (Overdue)` : formatDate(t.due_at);
+    const dueLabel = isTaskOverdue ? `${formatDate(t.due_at)} (Overdue)` : formatDate(t.due_at);
     const { url: linkUrl, isWeb } = resolveDiscordLink(t);
     const targetAttr = isWeb ? ' target="_blank" rel="noopener noreferrer"' : "";
     const jumpBtn = linkUrl
       ? `<a href="${escapeHtml(linkUrl)}"${targetAttr} class="btn btn-sm btn-discord">Open &#8599;</a>`
       : "—";
-    const safeState = escapeHtml(t.readiness_state);
+    const overduePill = isTaskOverdue
+      ? '<span class="legend-pill state-overdue" style="margin-right: 4px;">OVERDUE</span>'
+      : "";
 
     tr.innerHTML = `
       <td class="task-short-id">[${escapeHtml(t.short_id)}]</td>
       <td><strong>${escapeHtml(t.title)}</strong></td>
-      <td><span class="legend-pill state-${safeState}">${safeState}</span></td>
+      <td>${overduePill}<span class="legend-pill state-${safeState}">${safeState.toUpperCase()}</span></td>
       <td>${escapeHtml(STATUS_LABELS[t.status] || t.status)}</td>
       <td>${escapeHtml(PRIORITY_LABELS[t.priority] || t.priority)}</td>
       <td>${escapeHtml(t.assignee_name || "Unassigned")}</td>

@@ -359,22 +359,42 @@ body {
 }
 
 .legend-pill {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
   border-radius: 999px;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #fff;
-  background-color: var(--state-locked);
+  letter-spacing: 0.04em;
+  display: inline-block;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #949ba4;
 }
 
-.legend-pill.state-complete { background-color: var(--state-complete); }
-.legend-pill.state-active { background-color: var(--state-active); color: #111; }
-.legend-pill.state-available { background-color: var(--state-available); }
-.legend-pill.state-locked { background-color: var(--state-locked); }
+.legend-pill.state-complete {
+  background-color: rgba(35, 165, 90, 0.15);
+  color: var(--state-complete);
+}
+
+.legend-pill.state-active {
+  background-color: rgba(240, 178, 50, 0.15);
+  color: var(--state-active);
+}
+
+.legend-pill.state-available {
+  background-color: rgba(88, 101, 242, 0.15);
+  color: var(--state-available);
+}
+
+.legend-pill.state-locked {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #949ba4;
+}
+
 .legend-pill.state-blocked,
-.legend-pill.state-overdue { background-color: var(--state-blocked); }
+.legend-pill.state-overdue {
+  background-color: rgba(242, 63, 67, 0.15);
+  color: var(--state-blocked);
+}
 
 .cy-canvas {
   flex: 1;
@@ -423,6 +443,7 @@ body {
 .task-card {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--state-locked);
   border-radius: 6px;
   padding: 0.7rem;
   cursor: pointer;
@@ -434,6 +455,26 @@ body {
 
 .task-card:hover {
   border-color: var(--discord-blurple);
+}
+
+.task-card.state-complete { border-left-color: var(--state-complete); }
+.task-card.state-active { border-left-color: var(--state-active); }
+.task-card.state-available { border-left-color: var(--state-available); }
+.task-card.state-locked { border-left-color: var(--state-locked); }
+.task-card.state-blocked { border-left-color: var(--state-blocked); }
+.task-card.is-overdue { border-left-color: var(--state-blocked); }
+
+.task-card.state-complete .task-short-id { color: var(--state-complete); }
+.task-card.state-active .task-short-id { color: var(--state-active); }
+.task-card.state-available .task-short-id { color: var(--state-available); }
+.task-card.state-locked .task-short-id { color: var(--text-muted); }
+.task-card.state-blocked .task-short-id { color: var(--state-blocked); }
+.task-card.is-overdue .task-short-id { color: var(--state-blocked); }
+
+.task-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .task-card-top {
@@ -499,6 +540,40 @@ body {
 
 .matrix-table tbody tr:hover {
   background-color: var(--bg-tertiary);
+}
+
+.matrix-table tbody tr td:first-child {
+  border-left: 4px solid transparent;
+}
+
+.matrix-table tbody tr.state-complete td:first-child {
+  border-left-color: var(--state-complete);
+  color: var(--state-complete);
+}
+
+.matrix-table tbody tr.state-active td:first-child {
+  border-left-color: var(--state-active);
+  color: var(--state-active);
+}
+
+.matrix-table tbody tr.state-available td:first-child {
+  border-left-color: var(--state-available);
+  color: var(--state-available);
+}
+
+.matrix-table tbody tr.state-locked td:first-child {
+  border-left-color: var(--state-locked);
+  color: var(--text-muted);
+}
+
+.matrix-table tbody tr.state-blocked td:first-child {
+  border-left-color: var(--state-blocked);
+  color: var(--state-blocked);
+}
+
+.matrix-table tbody tr.is-overdue td:first-child {
+  border-left-color: var(--state-blocked);
+  color: var(--state-blocked);
 }
 
 /* Slide-Out Task Inspector */
